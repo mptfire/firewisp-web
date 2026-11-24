@@ -352,10 +352,10 @@ export function ProfilePage() {
               <>
                 <button
                   onClick={() => (isMuted ? unmutePubkey(hexPubkey) : mutePubkey(hexPubkey))}
-                  className={`fw-edge-btn px-3 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isMuted
-                      ? 'fw-edge-blocked text-red-100'
-                      : 'fw-edge-block text-red-300 hover:text-red-200'
+                      ? 'bg-red-600/25 border-red-500/60 text-red-200 hover:bg-red-600/35'
+                      : 'bg-red-500/10 border-red-500/35 text-red-400 hover:bg-red-500/20 hover:text-red-300'
                   }`}
                   title={isMuted ? 'Unblock / Unmute user' : 'Block / Mute user'}
                 >

@@ -603,7 +603,7 @@ export function SettingsPage() {
                       </div>
                       <button
                         onClick={() => settings.unmutePubkey(pk)}
-                        className="fw-edge-btn fw-edge-sm fw-edge-unblock px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:text-emerald-200 shrink-0 cursor-pointer"
+                        className="text-red-400 hover:text-red-300 hover:underline shrink-0 cursor-pointer"
                       >
                         Unblock
                       </button>

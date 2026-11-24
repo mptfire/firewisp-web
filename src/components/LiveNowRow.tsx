@@ -101,10 +101,10 @@ function LiveStreamPreviewCard({
     <div
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`relative w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border overflow-hidden transition shrink-0 group flex flex-col ${
+      className={`relative w-48 sm:w-52 rounded-xl bg-[#13151d] hover:bg-[#1a1d28] border overflow-hidden transition shrink-0 group flex flex-col shadow-md shadow-black/50 ${
         isFollowed
           ? 'border-emerald-500/45 hover:border-emerald-400'
-          : 'border-[#262938] hover:border-[#e8590c]/60'
+          : 'border-[#1d202d] hover:border-[#e8590c]/60'
       }`}
     >
       {/* 16:9 Stream Thumbnail Preview */}
@@ -318,7 +318,13 @@ export function LiveNowRow({
   }
 
   return (
-    <div className="border-b border-[#20222c] bg-[#111218]/90 px-3 pt-2.5 pb-2 space-y-2">
+    <div
+      className={
+        forceShow
+          ? 'bg-[#090a0e] px-3 pt-2.5 pb-2 space-y-2'
+          : 'mx-2.5 my-2.5 rounded-2xl bg-[#090a0e] border-2 border-[#040407] shadow-[0_0_0_1px_#232635,inset_0_2px_10px_rgba(0,0,0,0.75)] px-3 pt-2.5 pb-2 space-y-2'
+      }
+    >
       {/* Header Row: LIVE NOW count + scroll arrows */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">

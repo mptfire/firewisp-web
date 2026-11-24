@@ -258,7 +258,7 @@ function ChatBubble({
                   type="button"
                   onClick={() => onBlock(msg.senderPubkey, name)}
                   title={`Block ${name}`}
-                  className="fw-edge-btn fw-edge-sm fw-edge-block p-1 text-red-300 hover:text-red-200 cursor-pointer"
+                  className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer"
                 >
                   <Ban className="w-3 h-3" />
                 </button>
