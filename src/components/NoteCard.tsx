@@ -26,6 +26,7 @@ import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
+import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { MediaLightbox } from './MediaLightbox'
 import { YouTubeCard } from './YouTubeCard'
 import { ZapModal } from './ZapModal'
@@ -68,7 +69,7 @@ const MentionChip = memo(function MentionChip({
   )
 })
 
-/** Rich inline livestream preview card inside a note (pulls thumbnail/title/viewers from useLiveStore if live). */
+/** Rich inline livestream card inside a note: click Play to watch HLS right inside the note, or footer to open full stream & chat. */
 const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   hostPubkey,
   dTag,
@@ -80,32 +81,54 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
 }) {
   const aTag = buildLiveATag(hostPubkey, dTag)
   const entry = useLiveStore((s) => s.liveStreams[aTag])
+  const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
   const profile = useNostrStore((s) => s.profiles[displayPk])
   const [thumbFailed, setThumbFailed] = useState(false)
+  const [playingInline, setPlayingInline] = useState(false)
 
   const hostName = profile?.display_name || profile?.name || `${displayPk.slice(0, 10)}…`
   const title = entry?.activity.title || `Live Stream (${dTag.slice(0, 24)})`
   const thumb = entry?.activity.image
+  const streamUrl = entry?.activity.streamingUrl || entry?.activity.recordingUrl
   const isLive = entry?.activity.status === 'live'
   const viewers = entry?.activity.currentParticipants
 
   return (
-    <Link
-      to={`/live/${bech32}`}
+    <div
       onClick={(e) => e.stopPropagation()}
-      className="group block mt-2.5 rounded-xl overflow-hidden border border-[#e8590c]/40 hover:border-[#e8590c] bg-[#14151e] transition"
+      className="group mt-2.5 rounded-xl overflow-hidden border border-[#e8590c]/40 hover:border-[#e8590c] bg-[#14151e] transition"
     >
-      {thumb && !thumbFailed && (
-        <div className="relative aspect-video max-h-64 w-full bg-[#0e0e11] overflow-hidden">
-          <img
-            src={thumb}
-            alt={title}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setThumbFailed(true)}
-            className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
-          />
+      {playingInline && streamUrl ? (
+        <HlsVideoPlayer
+          streamUrl={streamUrl}
+          posterUrl={thumb}
+          title={title}
+          isLive={isLive}
+          autoStart
+          onStreamOffline={() => markStreamOffline(aTag)}
+        />
+      ) : streamUrl ? (
+        <button
+          type="button"
+          onClick={() => setPlayingInline(true)}
+          className="relative block aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden cursor-pointer text-left"
+          aria-label={`Play ${title} inline`}
+        >
+          {thumb && !thumbFailed ? (
+            <img
+              src={thumb}
+              alt={title}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setThumbFailed(true)}
+              className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] flex items-center justify-center">
+              <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="lg" />
+            </div>
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center">
             <span className="w-12 h-12 rounded-full bg-[#e8590c]/95 group-hover:scale-105 transition shadow-xl flex items-center justify-center text-white">
               <Play className="w-5 h-5 fill-white ml-0.5" />
@@ -120,14 +143,18 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               {viewers.toLocaleString()} watching
             </span>
           )}
-        </div>
-      )}
-      <div className="p-3 flex items-center justify-between gap-2.5">
+        </button>
+      ) : null}
+
+      <Link
+        to={`/live/${bech32}`}
+        className="p-3 flex items-center justify-between gap-2.5 hover:bg-white/[0.03] transition"
+      >
         <div className="flex items-center gap-2.5 min-w-0">
           <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="sm" />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              {(!thumb || thumbFailed) && (
+              {!streamUrl && (
                 <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
                   <Radio className="w-2.5 h-2.5 animate-pulse" />
                   LIVE
@@ -137,12 +164,15 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
                 {title}
               </span>
             </div>
-            <div className="text-[11px] text-[#8c8a82] truncate">{hostName}</div>
+            <div className="text-[11px] text-[#8c8a82] truncate">
+              {hostName}
+              {streamUrl && !playingInline ? ' · Click video to play inline' : ''}
+            </div>
           </div>
         </div>
-        <span className="text-xs font-semibold text-[#ff8a3d] shrink-0">Watch →</span>
-      </div>
-    </Link>
+        <span className="text-xs font-semibold text-[#ff8a3d] shrink-0">Full chat →</span>
+      </Link>
+    </div>
   )
 })
 
@@ -401,7 +431,7 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
     const sel = window.getSelection()?.toString()
     if (sel && sel.length > 0) return
     const target = e.target as HTMLElement | null
-    if (target?.closest('a, button, img, video, audio, input, textarea, [role="dialog"]')) {
+    if (target?.closest('a, button, img, video, audio, iframe, input, textarea, [role="dialog"]')) {
       return
     }
     navigate(`/e/${event.id}`)

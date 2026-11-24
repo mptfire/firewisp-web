@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -13,6 +13,8 @@ import {
   Cpu,
   ExternalLink,
   Radio,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import {
   ANDROID_APP_URL,
@@ -20,8 +22,10 @@ import {
   FIREWISP_RELAY,
   ZAPSTORE_URL,
 } from '../lib/constants'
+import { formatBlossomHost } from '../lib/nostr/blossom'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
 import { TrendingSidebar } from './TrendingSidebar'
@@ -35,13 +39,22 @@ export function Layout({ children }: { children: ReactNode }) {
   const logout = useAuthStore((s) => s.logout)
   const profile = useNostrStore((s) => (pubkey ? s.profiles[pubkey] : undefined))
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
+  const blossomServers = useSettingsStore((s) => s.blossomServers)
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
+  const [relaysExpanded, setRelaysExpanded] = useState(false)
 
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
   const totalCount = Math.max(Object.keys(relayStatuses).length, 1)
   const firewispRelayUp = relayStatuses[FIREWISP_RELAY] === 'connected'
+  const primaryBlossomHost = formatBlossomHost(blossomServers[0] || DEFAULT_BLOSSOM_PRIMARY)
+  const sortedRelayEntries = Object.entries(relayStatuses).sort((a, b) => {
+    if (a[1] === 'connected' && b[1] !== 'connected') return -1
+    if (b[1] === 'connected' && a[1] !== 'connected') return 1
+    return a[0].localeCompare(b[0])
+  })
 
   const navItems = [
     { to: '/', label: 'Feed', icon: Flame, end: true },
@@ -118,30 +131,62 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="mt-3 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setRelaysExpanded((v) => !v)}
+                className="w-full flex items-center justify-between mb-1.5 cursor-pointer group"
+                title="Click to inspect all connected relays"
+              >
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9a9890] group-hover:text-white flex items-center gap-1.5 transition">
                   <Radio className="w-3.5 h-3.5 text-[#f59f00]" />
                   Relay Network
                 </span>
-                <span className="text-[11px] text-emerald-400 font-medium">
+                <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-0.5">
                   {connectedCount}/{totalCount} live
+                  {relaysExpanded ? (
+                    <ChevronUp className="w-3 h-3" />
+                  ) : (
+                    <ChevronDown className="w-3 h-3" />
+                  )}
                 </span>
-              </div>
+              </button>
               <div className="text-xs text-[#c2bfb7] space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-[10px]">firewisp.relay.rtard.de</span>
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      firewispRelayUp ? 'bg-emerald-400' : 'bg-amber-400'
-                    }`}
-                  />
-                </div>
+                {!relaysExpanded ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono text-[10px]">
+                      {userReadRelays.length > 0
+                        ? `${userReadRelays.length} NIP-65 + Fire Wisp`
+                        : 'firewisp.relay.rtard.de'}
+                    </span>
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        firewispRelayUp ? 'bg-emerald-400' : 'bg-amber-400'
+                      }`}
+                    />
+                  </div>
+                ) : (
+                  <div className="max-h-40 overflow-y-auto space-y-1 pr-0.5 pt-0.5">
+                    {sortedRelayEntries.map(([url, st]) => (
+                      <div key={url} className="flex items-center justify-between gap-1.5">
+                        <span className="truncate font-mono text-[10px] text-[#d4d2cb]">
+                          {url.replace(/^wss?:\/\//, '')}
+                        </span>
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            st === 'connected'
+                              ? 'bg-emerald-400'
+                              : st === 'connecting'
+                                ? 'bg-amber-400'
+                                : 'bg-[#4b4d5a]'
+                          }`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <p className="text-[10px] text-[#8c8a82] leading-relaxed">
-                  Anti-spam PoW relay (12b+). Media via{' '}
-                  <span className="font-mono text-[#c2bfb7]">
-                    {DEFAULT_BLOSSOM_PRIMARY.replace('https://', '')}
-                  </span>
-                  .
+                  Media via{' '}
+                  <span className="font-mono text-[#c2bfb7] break-all">{primaryBlossomHost}</span>.
                 </p>
               </div>
             </div>

@@ -38,6 +38,7 @@ export interface SettingsState {
 
   addBlossomServer: (url: string) => boolean
   removeBlossomServer: (url: string) => void
+  mergeRemoteBlossomServers: (servers: string[]) => void
 
   setNotePowEnabled: (enabled: boolean) => void
   setNotePowBits: (bits: number) => void
@@ -223,6 +224,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   removeBlossomServer: (url) => {
     set((s) => ({ blossomServers: s.blossomServers.filter((u) => u !== url) }))
+    persist(get())
+  },
+
+  mergeRemoteBlossomServers: (servers) => {
+    const cleaned = servers
+      .map((u) => sanitizeBlossomUrl(u))
+      .filter((u): u is string => Boolean(u))
+    if (cleaned.length === 0) return
+    set((s) => ({
+      blossomServers: [...new Set([...cleaned, ...s.blossomServers])],
+    }))
     persist(get())
   },
 

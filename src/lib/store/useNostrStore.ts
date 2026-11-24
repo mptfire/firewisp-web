@@ -571,13 +571,25 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   loadUserGraph: async (pubkey) => {
     const relays = useSettingsStore.getState().getReadRelays()
-    const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents] = await Promise.all([
+    const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents, blossomEvents] = await Promise.all([
       nostrPool.query(relays, { kinds: [3], authors: [pubkey], limit: 3 }, 4000),
       nostrPool.query(relays, { kinds: [10003], authors: [pubkey], limit: 2 }, 3500),
-      nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 2 }, 3500),
+      nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 3 }, 3500),
       nostrPool.query(relays, { kinds: [10015, 30015], authors: [pubkey], limit: 25 }, 3500),
       nostrPool.query(relays, { kinds: [10000], authors: [pubkey], limit: 2 }, 3500),
+      nostrPool.query(relays, { kinds: [10063], authors: [pubkey], limit: 3 }, 3500),
     ])
+
+    // Sync BUD-03 kind-10063 Blossom media server list (user's published servers prioritized first)
+    if (blossomEvents.length > 0) {
+      const latestBlossom = [...blossomEvents].sort((a, b) => b.created_at - a.created_at)[0]
+      const remoteServers = latestBlossom.tags
+        .filter((t) => t[0] === 'server' && t[1])
+        .map((t) => t[1].trim())
+      if (remoteServers.length > 0) {
+        useSettingsStore.getState().mergeRemoteBlossomServers(remoteServers)
+      }
+    }
 
     // Sync NIP-51 kind-10000 mute list (public + NIP-44 private encrypted tags, matching Wisp Android!)
     if (muteEvents.length > 0) {
@@ -628,9 +640,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
 
     if (relayListEvents.length > 0) {
+      const latestRelayList = [...relayListEvents].sort((a, b) => b.created_at - a.created_at)[0]
       const nip65Read: string[] = []
       const nip65Write: string[] = []
-      for (const t of relayListEvents[0].tags) {
+      for (const t of latestRelayList.tags) {
         if (t[0] !== 'r' || !t[1]) continue
         const clean = sanitizeRelayUrl(t[1])
         if (!clean) continue
@@ -639,8 +652,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         if (!marker || marker === 'write') nip65Write.push(clean)
       }
       set({
-        userReadRelays: [...new Set(nip65Read)].slice(0, 10),
-        userWriteRelays: [...new Set(nip65Write)].slice(0, 10),
+        userReadRelays: [...new Set(nip65Read)].slice(0, 12),
+        userWriteRelays: [...new Set(nip65Write)].slice(0, 12),
       })
     }
 

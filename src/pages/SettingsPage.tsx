@@ -23,6 +23,8 @@ import { parseNwcUri } from '../lib/nostr/nip57'
 export function SettingsPage() {
   const settings = useSettingsStore()
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
+  const userWriteRelays = useNostrStore((s) => s.userWriteRelays)
   const profiles = useNostrStore((s) => s.profiles)
   const signer = useAuthStore((s) => s.signer)
   const hasVault = useAuthStore((s) => s.hasEncryptedVault)
@@ -209,24 +211,79 @@ export function SettingsPage() {
             <Plus className="w-3.5 h-3.5" /> Add
           </button>
         </form>
+
+        {(userReadRelays.length > 0 || userWriteRelays.length > 0) && (
+          <div className="pt-2 space-y-1.5">
+            <div className="text-[11px] font-medium text-[#9a9890] flex items-center justify-between">
+              <span>Synced from your Nostr NIP-65 list (kind 10002)</span>
+              <span className="text-[10px] text-[#6f6d66]">
+                {new Set([...userReadRelays, ...userWriteRelays]).size} relays
+              </span>
+            </div>
+            {[...new Set([...userReadRelays, ...userWriteRelays])].map((url) => {
+              const st = relayStatuses[url]
+              const dot =
+                st === 'connected'
+                  ? 'bg-emerald-400'
+                  : st === 'connecting'
+                    ? 'bg-amber-400'
+                    : 'bg-[#4b4d5a]'
+              const isR = userReadRelays.includes(url)
+              const isW = userWriteRelays.includes(url)
+              return (
+                <div
+                  key={url}
+                  className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#12131a] border border-[#20222c] text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
+                    <span className="font-mono truncate text-[#d4d2cb]">{url}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isR && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#e8590c]/15 text-[#ff922b]">
+                        R
+                      </span>
+                    )}
+                    {isW && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-300">
+                        W
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       {/* Blossom media servers */}
       <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <UploadCloud className="w-4 h-4 text-[#f59f00]" />
-          Blossom Media Servers
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <UploadCloud className="w-4 h-4 text-[#f59f00]" />
+            Blossom Media Servers
+          </h2>
+          <span className="text-[11px] text-[#8c8a82]">Auto-synced with NIP-63 / BUD-03</span>
+        </div>
         <div className="space-y-1.5">
-          {settings.blossomServers.map((url) => (
+          {settings.blossomServers.map((url, idx) => (
             <div
               key={url}
-              className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#15161c] border border-[#232530] text-xs"
+              className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#15161c] border border-[#232530] text-xs"
             >
-              <span className="font-mono truncate">{url}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-mono truncate">{url}</span>
+                {idx === 0 && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase bg-emerald-500/15 text-emerald-300 shrink-0">
+                    Primary
+                  </span>
+                )}
+              </div>
               <button
                 onClick={() => settings.removeBlossomServer(url)}
-                className="p-1 text-[#7c7a72] hover:text-red-400 cursor-pointer"
+                className="p-1 text-[#7c7a72] hover:text-red-400 cursor-pointer shrink-0"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>

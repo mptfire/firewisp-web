@@ -6,6 +6,7 @@ interface HlsVideoPlayerProps {
   posterUrl?: string
   title?: string
   isLive?: boolean
+  autoStart?: boolean
   onStreamOffline?: () => void
 }
 
@@ -14,10 +15,11 @@ export function HlsVideoPlayer({
   posterUrl,
   title,
   isLive = true,
+  autoStart = false,
   onStreamOffline,
 }: HlsVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [started, setStarted] = useState(false)
+  const [started, setStarted] = useState(autoStart)
   const [buffering, setBuffering] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,10 +32,10 @@ export function HlsVideoPlayer({
   }, [streamUrl])
 
   useEffect(() => {
-    setStarted(false)
+    setStarted(autoStart)
     setError(null)
     setBuffering(false)
-  }, [streamUrl])
+  }, [streamUrl, autoStart])
 
   useEffect(() => {
     if (!started) return

@@ -216,7 +216,7 @@ export function Composer({
           {youtubePreviews.length > 0 && (
             <div className="mt-2.5 grid gap-2 grid-cols-1 sm:grid-cols-2">
               {youtubePreviews.map((yt) => (
-                <YouTubeCard key={yt.videoId} video={yt} compact />
+                <YouTubeCard key={yt.videoId} video={yt} compact previewOnly />
               ))}
             </div>
           )}
