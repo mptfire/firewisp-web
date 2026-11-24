@@ -18,6 +18,7 @@ import {
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { nostrPool } from '../lib/nostr/pool'
 import { verifyEventPow } from '../lib/crypto/nip13'
+import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
@@ -177,8 +178,10 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
   const toggleLike = useNostrStore((s) => s.toggleLike)
   const toggleRepost = useNostrStore((s) => s.toggleRepost)
   const toggleBookmark = useNostrStore((s) => s.toggleBookmark)
+  const myPubkey = useAuthStore((s) => s.pubkey)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const muteHashtag = useSettingsStore((s) => s.muteHashtag)
+  const isMyNote = Boolean(myPubkey && myPubkey.toLowerCase() === event.pubkey.toLowerCase())
 
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
   const [altPreview, setAltPreview] = useState<string | null>(null)
@@ -319,40 +322,60 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
               )}
             </div>
 
-            <div className="relative" ref={menuRef}>
-              <button
-                onClick={() => setMenuOpen((o) => !o)}
-                className="p-1 rounded-lg text-[#7c7a72] hover:text-white hover:bg-white/5 cursor-pointer"
-                aria-label="Note actions"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-              {menuOpen && (
-                <div className="absolute right-0 mt-1 w-44 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
-                  <button
-                    onClick={() => {
-                      mutePubkey(event.pubkey)
-                      useNostrStore.getState().setToast('Blocked & muted user')
-                      setMenuOpen(false)
-                    }}
-                    className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 font-medium flex items-center gap-2 cursor-pointer"
-                  >
-                    <Ban className="w-3.5 h-3.5" />
-                    Block / Mute user
-                  </button>
-                  <button
-                    onClick={() => {
-                      void navigator.clipboard.writeText(nip19.noteEncode(event.id))
-                      useNostrStore.getState().setToast('Copied note ID')
-                      setMenuOpen(false)
-                    }}
-                    className="w-full px-3 py-2 text-left text-[#d4d2cb] hover:bg-white/5 flex items-center gap-2 cursor-pointer"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Copy note ID
-                  </button>
-                </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {!isMyNote && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    mutePubkey(event.pubkey)
+                    useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                  }}
+                  title={`Block & mute ${displayName}`}
+                  aria-label={`Block ${displayName}`}
+                  className="px-2 py-0.5 rounded-lg bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300 text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
+                >
+                  <Ban className="w-3 h-3" />
+                  <span className="hidden sm:inline">Block</span>
+                </button>
               )}
+
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setMenuOpen((o) => !o)}
+                  className="p-1 rounded-lg text-[#7c7a72] hover:text-white hover:bg-white/5 cursor-pointer"
+                  aria-label="Note actions"
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 mt-1 w-44 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
+                    {!isMyNote && (
+                      <button
+                        onClick={() => {
+                          mutePubkey(event.pubkey)
+                          useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                          setMenuOpen(false)
+                        }}
+                        className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 font-medium flex items-center gap-2 cursor-pointer"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        Block / Mute user
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard.writeText(nip19.noteEncode(event.id))
+                        useNostrStore.getState().setToast('Copied note ID')
+                        setMenuOpen(false)
+                      }}
+                      className="w-full px-3 py-2 text-left text-[#d4d2cb] hover:bg-white/5 flex items-center gap-2 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Copy note ID
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

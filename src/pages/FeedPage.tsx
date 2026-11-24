@@ -70,6 +70,8 @@ export function FeedPage() {
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
   const PAGE_SIZE = 40
@@ -224,6 +226,8 @@ export function FeedPage() {
     spamFilterEnabled,
     hideRepliesInExplore,
     requirePowInExplore,
+    mutedPubkeys,
+    mutedHashtags,
     pubkey,
     follows,
     extendedAuthors,
