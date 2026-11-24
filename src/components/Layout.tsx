@@ -135,12 +135,6 @@ export function Layout({ children }: { children: ReactNode }) {
               ))}
             </nav>
 
-            {isTheaterMode && (
-              <div className="mt-4">
-                <StreamTopZappersCard />
-              </div>
-            )}
-
             <div className="mt-4 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
               <button
                 type="button"
@@ -278,6 +272,12 @@ export function Layout({ children }: { children: ReactNode }) {
                 </button>
               )}
             </div>
+
+            {isTheaterMode && (
+              <div className="mt-3">
+                <StreamTopZappersCard />
+              </div>
+            )}
           </div>
 
           <div className="mt-auto shrink-0 p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">
