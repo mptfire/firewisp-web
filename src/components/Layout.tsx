@@ -36,6 +36,12 @@ import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
+  // Clicking the nav item for the page you're already on scrolls back to the top (like Twitter/Primal)
+  const scrollTopIfCurrent = (to: string) => {
+    if (location.pathname === to) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
   const isTheaterMode = location.pathname.startsWith('/live/')
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
@@ -108,6 +114,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   key={to}
                   to={to}
                   end={end}
+                  onClick={() => scrollTopIfCurrent(to)}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
                       isActive
@@ -362,6 +369,7 @@ export function Layout({ children }: { children: ReactNode }) {
             key={to}
             to={to}
             end={end}
+            onClick={() => scrollTopIfCurrent(to)}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 text-[10px] px-1.5 py-0.5 min-w-0 ${
                 isActive ? 'text-[#ff8a3d]' : 'text-[#8c8a82]'
