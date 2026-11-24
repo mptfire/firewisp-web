@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import { verifyEvent, type Event } from 'nostr-tools/pure'
 import {
   ArrowLeft,
   Zap,
-  Mail,
   Ban,
   UserPlus,
   UserCheck,
@@ -273,13 +272,6 @@ export function ProfilePage() {
             )}
             {!isMe && (
               <>
-                <Link
-                  to={`/messages?peer=${hexPubkey}`}
-                  className="p-2 rounded-xl bg-[#181a22] border border-[#2a2d3a] hover:border-[#e8590c] text-[#d4d2cb]"
-                  title="Send encrypted NIP-17 DM"
-                >
-                  <Mail className="w-4 h-4" />
-                </Link>
                 <button
                   onClick={() => (isMuted ? unmutePubkey(hexPubkey) : mutePubkey(hexPubkey))}
                   className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${

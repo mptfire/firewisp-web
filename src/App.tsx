@@ -7,7 +7,6 @@ import { FeedPage } from './pages/FeedPage'
 import { ThreadPage } from './pages/ThreadPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { NotificationsPage } from './pages/NotificationsPage'
-import { MessagesPage } from './pages/MessagesPage'
 import { SearchPage } from './pages/SearchPage'
 import { BookmarksPage } from './pages/BookmarksPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -79,7 +78,6 @@ export function App() {
             <Route path="/e/:eventId" element={<ThreadPage />} />
             <Route path="/p/:pubkey" element={<ProfilePage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/messages" element={<MessagesPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/bookmarks" element={<BookmarksPage />} />
             <Route path="/settings" element={<SettingsPage />} />

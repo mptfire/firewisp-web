@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
   UploadCloud,
@@ -7,6 +8,7 @@ import {
   Wallet,
   Shield,
   LayoutGrid,
+  ChevronDown,
   Plus,
   Trash2,
   RotateCcw,
@@ -21,6 +23,7 @@ import { parseNwcUri } from '../lib/nostr/nip57'
 export function SettingsPage() {
   const settings = useSettingsStore()
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
+  const profiles = useNostrStore((s) => s.profiles)
   const signer = useAuthStore((s) => s.signer)
   const hasVault = useAuthStore((s) => s.hasEncryptedVault)
   const exportNcryptsec = useAuthStore((s) => s.exportNcryptsec)
@@ -29,6 +32,8 @@ export function SettingsPage() {
   const [newRelay, setNewRelay] = useState('')
   const [newBlossom, setNewBlossom] = useState('')
   const [newMuteTag, setNewMuteTag] = useState('')
+  const [mutedUsersOpen, setMutedUsersOpen] = useState(false)
+  const [mutedTagsOpen, setMutedTagsOpen] = useState(false)
   const [nwcInput, setNwcInput] = useState(settings.nwcUri)
   const [nwcStatus, setNwcStatus] = useState<string | null>(null)
 
@@ -365,34 +370,77 @@ export function SettingsPage() {
           </button>
         </form>
         {settings.mutedHashtags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {settings.mutedHashtags.map((tag) => (
-              <button
-                key={tag}
-                onClick={() => settings.unmuteHashtag(tag)}
-                className="px-2.5 py-1 rounded-full bg-[#1a1c24] border border-[#2d3040] text-xs text-[#d4d2cb] hover:border-red-400 cursor-pointer"
-              >
-                #{tag} ×
-              </button>
-            ))}
+          <div className="rounded-xl bg-[#15161c] border border-[#232530] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMutedTagsOpen((o) => !o)}
+              className="w-full px-3 py-2.5 flex items-center justify-between text-xs font-medium text-[#d4d2cb] hover:bg-white/[0.03] cursor-pointer"
+            >
+              <span>Muted hashtags ({settings.mutedHashtags.length})</span>
+              <ChevronDown
+                className={`w-4 h-4 text-[#8c8a82] transition-transform ${mutedTagsOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {mutedTagsOpen && (
+              <div className="px-3 pb-3 pt-1 flex flex-wrap gap-1.5 border-t border-[#20222c] max-h-48 overflow-y-auto">
+                {settings.mutedHashtags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => settings.unmuteHashtag(tag)}
+                    className="px-2.5 py-1 rounded-full bg-[#1a1c24] border border-[#2d3040] text-xs text-[#d4d2cb] hover:border-red-400 cursor-pointer"
+                  >
+                    #{tag} ×
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {settings.mutedPubkeys.length > 0 && (
-          <div className="space-y-1">
-            {settings.mutedPubkeys.map((pk) => (
-              <div
-                key={pk}
-                className="flex items-center justify-between text-xs px-3 py-1.5 rounded-lg bg-[#15161c]"
-              >
-                <span className="font-mono text-[#9a9890]">{pk.slice(0, 20)}…</span>
-                <button
-                  onClick={() => settings.unmutePubkey(pk)}
-                  className="text-red-300 hover:underline cursor-pointer"
-                >
-                  Unmute
-                </button>
+          <div className="rounded-xl bg-[#15161c] border border-[#232530] overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMutedUsersOpen((o) => !o)}
+              className="w-full px-3 py-2.5 flex items-center justify-between text-xs font-medium text-[#d4d2cb] hover:bg-white/[0.03] cursor-pointer"
+            >
+              <span>Blocked / Muted users ({settings.mutedPubkeys.length})</span>
+              <ChevronDown
+                className={`w-4 h-4 text-[#8c8a82] transition-transform ${mutedUsersOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {mutedUsersOpen && (
+              <div className="divide-y divide-[#20222c] border-t border-[#20222c] max-h-64 overflow-y-auto">
+                {settings.mutedPubkeys.map((pk) => {
+                  const p = profiles[pk]
+                  let npub = pk
+                  try {
+                    npub = nip19.npubEncode(pk)
+                  } catch {
+                    // keep hex
+                  }
+                  const label = p?.display_name || p?.name
+                  return (
+                    <div
+                      key={pk}
+                      className="flex items-center justify-between gap-2 text-xs px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        {label && <div className="text-[#f4f1ea] font-medium truncate">{label}</div>}
+                        <div className="font-mono text-[11px] text-[#8c8a82] truncate">
+                          {npub.slice(0, 26)}…
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => settings.unmutePubkey(pk)}
+                        className="text-red-400 hover:text-red-300 hover:underline shrink-0 cursor-pointer"
+                      >
+                        Unblock
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
+            )}
           </div>
         )}
       </section>
@@ -445,21 +493,6 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.requirePowInExplore}
             onChange={(e) => settings.setRequirePowInExplore(e.target.checked)}
-            className="accent-[#e8590c]"
-          />
-        </label>
-
-        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
-          <div>
-            <div className="font-medium text-white">Auto-load external images in DMs</div>
-            <div className="text-[#8c8a82]">
-              Keep OFF to prevent strangers from learning your IP address in DMs.
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={settings.dmAutoLoadMedia}
-            onChange={(e) => settings.setDmAutoLoadMedia(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>

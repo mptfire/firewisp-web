@@ -4,7 +4,6 @@ import {
   Flame,
   Search,
   Bell,
-  Mail,
   Bookmark,
   Settings,
   User,
@@ -46,7 +45,6 @@ export function Layout({ children }: { children: ReactNode }) {
     { to: '/', label: 'Feed', icon: Flame, end: true },
     { to: '/search', label: 'Search', icon: Search },
     { to: '/notifications', label: 'Notifications', icon: Bell },
-    { to: '/messages', label: 'Messages', icon: Mail },
     { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
     { to: '/settings', label: 'Settings', icon: Settings },
@@ -245,7 +243,7 @@ export function Layout({ children }: { children: ReactNode }) {
           { to: '/', icon: Flame, label: 'Feed', end: true },
           { to: '/search', icon: Search, label: 'Search' },
           { to: '/notifications', icon: Bell, label: 'Notifications' },
-          { to: '/messages', icon: Mail, label: 'DMs' },
+          { to: '/bookmarks', icon: Bookmark, label: 'Bookmarks' },
           { to: '/settings', icon: Settings, label: 'Settings' },
         ].map(({ to, icon: Icon, label, end }) => (
           <NavLink
