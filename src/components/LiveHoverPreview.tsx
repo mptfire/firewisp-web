@@ -7,7 +7,7 @@ export type HoverPreviewStatus = 'connecting' | 'playing' | 'audio-only' | 'erro
 
 interface LiveHoverPreviewProps {
   streamUrl: string
-  rightOffset?: boolean
+  rightOffset?: boolean | 'wide'
   onStatusChange?: (status: HoverPreviewStatus) => void
 }
 
@@ -202,7 +202,7 @@ export function LiveHoverPreview({
           title={muted ? 'Unmute preview' : 'Mute preview'}
           aria-label={muted ? 'Unmute preview' : 'Mute preview'}
           className={`absolute top-2 ${
-            rightOffset ? 'right-9' : 'right-2'
+            rightOffset === 'wide' ? 'right-16' : rightOffset ? 'right-9' : 'right-2'
           } z-20 p-1 rounded-md bg-black/75 hover:bg-black/95 border border-white/15 text-white transition cursor-pointer`}
         >
           {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#ff922b]" />}

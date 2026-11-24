@@ -32,6 +32,7 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
 import { FloatingStreamPlayer } from './FloatingStreamPlayer'
+import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -133,6 +134,12 @@ export function Layout({ children }: { children: ReactNode }) {
                 </NavLink>
               ))}
             </nav>
+
+            {isTheaterMode && (
+              <div className="mt-4">
+                <StreamTopZappersCard />
+              </div>
+            )}
 
             <div className="mt-4 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
               <button

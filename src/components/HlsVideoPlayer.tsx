@@ -10,9 +10,11 @@ interface HlsVideoPlayerProps {
   isLive?: boolean
   autoStart?: boolean
   compact?: boolean
+  forceMuted?: boolean
   onPopOut?: () => void
   onPlaybackStart?: () => void
   onPlaybackReady?: () => void
+  onRequestFocus?: () => void
   onVideoElement?: (el: HTMLVideoElement | null) => void
   onStreamOffline?: () => void
 }
@@ -24,21 +26,27 @@ export function HlsVideoPlayer({
   isLive = true,
   autoStart = false,
   compact = false,
+  forceMuted,
   onPopOut,
   onPlaybackStart,
   onPlaybackReady,
+  onRequestFocus,
   onVideoElement,
   onStreamOffline,
 }: HlsVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const isLiveRef = useRef(isLive)
+  const forceMutedRef = useRef(forceMuted)
   const onStreamOfflineRef = useRef(onStreamOffline)
   const onPlaybackStartRef = useRef(onPlaybackStart)
   const onPlaybackReadyRef = useRef(onPlaybackReady)
+  const onRequestFocusRef = useRef(onRequestFocus)
   isLiveRef.current = isLive
+  forceMutedRef.current = forceMuted
   onStreamOfflineRef.current = onStreamOffline
   onPlaybackStartRef.current = onPlaybackStart
   onPlaybackReadyRef.current = onPlaybackReady
+  onRequestFocusRef.current = onRequestFocus
 
   const safeStreamUrl = useMemo(() => sanitizePublicHttpsUrl(streamUrl), [streamUrl])
   const safePosterUrl = useMemo(() => sanitizePublicHttpsUrl(posterUrl) || undefined, [posterUrl])
@@ -84,6 +92,9 @@ export function HlsVideoPlayer({
     let nativeCanPlay: (() => void) | null = null
     let nativeErr: (() => void) | null = null
 
+    if (typeof forceMutedRef.current === 'boolean') {
+      video.muted = forceMutedRef.current
+    }
     setError(null)
     setBuffering(true)
 
@@ -222,6 +233,17 @@ export function HlsVideoPlayer({
   }, [started, safeStreamUrl, retryNonce])
 
   useEffect(() => {
+    const video = videoRef.current
+    if (!video || typeof forceMuted !== 'boolean') return
+    if (video.muted !== forceMuted) {
+      video.muted = forceMuted
+    }
+    if (!forceMuted && video.paused && started && !error) {
+      void video.play().catch(() => {})
+    }
+  }, [forceMuted, started, error])
+
+  useEffect(() => {
     onVideoElement?.(started ? videoRef.current : null)
     return () => onVideoElement?.(null)
   }, [started, onVideoElement])
@@ -273,6 +295,17 @@ export function HlsVideoPlayer({
             ref={videoRef}
             controls
             playsInline
+            muted={forceMuted === true}
+            onVolumeChange={(e) => {
+              // If this pane is muted in Watch With mode and the user clicks unmute on native controls, hand audio/chat focus to this stream
+              if (forceMutedRef.current === true && !e.currentTarget.muted) {
+                if (onRequestFocusRef.current) {
+                  onRequestFocusRef.current()
+                } else {
+                  e.currentTarget.muted = true
+                }
+              }
+            }}
             poster={safePosterUrl}
             className="w-full h-full object-contain bg-black"
           />

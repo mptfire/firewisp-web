@@ -37,6 +37,7 @@ import {
   isLiveStreamFresh,
   isPlayableStreamUrl,
   parseLiveActivity,
+  rankTopZappers,
   shouldAcceptLiveActivityUpdate,
   sortLiveStreams,
 } from '../nostr/nip53'
@@ -925,5 +926,19 @@ describe('Full code-audit regression & security hardening', () => {
       dTag: 'fire-live-42',
     })
     expect(alreadyEmbedded.content).toBe(`Check out nostr:${naddr} right now!`)
+  })
+
+  it('ranks Top Zappers by total sats descending with zap-count and recency tie-breakers', () => {
+    const ranked = rankTopZappers({
+      alice: { pubkey: '1'.repeat(64), totalSats: 210, zapCount: 2, lastZapAt: 100 },
+      bob: { pubkey: '2'.repeat(64), totalSats: 10_026, zapCount: 1, lastZapAt: 90 },
+      carol: { pubkey: '3'.repeat(64), totalSats: 210, zapCount: 4, lastZapAt: 80 },
+      zero: { pubkey: '4'.repeat(64), totalSats: 0, zapCount: 1, lastZapAt: 200 },
+    })
+    expect(ranked.map((r) => r.pubkey)).toEqual([
+      '2'.repeat(64), // 10,026 sats
+      '3'.repeat(64), // 210 sats, 4 zaps
+      '1'.repeat(64), // 210 sats, 2 zaps
+    ])
   })
 })

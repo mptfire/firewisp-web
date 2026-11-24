@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, PictureInPicture2, Play, Radio } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Columns2, PictureInPicture2, Play, Radio } from 'lucide-react'
 import {
   encodeLiveNaddr,
   getStreamPrimaryPubkey,
@@ -26,10 +26,12 @@ function LiveStreamPreviewCard({
   stream,
   isFollowed,
   followerCount,
+  onWatchWith,
 }: {
   stream: LiveStreamEntry
   isFollowed: boolean
   followerCount?: number
+  onWatchWith?: (stream: LiveStreamEntry) => void
 }) {
   const displayPubkey = getStreamPrimaryPubkey(stream.activity)
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
@@ -131,7 +133,7 @@ function LiveStreamPreviewCard({
         {hoverActive && !isInMiniPlayer && previewUrl && (
           <LiveHoverPreview
             streamUrl={previewUrl}
-            rightOffset
+            rightOffset={onWatchWith ? 'wide' : true}
             onStatusChange={setPreviewStatus}
           />
         )}
@@ -151,29 +153,46 @@ function LiveStreamPreviewCard({
           )}
         </div>
 
-        {/* Top-right Pop-out mini-player button (sibling of Link, accessible on mouse, keyboard & touch) */}
+        {/* Top-right Pop-out / Watch With buttons (sibling of Link, accessible on mouse, keyboard & touch) */}
         {previewUrl && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              handleMouseLeave()
-              openMiniPlayer({
-                aTag: stream.aTagValue,
-                naddr,
-                streamUrl: previewUrl,
-                posterUrl: thumb,
-                title,
-                hostName,
-                isLive: stream.activity.status === 'live',
-              })
-            }}
-            title="Pop out mini-player and keep browsing"
-            aria-label={`Pop out ${title} in mini-player`}
-            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
-          >
-            <PictureInPicture2 className="w-3.5 h-3.5" />
-          </button>
+          <div className="absolute top-2 right-2 z-20 flex items-center gap-1">
+            {onWatchWith && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleMouseLeave()
+                  onWatchWith(stream)
+                }}
+                title="Watch With — open side-by-side in split view"
+                aria-label={`Watch ${title} side-by-side`}
+                className="p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-95 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+              >
+                <Columns2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleMouseLeave()
+                openMiniPlayer({
+                  aTag: stream.aTagValue,
+                  naddr,
+                  streamUrl: previewUrl,
+                  posterUrl: thumb,
+                  title,
+                  hostName,
+                  isLive: stream.activity.status === 'live',
+                })
+              }}
+              title="Pop out mini-player and keep browsing"
+              aria-label={`Pop out ${title} in mini-player`}
+              className="p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+            >
+              <PictureInPicture2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
         )}
 
         {/* Hover play icon (hidden once live video preview is rendering so stream is unobstructed) */}
@@ -217,11 +236,14 @@ function LiveStreamPreviewCard({
 export function LiveNowRow({
   forceShow = false,
   excludeATag,
+  onWatchWith,
 }: {
   /** Render regardless of the global "Show Live Now bar" setting (used by the stream page reveal panel). */
   forceShow?: boolean
   /** Hide the stream currently being watched. */
   excludeATag?: string
+  /** Optional Watch With callback when rendered on a stream page. */
+  onWatchWith?: (stream: LiveStreamEntry) => void
 } = {}) {
   const showLiveNowBarSetting = useSettingsStore((s) => s.showLiveNowBar)
   const showLiveNowBar = forceShow || showLiveNowBarSetting
@@ -349,6 +371,7 @@ export function LiveNowRow({
               followerCount={
                 followerCounts[pk] ?? followerCounts[stream.activity.hostPubkey.toLowerCase()]
               }
+              onWatchWith={onWatchWith}
             />
           )
         })}

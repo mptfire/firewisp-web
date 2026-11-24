@@ -340,3 +340,26 @@ export function buildShareStreamNotePayload(params: {
 
   return { content, extraTags }
 }
+
+export interface StreamZapperSummary {
+  pubkey: string
+  totalSats: number
+  zapCount: number
+  lastZapAt: number
+}
+
+/**
+ * Ranks stream zappers by total sats descending (ties broken by zap count, then most recent zap).
+ */
+export function rankTopZappers(
+  zappers: Readonly<Record<string, StreamZapperSummary>>,
+  limit = 10,
+): StreamZapperSummary[] {
+  return Object.values(zappers)
+    .filter((z) => z.totalSats > 0)
+    .sort(
+      (a, b) =>
+        b.totalSats - a.totalSats || b.zapCount - a.zapCount || b.lastZapAt - a.lastZapAt,
+    )
+    .slice(0, limit)
+}

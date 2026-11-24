@@ -11,6 +11,7 @@ import {
   parseLiveActivity,
   shouldAcceptLiveActivityUpdate,
   type LiveActivity,
+  type StreamZapperSummary,
 } from '../nostr/nip53'
 import { sanitizePublicRelayUrl } from '../sanitize'
 import { useAuthStore } from './useAuthStore'
@@ -50,9 +51,12 @@ interface LiveState {
   streamerFollowerCounts: Record<string, number>
   activeATag: string | null
   activeActivity: LiveActivity | null
+  focusedChatATag: string | null
+  focusedChatTitle: string | null
   activeChatRelays: string[]
   currentChatMessages: LiveChatMessage[]
   streamZapTotal: number
+  streamZappers: Record<string, StreamZapperSummary>
   loadingStream: boolean
   miniPlayer: MiniPlayerStream | null
   miniChatMessages: LiveChatMessage[]
@@ -61,6 +65,11 @@ interface LiveState {
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
+  fetchLiveActivityOnce: (
+    hostPubkey: string,
+    dTag: string,
+    naddrRelays?: string[],
+  ) => Promise<LiveActivity | null>
   markStreamOffline: (aTag: string) => void
   markStreamOnline: (aTag: string) => void
   openMiniPlayer: (stream: MiniPlayerStream) => void
@@ -75,6 +84,12 @@ interface LiveState {
     hostPubkey: string,
     dTag: string,
     naddrRelays?: string[],
+  ) => () => void
+  subscribeFocusedChat: (
+    hostPubkey: string,
+    dTag: string,
+    naddrRelays?: string[],
+    streamTitle?: string,
   ) => () => void
   sendChatMessage: (
     hostPubkey: string,
@@ -187,9 +202,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   streamerFollowerCounts: {},
   activeATag: null,
   activeActivity: null,
+  focusedChatATag: null,
+  focusedChatTitle: null,
   activeChatRelays: [],
   currentChatMessages: [],
   streamZapTotal: 0,
+  streamZappers: {},
   loadingStream: false,
   miniPlayer: null,
   miniChatMessages: [],
@@ -201,13 +219,13 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       activeInlineStreamKey: null,
       miniPlayer: stream,
       miniChatMessages:
-        s.activeATag === stream.aTag
+        s.focusedChatATag === stream.aTag
           ? s.currentChatMessages.slice(-120)
           : s.miniPlayer?.aTag === stream.aTag
             ? s.miniChatMessages
             : [],
       miniChatRelays:
-        s.activeATag === stream.aTag && s.activeChatRelays.length > 0
+        s.focusedChatATag === stream.aTag && s.activeChatRelays.length > 0
           ? s.activeChatRelays
           : s.miniPlayer?.aTag === stream.aTag
             ? s.miniChatRelays
@@ -454,6 +472,45 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     }
   },
 
+  fetchLiveActivityOnce: async (hostPubkey, dTag, naddrRelays = []) => {
+    const cleanHost = hostPubkey.toLowerCase()
+    const aTag = buildLiveATag(cleanHost, dTag)
+    const cached = get().liveStreams[aTag]?.activity
+    if (cached) return cached
+
+    const safeNaddrRelays = naddrRelays
+      .map((r) => sanitizePublicRelayUrl(r))
+      .filter((r): r is string => Boolean(r))
+    const relays = [
+      ...new Set([
+        ...safeNaddrRelays,
+        ...LIVE_DISCOVERY_RELAYS,
+        ...useSettingsStore.getState().getReadRelays(),
+      ]),
+    ].slice(0, 10)
+
+    try {
+      const evs = await nostrPool.query(
+        relays,
+        { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 2 },
+        4000,
+      )
+      const sorted = [...evs].sort((a, b) => b.created_at - a.created_at)
+      for (const ev of sorted) {
+        const parsed = parseLiveActivity(ev)
+        if (parsed) {
+          void useNostrStore
+            .getState()
+            .fetchProfiles([parsed.streamerPubkey || cleanHost, cleanHost])
+          return parsed
+        }
+      }
+    } catch {
+      // ignore relay errors
+    }
+    return null
+  },
+
   subscribeActiveStream: (hostPubkey, dTag, naddrRelays = []) => {
     const cleanHost = hostPubkey.toLowerCase()
     const aTag = buildLiveATag(cleanHost, dTag)
@@ -462,9 +519,117 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     set({
       activeATag: aTag,
       activeActivity: cached,
+      loadingStream: !cached,
+    })
+
+    let active = true
+    const closers: Array<{ close: () => void }> = []
+
+    void (async () => {
+      try {
+        const safeNaddrRelays = naddrRelays
+          .map((r) => sanitizePublicRelayUrl(r))
+          .filter((r): r is string => Boolean(r))
+        const baseRelays = [
+          ...new Set([
+            ...safeNaddrRelays,
+            ...(cached?.relayHints || []),
+            ...LIVE_DISCOVERY_RELAYS,
+            ...useSettingsStore.getState().getReadRelays(),
+          ]),
+        ].slice(0, 10)
+
+        const activityEvs = await nostrPool.query(
+          baseRelays,
+          { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 2 },
+          4000,
+        )
+        if (!active) return
+
+        let latestActivity = get().activeActivity || cached
+        if (activityEvs.length > 0) {
+          const sorted = [...activityEvs].sort((a, b) => b.created_at - a.created_at)
+          for (const rawEv of sorted) {
+            const parsed = parseLiveActivity(rawEv)
+            if (!parsed) continue
+            const prevSeen = latestActivitySeen.get(aTag)
+            if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) continue
+            latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
+            if (shouldAcceptLiveActivityUpdate(latestActivity || undefined, parsed)) {
+              latestActivity = parsed
+              set((s) => (s.activeATag === aTag ? { activeActivity: parsed } : s))
+            }
+            break
+          }
+        }
+        set({ loadingStream: false })
+
+        const hostPk = latestActivity?.streamerPubkey || cleanHost
+        void useNostrStore
+          .getState()
+          .fetchProfiles(cleanHost !== hostPk ? [hostPk, cleanHost] : [hostPk])
+
+        const statusRelays = [
+          ...new Set([
+            ...safeNaddrRelays,
+            ...(latestActivity?.relayHints || []),
+            ...LIVE_DISCOVERY_RELAYS,
+          ]),
+        ].slice(0, 8)
+
+        const statusSub = nostrPool.subscribe(
+          statusRelays,
+          { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 1 },
+          {
+            onevent: (ev: Event) => {
+              if (!active) return
+              const parsed = parseLiveActivity(ev)
+              if (!parsed) return
+              const prevSeen = latestActivitySeen.get(aTag)
+              if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) return
+              latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
+              set((s) => {
+                if (s.activeATag !== aTag) return s
+                if (!shouldAcceptLiveActivityUpdate(s.activeActivity || undefined, parsed)) return s
+                return { activeActivity: parsed }
+              })
+            },
+          },
+        )
+        closers.push(statusSub)
+      } catch {
+        // Relay errors are handled gracefully by keeping cached activity state
+      } finally {
+        if (active) set({ loadingStream: false })
+      }
+    })()
+
+    return () => {
+      active = false
+      for (const c of closers) c.close()
+      set({
+        activeATag: null,
+        activeActivity: null,
+        loadingStream: false,
+      })
+    }
+  },
+
+  subscribeFocusedChat: (hostPubkey, dTag, naddrRelays = [], streamTitle) => {
+    const cleanHost = hostPubkey.toLowerCase()
+    const aTag = buildLiveATag(cleanHost, dTag)
+    const cached =
+      (get().activeATag === aTag ? get().activeActivity : null) ||
+      get().liveStreams[aTag]?.activity ||
+      null
+
+    set({
+      focusedChatATag: aTag,
+      focusedChatTitle: streamTitle || cached?.title || null,
+      activeChatRelays: [],
       currentChatMessages: [],
       streamZapTotal: 0,
-      loadingStream: !cached,
+      streamZappers: {},
     })
 
     let active = true
@@ -499,38 +664,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           ]),
         ].slice(0, 10)
 
-        // Fetch activity (if missing or stale) + host's NIP-65 relay list in parallel
-        const [activityEvs, relayListEvs] = await Promise.all([
-          nostrPool.query(
-            baseRelays,
-            { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 2 },
-            4000,
-          ),
-          nostrPool.query(baseRelays, { kinds: [10002], authors: [cleanHost], limit: 1 }, 2500),
-        ])
+        const relayListEvs = await nostrPool.query(
+          baseRelays,
+          { kinds: [10002], authors: [cleanHost], limit: 1 },
+          2500,
+        )
         if (!active) return
-
-        let latestActivity = get().activeActivity || cached
-        if (activityEvs.length > 0) {
-          const sorted = [...activityEvs].sort((a, b) => b.created_at - a.created_at)
-          for (const rawEv of sorted) {
-            const parsed = parseLiveActivity(rawEv)
-            if (!parsed) continue
-            const prevSeen = latestActivitySeen.get(aTag)
-            if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) continue
-            latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
-            if (shouldAcceptLiveActivityUpdate(latestActivity || undefined, parsed)) {
-              latestActivity = parsed
-              set((s) => (s.activeATag === aTag ? { activeActivity: parsed } : s))
-            }
-            break
-          }
-        }
-        set({ loadingStream: false })
-
-        const hostPk = latestActivity?.streamerPubkey || cleanHost
-        queueProfile(hostPk)
-        if (cleanHost !== hostPk) queueProfile(cleanHost)
 
         const hostRelays: string[] = []
         if (relayListEvs.length > 0) {
@@ -541,17 +680,22 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           }
         }
 
+        const latestCached =
+          (get().activeATag === aTag ? get().activeActivity : null) ||
+          get().liveStreams[aTag]?.activity ||
+          cached
+
         const chatRelays = [
           ...new Set([
             ...safeNaddrRelays,
-            ...(latestActivity?.relayHints || []),
+            ...(latestCached?.relayHints || []),
             ...hostRelays.slice(0, 4),
             ...LIVE_DISCOVERY_RELAYS,
           ]),
         ].slice(0, 8)
-        set({ activeChatRelays: chatRelays })
+        set((s) => (s.focusedChatATag === aTag ? { activeChatRelays: chatRelays } : s))
 
-        // Subscribe live to chat (kind 1311), stream zaps (kind 9735), and activity status updates (kind 30311)
+        // Subscribe live to chat (kind 1311) & stream zaps (kind 9735) for the focused stream
         const chatSub = nostrPool.subscribe(
           chatRelays,
           { kinds: [KIND_LIVE_CHAT_MESSAGE], '#a': [aTag], limit: 150 },
@@ -572,7 +716,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
               }
               queueProfile(msg.senderPubkey)
               set((s) => {
-                if (s.activeATag !== aTag) return s
+                if (s.focusedChatATag !== aTag) return s
                 if (s.currentChatMessages.some((m) => m.id === msg.id)) return s
                 const next = [...s.currentChatMessages, msg]
                   .sort((a, b) => a.createdAt - b.createdAt)
@@ -586,7 +730,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
         const zapSub = nostrPool.subscribe(
           chatRelays,
-          { kinds: [9735], '#a': [aTag], limit: 100 },
+          { kinds: [9735], '#a': [aTag], limit: 250 },
           {
             onevent: (ev: Event) => {
               const zapKey = `zap-${ev.id}`
@@ -605,45 +749,34 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 zapAmountSats: info.sats,
               }
               set((s) => {
-                if (s.activeATag !== aTag) return s
-                if (s.currentChatMessages.some((m) => m.id === msg.id)) return s
-                const next = [...s.currentChatMessages, msg]
-                  .sort((a, b) => a.createdAt - b.createdAt)
-                  .slice(-300)
+                if (s.focusedChatATag !== aTag) return s
+                const prevZapper = s.streamZappers[info.senderPubkey]
+                const updatedZappers = {
+                  ...s.streamZappers,
+                  [info.senderPubkey]: {
+                    pubkey: info.senderPubkey,
+                    totalSats: (prevZapper?.totalSats || 0) + info.sats,
+                    zapCount: (prevZapper?.zapCount || 0) + 1,
+                    lastZapAt: Math.max(prevZapper?.lastZapAt || 0, ev.created_at),
+                  },
+                }
+                const nextMessages = s.currentChatMessages.some((m) => m.id === msg.id)
+                  ? s.currentChatMessages
+                  : [...s.currentChatMessages, msg]
+                      .sort((a, b) => a.createdAt - b.createdAt)
+                      .slice(-300)
                 return {
-                  currentChatMessages: next,
+                  currentChatMessages: nextMessages,
                   streamZapTotal: s.streamZapTotal + info.sats,
+                  streamZappers: updatedZappers,
                 }
               })
             },
           },
         )
         closers.push(zapSub)
-
-        const statusSub = nostrPool.subscribe(
-          chatRelays,
-          { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 1 },
-          {
-            onevent: (ev: Event) => {
-              if (!active) return
-              const parsed = parseLiveActivity(ev)
-              if (!parsed) return
-              const prevSeen = latestActivitySeen.get(aTag)
-              if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) return
-              latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
-              set((s) => {
-                if (s.activeATag !== aTag) return s
-                if (!shouldAcceptLiveActivityUpdate(s.activeActivity || undefined, parsed)) return s
-                return { activeActivity: parsed }
-              })
-            },
-          },
-        )
-        closers.push(statusSub)
       } catch {
-        // Relay errors are handled gracefully by keeping cached activity state
-      } finally {
-        if (active) set({ loadingStream: false })
+        // Ignore transient relay lookup failures
       }
     })()
 
@@ -651,14 +784,18 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       active = false
       if (profileTimer) clearTimeout(profileTimer)
       for (const c of closers) c.close()
-      set({
-        activeATag: null,
-        activeActivity: null,
-        activeChatRelays: [],
-        currentChatMessages: [],
-        streamZapTotal: 0,
-        loadingStream: false,
-      })
+      set((s) =>
+        s.focusedChatATag === aTag
+          ? {
+              focusedChatATag: null,
+              focusedChatTitle: null,
+              activeChatRelays: [],
+              currentChatMessages: [],
+              streamZapTotal: 0,
+              streamZappers: {},
+            }
+          : s,
+      )
     }
   },
 
@@ -787,7 +924,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     const aTag = buildLiveATag(cleanHost, dTag)
     const state = get()
     const relays =
-      state.activeATag === aTag && state.activeChatRelays.length > 0
+      state.focusedChatATag === aTag && state.activeChatRelays.length > 0
         ? state.activeChatRelays
         : state.miniPlayer?.aTag === aTag && state.miniChatRelays.length > 0
           ? state.miniChatRelays
@@ -820,7 +957,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         replyToId,
       }
       const next: Partial<LiveState> = {}
-      if (s.activeATag === aTag && !s.currentChatMessages.some((m) => m.id === signed.id)) {
+      if (s.focusedChatATag === aTag && !s.currentChatMessages.some((m) => m.id === signed.id)) {
         next.currentChatMessages = [...s.currentChatMessages, msg]
           .sort((a, b) => a.createdAt - b.createdAt)
           .slice(-300)
