@@ -54,7 +54,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
-      <div className="w-full max-w-[1440px] flex min-h-screen">
+      <div className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-screen`}>
         {/* Left Sidebar (desktop) */}
         <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen overflow-y-auto gap-3.5">
           <div>

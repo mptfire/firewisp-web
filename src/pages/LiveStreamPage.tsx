@@ -630,7 +630,7 @@ export function LiveStreamPage() {
 
           {/* Live Chat Box — matches exact height of the 16:9 video screen on desktop; supports Blossom drag & drop */}
           <div
-            className="relative lg:w-72 xl:w-80 shrink-0 h-[360px] lg:h-auto"
+            className="relative lg:w-72 xl:w-80 2xl:w-96 shrink-0 h-[360px] lg:h-auto"
             onDragOver={(e) => {
               e.preventDefault()
               if (!dragOver) setDragOver(true)
