@@ -41,6 +41,7 @@ function FeedSkeleton() {
 
 export function FeedPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
+  const sessionRestored = useAuthStore((s) => s.sessionRestored)
   const tab = useNostrStore((s) => s.activeFeedTab)
   const setTab = useNostrStore((s) => s.setActiveFeedTab)
   const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
@@ -72,6 +73,7 @@ export function FeedPage() {
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
   const PAGE_SIZE = 40
@@ -80,10 +82,12 @@ export function FeedPage() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
+    if (!sessionRestored) return
     setNoMoreOlder(false)
     setVisibleCount(PAGE_SIZE)
     return subscribeFeed(tab)
   }, [
+    sessionRestored,
     tab,
     pubkey,
     follows.length,
@@ -228,6 +232,7 @@ export function FeedPage() {
     requirePowInExplore,
     mutedPubkeys,
     mutedHashtags,
+    mutedWords,
     pubkey,
     follows,
     extendedAuthors,

@@ -19,6 +19,7 @@ export interface SettingsState {
   reactionPowBits: number
   mutedPubkeys: string[]
   mutedHashtags: string[]
+  mutedWords: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
   spamFilterEnabled: boolean
@@ -43,6 +44,7 @@ export interface SettingsState {
   unmutePubkey: (pubkey: string) => void
   muteHashtag: (tag: string) => void
   unmuteHashtag: (tag: string) => void
+  mergeRemoteMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
 
   setDmAutoLoadMedia: (enabled: boolean) => void
   setClientTagEnabled: (enabled: boolean) => void
@@ -64,6 +66,7 @@ interface PersistedSettings {
   reactionPowBits: number
   mutedPubkeys: string[]
   mutedHashtags: string[]
+  mutedWords: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
   spamFilterEnabled: boolean
@@ -82,6 +85,7 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     reactionPowBits: DEFAULT_REACTION_POW_BITS,
     mutedPubkeys: [],
     mutedHashtags: [],
+    mutedWords: [],
     dmAutoLoadMedia: false,
     clientTagEnabled: true,
     spamFilterEnabled: true,
@@ -141,6 +145,7 @@ function persist(state: SettingsState) {
     reactionPowBits: state.reactionPowBits,
     mutedPubkeys: state.mutedPubkeys,
     mutedHashtags: state.mutedHashtags,
+    mutedWords: state.mutedWords,
     dmAutoLoadMedia: state.dmAutoLoadMedia,
     clientTagEnabled: state.clientTagEnabled,
     spamFilterEnabled: state.spamFilterEnabled,
@@ -246,6 +251,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   unmuteHashtag: (tag) => {
     const clean = tag.trim().toLowerCase().replace(/^#/, '')
     set((s) => ({ mutedHashtags: s.mutedHashtags.filter((t) => t !== clean) }))
+    persist(get())
+  },
+  mergeRemoteMutes: ({ pubkeys = [], hashtags = [], words = [] }) => {
+    set((s) => ({
+      mutedPubkeys: [
+        ...new Set([...s.mutedPubkeys, ...pubkeys.map((p) => p.toLowerCase()).filter(Boolean)]),
+      ],
+      mutedHashtags: [
+        ...new Set([
+          ...s.mutedHashtags,
+          ...hashtags.map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean),
+        ]),
+      ],
+      mutedWords: [
+        ...new Set([
+          ...s.mutedWords,
+          ...words.map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2),
+        ]),
+      ],
+    }))
     persist(get())
   },
 

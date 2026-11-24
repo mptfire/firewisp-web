@@ -364,11 +364,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   isEventMuted: (event) => {
-    const { mutedPubkeys, mutedHashtags } = useSettingsStore.getState()
+    const { mutedPubkeys, mutedHashtags, mutedWords } = useSettingsStore.getState()
     if (mutedPubkeys.includes(event.pubkey.toLowerCase())) return true
     if (mutedHashtags.length > 0) {
       const tags = extractEventHashtags(event)
       if (tags.some((t) => mutedHashtags.includes(t))) return true
+    }
+    if (mutedWords && mutedWords.length > 0 && event.content) {
+      const lower = event.content.toLowerCase()
+      if (mutedWords.some((w) => w.length >= 2 && lower.includes(w))) return true
     }
     return false
   },
@@ -562,12 +566,48 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   loadUserGraph: async (pubkey) => {
     const relays = useSettingsStore.getState().getReadRelays()
-    const [contactEvents, bookmarkEvents, relayListEvents, interestEvents] = await Promise.all([
+    const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents] = await Promise.all([
       nostrPool.query(relays, { kinds: [3], authors: [pubkey], limit: 3 }, 4000),
       nostrPool.query(relays, { kinds: [10003], authors: [pubkey], limit: 2 }, 3500),
       nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 2 }, 3500),
       nostrPool.query(relays, { kinds: [10015, 30015], authors: [pubkey], limit: 25 }, 3500),
+      nostrPool.query(relays, { kinds: [10000], authors: [pubkey], limit: 2 }, 3500),
     ])
+
+    // Sync NIP-51 kind-10000 mute list (public + NIP-44 private encrypted tags, matching Wisp Android!)
+    if (muteEvents.length > 0) {
+      const latestMute = muteEvents[0]
+      const allMuteTags: string[][] = [...latestMute.tags]
+      if (latestMute.content) {
+        const signer = useAuthStore.getState().signer
+        if (signer?.canEncrypt) {
+          try {
+            const decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
+            const parsed = JSON.parse(decrypted) as unknown
+            if (Array.isArray(parsed)) {
+              for (const item of parsed) {
+                if (Array.isArray(item) && item.every((x) => typeof x === 'string')) {
+                  allMuteTags.push(item as string[])
+                }
+              }
+            }
+          } catch {
+            // Encrypted with legacy NIP-04 or signer declined — keep public tags cleanly
+          }
+        }
+      }
+      const pubkeys: string[] = []
+      const hashtags: string[] = []
+      const words: string[] = []
+      for (const t of allMuteTags) {
+        if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubkeys.push(t[1].toLowerCase())
+        else if (t[0] === 't' && t[1]) hashtags.push(t[1])
+        else if (t[0] === 'word' && t[1]) words.push(t[1])
+      }
+      if (pubkeys.length > 0 || hashtags.length > 0 || words.length > 0) {
+        useSettingsStore.getState().mergeRemoteMutes({ pubkeys, hashtags, words })
+      }
+    }
 
     if (interestEvents.length > 0) {
       const tagSet = new Set<string>()
@@ -1222,6 +1262,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           if (!isTopLevelNote(e)) continue
           if (get().isEventMuted(e)) continue
           if (extractEventHashtags(e).length > 4) continue
+          const textOnly = e.content
+            .replace(/https?:\/\/[^\s]+/gi, '')
+            .replace(/nostr:[0-9a-z]+/gi, '')
+            .trim()
+          if (textOnly.length < 30) continue
           const verdict = evaluateNoteSpam(e, {
             myPubkey,
             follows: allowedForYouAuthors || undefined,
@@ -1229,7 +1274,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             authorCounts: suppAuthorCounts,
             maxPerAuthor: 1,
           })
-          if (verdict.isSpam) continue
+          // Zero-tolerance on supplementary non-follow picks (score must be <= 0)
+          if (verdict.isSpam || verdict.score > 0) continue
           out.push(e)
           if (out.length >= cap) break
         }
@@ -1238,7 +1284,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
       const trendingPromise = nostrPool
         .query([TRENDING_RELAY], { kinds: [1], limit: 20 }, 4000)
-        .then((evs) => filterCleanSupp(evs, 10))
+        .then((evs) => filterCleanSupp(evs, 5))
 
       const hashtagQueries: Promise<Event[]>[] = []
       if (followedHashtags.length > 0) {
@@ -1251,7 +1297,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
                 { kinds: [1], '#t': followedHashtags.slice(i, i + 10), since: since24h, limit: 20 },
                 4500,
               )
-              .then((evs) => filterCleanSupp(evs, 10)),
+              .then((evs) => filterCleanSupp(evs, 5)),
           )
         }
       }

@@ -27,6 +27,7 @@ export interface AuthState {
   signer: FireWispSigner | null
   pubkey: string | null
   method: AuthMethod | null
+  sessionRestored: boolean
   hasEncryptedVault: boolean
   pendingMnemonicBackup: string | null
   authModalOpen: boolean
@@ -72,10 +73,16 @@ function hasVault(): boolean {
   return Boolean(localStorage.getItem(ENCRYPTED_VAULT_KEY))
 }
 
+const initialMeta = readMeta()
+const needsAsyncRestore = Boolean(
+  initialMeta && (initialMeta.method === 'nip07' || initialMeta.method === 'readonly'),
+)
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   signer: null,
   pubkey: null,
   method: null,
+  sessionRestored: !needsAsyncRestore,
   hasEncryptedVault: hasVault(),
   pendingMnemonicBackup: null,
   authModalOpen: false,
@@ -84,20 +91,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   closeAuthModal: () => set({ authModalOpen: false }),
 
   restoreSession: async () => {
-    const meta = readMeta()
-    if (!meta) return
-    if (meta.method === 'readonly' && meta.pubkey && isValidHex64(meta.pubkey)) {
-      const signer = new ReadOnlySigner(meta.pubkey)
-      set({ signer, pubkey: signer.pubkey, method: 'readonly' })
-      return
-    }
-    if (meta.method === 'nip07' && typeof window !== 'undefined' && window.nostr) {
-      try {
-        const signer = await Nip07Signer.connect()
-        set({ signer, pubkey: signer.pubkey, method: 'nip07' })
-      } catch {
-        // Extension locked or unavailable; stay browse-only until user signs in.
+    try {
+      const meta = readMeta()
+      if (!meta) return
+      if (meta.method === 'readonly' && meta.pubkey && isValidHex64(meta.pubkey)) {
+        const signer = new ReadOnlySigner(meta.pubkey)
+        set({ signer, pubkey: signer.pubkey, method: 'readonly' })
+        return
       }
+      if (meta.method === 'nip07' && typeof window !== 'undefined' && window.nostr) {
+        try {
+          const signer = await Nip07Signer.connect()
+          set({ signer, pubkey: signer.pubkey, method: 'nip07' })
+        } catch {
+          // Extension locked or unavailable; stay browse-only until user signs in.
+        }
+      }
+    } finally {
+      set({ sessionRestored: true })
     }
   },
 
