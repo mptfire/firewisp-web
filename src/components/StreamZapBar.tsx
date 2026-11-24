@@ -19,7 +19,7 @@ interface StreamZapBarProps {
   eventATag?: string
 }
 
-const STREAM_ZAP_PRESETS = [21, 69, 100, 420, 1000, 5000, 10000]
+const STREAM_ZAP_PRESETS = [21, 100, 500, 1000]
 
 export function StreamZapBar({
   recipientPubkey,
@@ -43,7 +43,7 @@ export function StreamZapBar({
     [activeChatRelays, relays],
   )
 
-  const [amount, setAmount] = useState(21)
+  const [amountInput, setAmountInput] = useState('21')
   const [comment, setComment] = useState('')
   const [busyMode, setBusyMode] = useState<'nwc' | 'webln' | 'qr' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +56,10 @@ export function StreamZapBar({
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasWebln = typeof window !== 'undefined' && Boolean(window.webln)
 
-  // Reset invoice & transient state whenever the target stream / Watch With focus changes
+  const parsedAmount = parseInt(amountInput, 10)
+  const validAmount = Number.isFinite(parsedAmount) && parsedAmount >= 1 ? parsedAmount : 0
+
+  // Reset invoice & transient state whenever the target stream / Watch With tab changes
   useEffect(() => {
     setInvoice(null)
     setQrDataUrl(null)
@@ -91,8 +94,7 @@ export function StreamZapBar({
   }, [invoice])
 
   const handleZap = async (mode: 'nwc' | 'webln' | 'qr') => {
-    if (busyMode) return
-    const cleanSats = Math.max(1, Math.floor(amount) || 21)
+    if (busyMode || validAmount < 1) return
     setError(null)
     setBusyMode(mode)
     try {
@@ -101,7 +103,7 @@ export function StreamZapBar({
           ? invoice
           : await requestZapInvoice({
               lud16,
-              amountSats: cleanSats,
+              amountSats: validAmount,
               recipientPubkey,
               eventId,
               eventATag,
@@ -124,10 +126,10 @@ export function StreamZapBar({
       setInvoice(null)
       setQrDataUrl(null)
       setComment('')
-      setLastPaidSats(cleanSats)
+      setLastPaidSats(validAmount)
       useNostrStore
         .getState()
-        .setToast(`Zapped ${cleanSats.toLocaleString()} sats to ${recipientName} ⚡`)
+        .setToast(`Zapped ${validAmount.toLocaleString()} sats to ${recipientName} ⚡`)
       if (paidTimerRef.current) clearTimeout(paidTimerRef.current)
       paidTimerRef.current = setTimeout(() => {
         paidTimerRef.current = null
@@ -158,76 +160,62 @@ export function StreamZapBar({
   const preferredMode: 'nwc' | 'webln' | 'qr' = nwcUri ? 'nwc' : hasWebln ? 'webln' : 'qr'
 
   return (
-    <div className="pt-3 border-t border-[#222532] space-y-2.5">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Zap className="w-4 h-4 text-[#f59f00] fill-[#f59f00]/35 shrink-0" />
-          <span className="text-xs font-semibold text-white truncate">
-            Zap {recipientName}
-          </span>
-          <span className="text-[11px] font-mono text-[#7c7a72] truncate hidden sm:inline">
-            · {lud16}
-          </span>
-        </div>
-
-        {lastPaidSats !== null && (
-          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1">
-            <Check className="w-3 h-3" />
-            Zapped {lastPaidSats.toLocaleString()} sats!
-          </span>
-        )}
-      </div>
-
-      {/* Preset sats pills + custom sats input */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {STREAM_ZAP_PRESETS.map((sats) => (
-          <button
-            key={sats}
-            type="button"
-            disabled={Boolean(busyMode)}
-            onClick={() => {
-              setAmount(sats)
-              setInvoice(null)
-              setError(null)
-            }}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer disabled:opacity-50 ${
-              amount === sats
-                ? 'bg-[#f59f00]/20 border-[#f59f00] text-[#ffd43b] shadow-sm shadow-[#f59f00]/15'
-                : 'bg-[#1b1d27] border-[#292c3b] text-[#d4d2cb] hover:border-[#f59f00]/50 hover:text-white'
-            }`}
-          >
-            ⚡ {sats >= 1000 ? `${sats / 1000}k` : sats}
-          </button>
-        ))}
-
-        <div className="relative flex items-center">
-          <input
-            type="number"
-            min={1}
-            value={amount}
-            onChange={(e) => {
-              setAmount(Math.max(1, Number(e.target.value) || 1))
-              setInvoice(null)
-              setError(null)
-            }}
-            aria-label="Custom zap amount in sats"
-            className="w-24 pl-2.5 pr-9 py-1.5 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs font-semibold text-white focus:outline-none"
-          />
-          <span className="absolute right-2.5 text-[10px] text-[#7c7a72] pointer-events-none">
-            sats
-          </span>
-        </div>
-      </div>
-
-      {/* Optional note + direct pay actions */}
+    <>
+      {/* Sits directly inside the main bar under the video — 4 presets, larger typed amount (no arrows), note, Pay & QR */}
       <form
         onSubmit={(e) => {
           e.preventDefault()
           void handleZap(preferredMode)
         }}
-        className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
+        className="flex-1 min-w-[260px] flex items-center gap-1.5 flex-wrap xl:flex-nowrap"
       >
+        {/* 4 default preset buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {STREAM_ZAP_PRESETS.map((sats) => (
+            <button
+              key={sats}
+              type="button"
+              disabled={Boolean(busyMode)}
+              onClick={() => {
+                setAmountInput(String(sats))
+                setInvoice(null)
+                setError(null)
+              }}
+              className={`px-2 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer disabled:opacity-50 ${
+                validAmount === sats
+                  ? 'bg-[#f59f00]/20 border-[#f59f00] text-[#ffd43b] shadow-sm shadow-[#f59f00]/15'
+                  : 'bg-[#1b1d27] border-[#292c3b] text-[#d4d2cb] hover:border-[#f59f00]/50 hover:text-white'
+              }`}
+            >
+              ⚡{sats >= 1000 ? `${sats / 1000}k` : sats}
+            </button>
+          ))}
+        </div>
+
+        {/* Larger typed sats input — text/numeric mode so browsers never render up/down spinner arrows */}
+        <div className="relative flex items-center shrink-0">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={amountInput}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, '').slice(0, 9)
+              setAmountInput(digits)
+              setInvoice(null)
+              setError(null)
+            }}
+            placeholder="Sats"
+            aria-label="Custom zap amount in sats"
+            title={`Zap ${recipientName} (${lud16})`}
+            className="w-28 sm:w-32 pl-3 pr-10 py-1.5 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-base font-bold text-white placeholder-[#6c6a63] focus:outline-none"
+          />
+          <span className="absolute right-2.5 text-[11px] font-medium text-[#7c7a72] pointer-events-none">
+            sats
+          </span>
+        </div>
+
+        {/* Optional zap note */}
         <input
           type="text"
           value={comment}
@@ -236,17 +224,19 @@ export function StreamZapBar({
             setInvoice(null)
           }}
           maxLength={140}
-          placeholder="Optional zap note…"
-          className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs text-white placeholder-[#6c6a63] focus:outline-none"
+          placeholder="Zap note…"
+          className="flex-1 min-w-[100px] px-2.5 py-2 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs text-white placeholder-[#6c6a63] focus:outline-none"
         />
 
-        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+        {/* Direct Pay + QR buttons on the same main bar */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {nwcUri && (
             <button
               type="button"
-              disabled={Boolean(busyMode)}
+              disabled={Boolean(busyMode) || validAmount < 1}
               onClick={() => void handleZap('nwc')}
-              className="px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer flex-1 sm:flex-initial"
+              title={`Pay ${validAmount.toLocaleString()} sats via NWC to ${lud16}`}
+              className="px-3 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-45 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
             >
               {busyMode === 'nwc' ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -255,16 +245,17 @@ export function StreamZapBar({
               )}
               {busyMode === 'nwc'
                 ? 'Paying…'
-                : `Pay ${amount.toLocaleString()} sats (NWC)`}
+                : `Zap ${validAmount > 0 ? validAmount.toLocaleString() : ''}`}
             </button>
           )}
 
           {hasWebln && (
             <button
               type="button"
-              disabled={Boolean(busyMode)}
+              disabled={Boolean(busyMode) || validAmount < 1}
               onClick={() => void handleZap('webln')}
-              className="px-3.5 py-2 rounded-xl bg-[#f59f00] hover:bg-[#e09100] disabled:opacity-50 text-black text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer flex-1 sm:flex-initial"
+              title={`Pay ${validAmount.toLocaleString()} sats via WebLN`}
+              className="px-2.5 py-2 rounded-xl bg-[#f59f00] hover:bg-[#e09100] disabled:opacity-45 text-black text-xs font-semibold flex items-center gap-1 transition cursor-pointer whitespace-nowrap"
             >
               {busyMode === 'webln' ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -275,29 +266,36 @@ export function StreamZapBar({
                 ? 'Opening…'
                 : nwcUri
                   ? 'WebLN'
-                  : `Pay ${amount.toLocaleString()} sats`}
+                  : `Zap ${validAmount > 0 ? validAmount.toLocaleString() : ''}`}
             </button>
           )}
 
           <button
             type="button"
-            disabled={Boolean(busyMode)}
+            disabled={Boolean(busyMode) || validAmount < 1}
             onClick={() => void handleZap('qr')}
-            className="px-3 py-2 rounded-xl bg-[#1c1e2a] hover:bg-[#252838] border border-[#2d3042] disabled:opacity-50 text-xs font-medium text-[#ece9e1] flex items-center justify-center gap-1.5 transition cursor-pointer"
-            title="Show Lightning invoice QR code"
+            className="px-2.5 py-2 rounded-xl bg-[#1c1e2a] hover:bg-[#252838] border border-[#2d3042] disabled:opacity-45 text-xs font-medium text-[#ece9e1] flex items-center gap-1 transition cursor-pointer whitespace-nowrap"
+            title={invoice ? 'Refresh Lightning invoice QR' : `Show Lightning invoice QR (${lud16})`}
           >
             {busyMode === 'qr' ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-[#f59f00]" />
             ) : (
               <QrCode className="w-3.5 h-3.5 text-[#f59f00]" />
             )}
-            <span>{invoice ? 'Refresh QR' : 'Invoice QR'}</span>
+            <span>QR</span>
           </button>
+
+          {lastPaidSats !== null && (
+            <span className="px-2 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap">
+              <Check className="w-3 h-3" />
+              {lastPaidSats.toLocaleString()}
+            </span>
+          )}
         </div>
       </form>
 
       {error && (
-        <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center justify-between gap-2">
+        <div className="order-last basis-full p-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-center justify-between gap-2">
           <span>{error}</span>
           <button
             type="button"
@@ -310,9 +308,9 @@ export function StreamZapBar({
         </div>
       )}
 
-      {/* Inline Lightning Invoice QR panel */}
+      {/* Inline Lightning Invoice QR panel (only shown when QR is clicked) */}
       {qrDataUrl && invoice && (
-        <div className="p-3 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] flex flex-col sm:flex-row items-center gap-3">
+        <div className="order-last basis-full p-3 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] flex flex-col sm:flex-row items-center gap-3">
           <img
             src={qrDataUrl}
             alt="Lightning invoice QR"
@@ -321,7 +319,7 @@ export function StreamZapBar({
           <div className="flex-1 min-w-0 w-full space-y-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-white">
-                Lightning Invoice · {amount.toLocaleString()} sats
+                Lightning Invoice · {validAmount.toLocaleString()} sats · {lud16}
               </span>
               <button
                 type="button"
@@ -367,6 +365,6 @@ export function StreamZapBar({
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

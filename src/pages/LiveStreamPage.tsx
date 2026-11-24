@@ -1347,10 +1347,10 @@ export function LiveStreamPage() {
           </div>
         </div>
 
-        {/* Stream Info & Actions */}
-        <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2.5">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 group">
+        {/* Stream Info & Actions — Host, inline Zap controls, Share & Follow all on one main bar */}
+        <div className="p-3 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">
+          <div className="flex items-center justify-between gap-2.5 flex-wrap">
+            <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 shrink-0 group">
               <Avatar src={hostProfile?.picture} pubkey={hostPubkey} name={hostName} size="md" />
               <div className="min-w-0">
                 <div className="font-semibold text-sm text-white group-hover:text-[#ff922b] truncate">
@@ -1370,11 +1370,21 @@ export function LiveStreamPage() {
               </div>
             </Link>
 
-            <div className="flex items-center gap-2 flex-wrap">
+            {hostProfile?.lud16 && (
+              <StreamZapBar
+                recipientPubkey={hostPubkey}
+                recipientName={hostName}
+                lud16={hostProfile.lud16}
+                eventId={focusedActivity?.eventId}
+                eventATag={focusedATag}
+              />
+            )}
+
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}
-                className="px-3.5 py-2 rounded-xl bg-[#1c1e2a] hover:bg-[#252838] border border-[#2d3042] hover:border-[#e8590c]/50 text-[#ece9e1] text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3 py-2 rounded-xl bg-[#1c1e2a] hover:bg-[#252838] border border-[#2d3042] hover:border-[#e8590c]/50 text-[#ece9e1] text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
               >
                 <Share2 className="w-3.5 h-3.5 text-[#ff922b]" />
                 Share Stream
@@ -1382,7 +1392,7 @@ export function LiveStreamPage() {
               {!isMe && hostPubkey && (
                 <button
                   onClick={() => void toggleFollow(hostPubkey)}
-                  className={`fw-edge-btn px-3.5 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer text-white ${
+                  className={`fw-edge-btn px-3.5 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer text-white whitespace-nowrap ${
                     isFollowing ? 'fw-edge-following' : 'fw-edge-follow'
                   }`}
                 >
@@ -1404,16 +1414,6 @@ export function LiveStreamPage() {
             <p className="text-xs text-[#c2bfb7] leading-relaxed whitespace-pre-wrap">
               {focusedActivity.summary}
             </p>
-          )}
-
-          {hostProfile?.lud16 && (
-            <StreamZapBar
-              recipientPubkey={hostPubkey}
-              recipientName={hostName}
-              lud16={hostProfile.lud16}
-              eventId={focusedActivity?.eventId}
-              eventATag={focusedATag}
-            />
           )}
         </div>
 

@@ -18,7 +18,7 @@ interface ZapModalProps {
   onClose: () => void
 }
 
-const PRESETS = [21, 100, 500, 1000, 5000]
+const PRESETS = [21, 100, 500, 1000]
 
 export function ZapModal({
   recipientPubkey,
@@ -36,7 +36,9 @@ export function ZapModal({
     [relays],
   )
 
-  const [amount, setAmount] = useState(21)
+  const [amountInput, setAmountInput] = useState('21')
+  const parsedAmt = parseInt(amountInput, 10)
+  const amount = Number.isFinite(parsedAmt) && parsedAmt >= 1 ? parsedAmt : 0
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -60,6 +62,7 @@ export function ZapModal({
   }, [invoice])
 
   const handleGenerateOrPay = async (mode: 'qr' | 'webln' | 'nwc') => {
+    if (amount < 1) return
     setError(null)
     setBusy(true)
     try {
@@ -140,12 +143,12 @@ export function ZapModal({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-5 gap-1.5 mb-3">
+            <div className="grid grid-cols-4 gap-1.5 mb-3">
               {PRESETS.map((sats) => (
                 <button
                   key={sats}
                   onClick={() => {
-                    setAmount(sats)
+                    setAmountInput(String(sats))
                     setInvoice(null)
                   }}
                   className={`py-2 rounded-xl text-xs font-semibold border transition cursor-pointer ${
@@ -160,17 +163,24 @@ export function ZapModal({
             </div>
 
             <div className="flex gap-2 mb-3">
-              <input
-                type="number"
-                min={1}
-                value={amount}
-                onChange={(e) => {
-                  setAmount(Math.max(1, Number(e.target.value) || 1))
-                  setInvoice(null)
-                }}
-                className="w-28 px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-sm focus:outline-none focus:border-[#e8590c]"
-                placeholder="Sats"
-              />
+              <div className="relative flex items-center shrink-0">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={amountInput}
+                  onChange={(e) => {
+                    setAmountInput(e.target.value.replace(/\D/g, '').slice(0, 9))
+                    setInvoice(null)
+                  }}
+                  className="w-32 pl-3 pr-10 py-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-base font-bold text-white focus:outline-none focus:border-[#e8590c]"
+                  placeholder="Sats"
+                  aria-label="Zap amount in sats"
+                />
+                <span className="absolute right-3 text-xs text-[#7c7a72] pointer-events-none">
+                  sats
+                </span>
+              </div>
               <input
                 type="text"
                 value={comment}
@@ -179,7 +189,7 @@ export function ZapModal({
                   setInvoice(null)
                 }}
                 maxLength={140}
-                className="flex-1 px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-sm focus:outline-none focus:border-[#e8590c]"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-sm focus:outline-none focus:border-[#e8590c]"
                 placeholder="Optional note…"
               />
             </div>
@@ -209,7 +219,7 @@ export function ZapModal({
             <div className="flex flex-col gap-2">
               {nwcUri && (
                 <button
-                  disabled={busy}
+                  disabled={busy || amount < 1}
                   onClick={() => handleGenerateOrPay('nwc')}
                   className="w-full py-2.5 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
@@ -219,7 +229,7 @@ export function ZapModal({
               )}
               {hasWebln && (
                 <button
-                  disabled={busy}
+                  disabled={busy || amount < 1}
                   onClick={() => handleGenerateOrPay('webln')}
                   className="w-full py-2.5 rounded-xl bg-[#f59f00] hover:bg-[#e09100] text-black disabled:opacity-50 font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
@@ -228,7 +238,7 @@ export function ZapModal({
                 </button>
               )}
               <button
-                disabled={busy}
+                disabled={busy || amount < 1}
                 onClick={() => handleGenerateOrPay('qr')}
                 className="w-full py-2.5 rounded-xl bg-[#1c1e26] hover:bg-[#252834] border border-[#2a2d3a] disabled:opacity-50 font-medium text-sm cursor-pointer"
               >
