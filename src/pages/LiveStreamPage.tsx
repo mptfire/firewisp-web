@@ -6,6 +6,7 @@ import {
   Check,
   Copy,
   CornerDownRight,
+  ImagePlus,
   Loader2,
   MessageCircle,
   Radio,
@@ -15,14 +16,21 @@ import {
   X,
   Zap,
 } from 'lucide-react'
+import { buildImetaTag, uploadToBlossom, type BlossomUploadResult } from '../lib/nostr/blossom'
+import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr } from '../lib/nostr/nip53'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore, type LiveChatMessage } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
+import { MediaLightbox } from '../components/MediaLightbox'
 import { ZapModal } from '../components/ZapModal'
+
+// Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
+const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:\?.*)?$/i
 
 function formatChatTime(unixSec: number): string {
   return new Date(unixSec * 1000).toLocaleTimeString([], {
@@ -31,18 +39,118 @@ function formatChatTime(unixSec: number): string {
   })
 }
 
+function extractCustomEmojis(tags: string[][]): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const t of tags) {
+    if (t[0] !== 'emoji' || !t[1] || !t[2]) continue
+    const safe = sanitizePublicHttpsUrl(t[2])
+    if (safe) map.set(t[1], safe)
+  }
+  return map
+}
+
+function renderTextWithCustomEmojis(text: string, emojiMap: Map<string, string>) {
+  if (emojiMap.size === 0 || !text.includes(':')) return text
+  const parts = text.split(/(:[a-zA-Z0-9_+-]+:)/g)
+  return parts.map((part, idx) => {
+    if (part.startsWith(':') && part.endsWith(':') && part.length > 2) {
+      const code = part.slice(1, -1)
+      const url = emojiMap.get(code)
+      if (url) {
+        return (
+          <img
+            key={idx}
+            src={url}
+            alt={part}
+            title={part}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="inline-block w-4 h-4 align-text-bottom mx-0.5 object-contain"
+          />
+        )
+      }
+    }
+    return <span key={idx}>{part}</span>
+  })
+}
+
+/** Renders an extensionless Blossom SHA-256 URL as image -> video -> clickable link fallback */
+function BlossomBlobMedia({
+  url,
+  display,
+  onOpenLightbox,
+}: {
+  url: string
+  display: string
+  onOpenLightbox: (m: MediaAttachment) => void
+}) {
+  const [mode, setMode] = useState<'img' | 'video' | 'link'>('img')
+  if (mode === 'link') {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[#ff8a3d] hover:underline break-all"
+      >
+        {display}
+      </a>
+    )
+  }
+  if (mode === 'video') {
+    return (
+      <video
+        src={`${url}#t=0.001`}
+        controls
+        playsInline
+        preload="metadata"
+        onError={() => setMode('link')}
+        className="block mt-1.5 max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
+      />
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenLightbox({ url, kind: 'image' })}
+      className="block mt-1.5 rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
+    >
+      <img
+        src={url}
+        alt="Chat media"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setMode('video')}
+        className="max-h-44 max-w-full object-contain"
+      />
+    </button>
+  )
+}
+
+function ChatMention({ pubkey, bech32 }: { pubkey: string; bech32: string }) {
+  const profile = useNostrStore((s) => s.profiles[pubkey])
+  const label = profile?.display_name || profile?.name || `${bech32.slice(0, 10)}…`
+  return (
+    <Link to={`/p/${pubkey}`} className="text-[#ff922b] hover:underline font-medium">
+      @{label}
+    </Link>
+  )
+}
+
 function ChatBubble({
   msg,
   replyParent,
   myPubkey,
   onReply,
   onBlock,
+  onOpenLightbox,
 }: {
   msg: LiveChatMessage
   replyParent?: LiveChatMessage
   myPubkey: string | null
   onReply: (m: LiveChatMessage) => void
   onBlock: (pk: string, name: string) => void
+  onOpenLightbox: (m: MediaAttachment) => void
 }) {
   const profile = useNostrStore((s) => s.profiles[msg.senderPubkey])
   const parentProfile = useNostrStore((s) =>
@@ -50,6 +158,28 @@ function ChatBubble({
   )
   const name = profile?.display_name || profile?.name || `${msg.senderPubkey.slice(0, 8)}…`
   const isMe = Boolean(myPubkey && myPubkey.toLowerCase() === msg.senderPubkey)
+
+  const parsed = useMemo(
+    () => parseNoteContent({ content: msg.content, tags: msg.tags || [] }),
+    [msg.content, msg.tags],
+  )
+  const emojiMap = useMemo(() => extractCustomEmojis(msg.tags || []), [msg.tags])
+  const parsedMediaUrls = useMemo(
+    () => new Set(parsed.media.map((m) => m.url)),
+    [parsed.media],
+  )
+  const hasVisibleSegments = useMemo(
+    () =>
+      parsed.segments.some((seg) => {
+        if (seg.type === 'text') return seg.text.trim().length > 0
+        if (seg.type === 'link') {
+          const pub = sanitizePublicHttpsUrl(seg.url)
+          if (pub && parsedMediaUrls.has(pub)) return false
+        }
+        return true
+      }),
+    [parsed.segments, parsedMediaUrls],
+  )
 
   if (msg.isZapAnnouncement) {
     return (
@@ -118,9 +248,115 @@ function ChatBubble({
               )}
             </div>
           </div>
-          <p className="text-xs text-[#ece9e1] whitespace-pre-wrap break-words leading-relaxed">
-            {msg.content}
-          </p>
+
+          {/* Rich chat text + inline extensionless Blossom media */}
+          {hasVisibleSegments && (
+            <div className="text-xs text-[#ece9e1] whitespace-pre-wrap break-words leading-relaxed">
+              {parsed.segments.map((seg, idx) => {
+                if (seg.type === 'text') {
+                  return <span key={idx}>{renderTextWithCustomEmojis(seg.text, emojiMap)}</span>
+                }
+                if (seg.type === 'link') {
+                  const publicHttps = sanitizePublicHttpsUrl(seg.url)
+                  if (publicHttps && parsedMediaUrls.has(publicHttps)) return null
+                  if (publicHttps && BLOSSOM_HEX_URL_RE.test(publicHttps)) {
+                    return (
+                      <BlossomBlobMedia
+                        key={idx}
+                        url={publicHttps}
+                        display={seg.display}
+                        onOpenLightbox={onOpenLightbox}
+                      />
+                    )
+                  }
+                  return (
+                    <a
+                      key={idx}
+                      href={seg.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#ff8a3d] hover:underline break-all"
+                    >
+                      {seg.display}
+                    </a>
+                  )
+                }
+                if (seg.type === 'hashtag') {
+                  return (
+                    <Link
+                      key={idx}
+                      to={`/search?q=${encodeURIComponent('#' + seg.tag)}`}
+                      className="text-[#f59f00] hover:underline"
+                    >
+                      #{seg.tag}
+                    </Link>
+                  )
+                }
+                if (seg.type === 'mention') {
+                  return <ChatMention key={idx} pubkey={seg.pubkey} bech32={seg.bech32} />
+                }
+                if (seg.type === 'quote' && seg.eventId) {
+                  return (
+                    <Link
+                      key={idx}
+                      to={`/e/${seg.eventId}`}
+                      className="text-[#ff8a3d] hover:underline"
+                    >
+                      nostr:{seg.bech32.slice(0, 14)}…
+                    </Link>
+                  )
+                }
+                if (seg.type === 'live') {
+                  return (
+                    <Link
+                      key={idx}
+                      to={`/live/${seg.bech32}`}
+                      className="text-[#ff8a3d] hover:underline"
+                    >
+                      Watch stream
+                    </Link>
+                  )
+                }
+                return null
+              })}
+            </div>
+          )}
+
+          {/* Standard & imeta media attachments (images, gifs, videos, audio) */}
+          {parsed.media.length > 0 && (
+            <div className="mt-1.5 space-y-1.5">
+              {parsed.media.map((m) =>
+                m.kind === 'image' ? (
+                  <button
+                    key={m.url}
+                    type="button"
+                    onClick={() => onOpenLightbox(m)}
+                    className="block rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
+                  >
+                    <img
+                      src={m.url}
+                      alt={m.alt || 'Chat media'}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                      className="max-h-44 max-w-full object-contain"
+                    />
+                  </button>
+                ) : m.kind === 'video' ? (
+                  <video
+                    key={m.url}
+                    src={`${m.url}#t=0.001`}
+                    poster={m.poster}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
+                  />
+                ) : (
+                  <audio key={m.url} src={m.url} controls className="w-full h-8" />
+                ),
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -146,6 +382,7 @@ export function LiveStreamPage() {
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
+  const blossomServers = useSettingsStore((s) => s.blossomServers)
 
   const hostPubkey =
     activeActivity?.streamerPubkey || activeActivity?.hostPubkey || decoded?.hostPubkey || ''
@@ -154,11 +391,16 @@ export function LiveStreamPage() {
   const toggleFollow = useNostrStore((s) => s.toggleFollow)
 
   const [draft, setDraft] = useState('')
+  const [attachments, setAttachments] = useState<BlossomUploadResult[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const [sending, setSending] = useState(false)
   const [replyTarget, setReplyTarget] = useState<LiveChatMessage | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
 
@@ -212,12 +454,51 @@ export function LiveStreamPage() {
   const playableUrl = activeActivity?.streamingUrl || activeActivity?.recordingUrl
   const aTag = buildLiveATag(decoded.hostPubkey, decoded.dTag)
 
+  const handleUploadFiles = async (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
+    if (!signer?.canSign) {
+      openAuthModal()
+      return
+    }
+    const list = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
+    )
+    if (list.length === 0) {
+      useNostrStore.getState().setToast('Drop an image or video to upload via Blossom')
+      return
+    }
+    setUploading(true)
+    try {
+      for (const file of list.slice(0, 3)) {
+        const res = await uploadToBlossom(
+          file,
+          file.type || 'application/octet-stream',
+          signer,
+          blossomServers,
+        )
+        setAttachments((prev) => [...prev, res])
+      }
+    } catch (err) {
+      useNostrStore
+        .getState()
+        .setToast(err instanceof Error ? err.message : 'Blossom upload failed')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   const handleSend = async () => {
-    if (!draft.trim() || sending) return
+    const cleanText = draft.trim()
+    if ((!cleanText && attachments.length === 0) || sending || uploading) return
     setSending(true)
     try {
-      await sendChatMessage(decoded.hostPubkey, decoded.dTag, draft, replyTarget?.id)
+      const mediaUrls = attachments.map((a) => a.url).join('\n')
+      const fullContent = [cleanText, mediaUrls].filter(Boolean).join('\n')
+      const imetaTags = attachments.map((a) => buildImetaTag(a))
+      await sendChatMessage(decoded.hostPubkey, decoded.dTag, fullContent, replyTarget?.id, imetaTags)
       setDraft('')
+      setAttachments([])
       setReplyTarget(null)
     } catch (err) {
       useNostrStore
@@ -319,18 +600,46 @@ export function LiveStreamPage() {
             )}
           </div>
 
-          {/* Live Chat Box — matches exact height of the 16:9 video screen on desktop */}
-          <div className="relative lg:w-72 xl:w-80 shrink-0 h-[360px] lg:h-auto">
-            <div className="h-full lg:absolute lg:inset-0 rounded-xl border border-[#232530] flex flex-col overflow-hidden bg-[#12131a]">
+          {/* Live Chat Box — matches exact height of the 16:9 video screen on desktop; supports Blossom drag & drop */}
+          <div
+            className="relative lg:w-72 xl:w-80 shrink-0 h-[360px] lg:h-auto"
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (!dragOver) setDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setDragOver(false)
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              void handleUploadFiles(e.dataTransfer.files)
+            }}
+          >
+            <div
+              className={`h-full lg:absolute lg:inset-0 rounded-xl border flex flex-col overflow-hidden bg-[#12131a] transition ${
+                dragOver ? 'border-[#e8590c] ring-2 ring-[#e8590c]/40' : 'border-[#232530]'
+              }`}
+            >
               <div className="px-3 py-2 border-b border-[#20222c] flex items-center justify-between text-xs font-semibold text-[#d4d2cb] shrink-0">
                 <span className="flex items-center gap-1.5">
                   <MessageCircle className="w-3.5 h-3.5 text-[#f59f00]" />
                   Live Chat
                 </span>
-                <span className="text-[11px] font-normal text-[#8c8a82]">
-                  {messages.length}
-                </span>
+                <span className="text-[11px] font-normal text-[#8c8a82]">{messages.length}</span>
               </div>
+
+              {dragOver && (
+                <div className="absolute inset-0 z-20 bg-[#0e0e11]/90 backdrop-blur-sm flex flex-col items-center justify-center gap-2 p-4 text-center pointer-events-none">
+                  <ImagePlus className="w-8 h-8 text-[#ff8a3d]" />
+                  <p className="text-xs font-semibold text-white">
+                    Drop image to upload via Blossom
+                  </p>
+                  <p className="text-[11px] text-[#9a9890]">EXIF metadata stripped client-side</p>
+                </div>
+              )}
 
               <div
                 ref={chatScrollRef}
@@ -356,14 +665,48 @@ export function LiveStreamPage() {
                         mutePubkey(pk)
                         useNostrStore.getState().setToast(`Blocked ${name} (undo in Settings)`)
                       }}
+                      onOpenLightbox={setLightboxMedia}
                     />
                   ))
                 )}
               </div>
 
+              {/* Uploaded Blossom attachment previews */}
+              {attachments.length > 0 && (
+                <div className="px-2 py-1.5 bg-[#161822] border-t border-[#232530] flex flex-wrap gap-1.5 shrink-0">
+                  {attachments.map((att, idx) => (
+                    <div
+                      key={att.url}
+                      className="relative w-12 h-12 rounded-lg overflow-hidden border border-[#2d3042] bg-[#0e0e11]"
+                    >
+                      {att.type.startsWith('image/') ? (
+                        <img
+                          src={att.url}
+                          alt="Uploaded preview"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-[9px] text-[#9a9890] p-1 text-center">
+                          video
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
+                        className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/80 text-white hover:bg-red-600 cursor-pointer"
+                        aria-label="Remove attachment"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Reply quote strip */}
               {replyTarget && (
-                <div className="px-2.5 py-1 bg-[#181a22] border-t border-[#232530] flex items-center justify-between gap-2 text-[11px] text-[#c2bfb7]">
+                <div className="px-2.5 py-1 bg-[#181a22] border-t border-[#232530] flex items-center justify-between gap-2 text-[11px] text-[#c2bfb7] shrink-0">
                   <span className="truncate">
                     Replying to: <span className="text-[#8c8a82]">{replyTarget.content}</span>
                   </span>
@@ -384,20 +727,49 @@ export function LiveStreamPage() {
                       e.preventDefault()
                       void handleSend()
                     }}
-                    className="flex gap-1.5"
+                    className="flex gap-1.5 items-center"
                   >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => void handleUploadFiles(e.target.files)}
+                    />
+                    <button
+                      type="button"
+                      disabled={uploading}
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Upload image via Blossom (or drag & drop / paste)"
+                      aria-label="Upload image via Blossom"
+                      className="p-1.5 rounded-lg text-[#9a9890] hover:text-[#ff922b] hover:bg-white/5 disabled:opacity-40 cursor-pointer shrink-0"
+                    >
+                      {uploading ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-[#e8590c]" />
+                      ) : (
+                        <ImagePlus className="w-4 h-4" />
+                      )}
+                    </button>
                     <input
                       type="text"
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Send a message…"
+                      onPaste={(e) => {
+                        const files = Array.from(e.clipboardData.files || [])
+                        if (files.length > 0) {
+                          e.preventDefault()
+                          void handleUploadFiles(files)
+                        }
+                      }}
+                      placeholder={uploading ? 'Uploading to Blossom…' : 'Send or drop image…'}
                       maxLength={500}
                       className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-[#0e0e11] border border-[#262834] text-xs text-white focus:outline-none focus:border-[#e8590c]"
                     />
                     <button
                       type="submit"
-                      disabled={sending || !draft.trim()}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-40 text-white cursor-pointer"
+                      disabled={sending || uploading || (!draft.trim() && attachments.length === 0)}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-40 text-white cursor-pointer shrink-0"
                       aria-label="Send message"
                     >
                       {sending ? (
@@ -494,6 +866,8 @@ export function LiveStreamPage() {
           onClose={() => setZapOpen(false)}
         />
       )}
+
+      <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />
     </div>
   )
 }

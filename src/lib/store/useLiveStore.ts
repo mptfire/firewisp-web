@@ -19,6 +19,7 @@ export interface LiveChatMessage {
   id: string
   senderPubkey: string
   content: string
+  tags: string[][]
   createdAt: number
   replyToId?: string
   isZapAnnouncement?: boolean
@@ -52,6 +53,7 @@ interface LiveState {
     dTag: string,
     content: string,
     replyToId?: string,
+    extraTags?: string[][],
   ) => Promise<void>
 }
 
@@ -288,6 +290,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 id: ev.id,
                 senderPubkey: ev.pubkey.toLowerCase(),
                 content: ev.content || '',
+                tags: ev.tags || [],
                 createdAt: ev.created_at,
                 replyToId,
               }
@@ -318,6 +321,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 id: zapKey,
                 senderPubkey: info.senderPubkey,
                 content: info.comment || '',
+                tags: [],
                 createdAt: ev.created_at,
                 isZapAnnouncement: true,
                 zapAmountSats: info.sats,
@@ -372,7 +376,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     }
   },
 
-  sendChatMessage: async (hostPubkey, dTag, content, replyToId) => {
+  sendChatMessage: async (hostPubkey, dTag, content, replyToId, extraTags = []) => {
     const signer = useAuthStore.getState().signer
     if (!signer?.canSign) {
       useAuthStore.getState().openAuthModal()
@@ -391,6 +395,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     const tags: string[][] = [
       ['a', aTag, relays[0] || ''],
       ['p', cleanHost],
+      ...extraTags,
     ]
     if (replyToId) {
       tags.push(['e', replyToId, '', 'reply'])
@@ -411,6 +416,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         id: signed.id,
         senderPubkey: signed.pubkey.toLowerCase(),
         content: signed.content,
+        tags: signed.tags,
         createdAt: signed.created_at,
         replyToId,
       }
