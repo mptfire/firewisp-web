@@ -17,6 +17,25 @@ class FireWispPool {
   private statusListeners = new Set<(statuses: Record<string, RelayStatus>) => void>()
   private probeSockets = new Map<string, number>()
 
+  constructor() {
+    if (typeof window !== 'undefined') {
+      const refreshStale = () => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+        const urls = [...this.statuses.keys()]
+        for (const url of urls) {
+          if (this.statuses.get(url) === 'connected') {
+            this.statuses.set(url, 'disconnected')
+          }
+        }
+        if (urls.length > 0) {
+          void this.ensureConnected(urls)
+        }
+      }
+      document.addEventListener('visibilitychange', refreshStale)
+      window.addEventListener('online', refreshStale)
+    }
+  }
+
   getStatuses(): Record<string, RelayStatus> {
     const out: Record<string, RelayStatus> = {}
     for (const [k, v] of this.statuses) out[k] = v

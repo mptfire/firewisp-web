@@ -1,21 +1,54 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Flame, Users, Globe, TrendingUp, Network, Loader2, ShieldCheck, RefreshCw } from 'lucide-react'
+import {
+  Flame,
+  Users,
+  Globe,
+  TrendingUp,
+  Network,
+  Loader2,
+  ShieldCheck,
+  RefreshCw,
+  ArrowUp,
+} from 'lucide-react'
 import type { Event } from 'nostr-tools/pure'
 import { evaluateNoteSpam, isTopLevelNote } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
-import { useNostrStore } from '../lib/store/useNostrStore'
+import { useNostrStore, type FeedTab } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Composer } from '../components/Composer'
 import { NoteCard } from '../components/NoteCard'
 
-type FeedTab = 'global' | 'trending' | 'firewisp' | 'following' | 'extended'
+function FeedSkeleton() {
+  return (
+    <div className="divide-y divide-[#20222c]">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div key={i} className="px-4 py-4 flex gap-3 animate-pulse">
+          <div className="w-10 h-10 rounded-full bg-[#1c1e26] shrink-0" />
+          <div className="flex-1 space-y-2.5 pt-1">
+            <div className="flex gap-2">
+              <div className="h-3.5 w-28 rounded bg-[#1c1e26]" />
+              <div className="h-3.5 w-12 rounded bg-[#181920]" />
+            </div>
+            <div className="h-3.5 w-full rounded bg-[#181920]" />
+            <div className="h-3.5 w-4/5 rounded bg-[#181920]" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export function FeedPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
+  const tab = useNostrStore((s) => s.activeFeedTab)
+  const setTab = useNostrStore((s) => s.setActiveFeedTab)
+  const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
+  const setShowRepliesInFollows = useNostrStore((s) => s.setShowRepliesInFollows)
   const follows = useNostrStore((s) => s.follows)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
   const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
+  const loadingMore = useNostrStore((s) => s.loadingMore)
   const events = useNostrStore((s) => s.events)
   const deletedEventIds = useNostrStore((s) => s.deletedEventIds)
   const firewispFeedIds = useNostrStore((s) => s.firewispFeedIds)
@@ -23,8 +56,11 @@ export function FeedPage() {
   const extendedFeedIds = useNostrStore((s) => s.extendedFeedIds)
   const trendingFeedIds = useNostrStore((s) => s.trendingFeedIds)
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
+  const pendingCount = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab]?.length || 0)
   const loadingFeed = useNostrStore((s) => s.loadingFeed)
   const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
+  const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
+  const loadOlderFeed = useNostrStore((s) => s.loadOlderFeed)
   const clearFeedTab = useNostrStore((s) => s.clearFeedTab)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
@@ -32,16 +68,28 @@ export function FeedPage() {
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
-  const [tab, setTab] = useState<FeedTab>('global')
   const [refreshTick, setRefreshTick] = useState(0)
+  const [noMoreOlder, setNoMoreOlder] = useState(false)
 
   useEffect(() => {
+    setNoMoreOlder(false)
     return subscribeFeed(tab)
   }, [tab, pubkey, follows.length, userReadRelays.length, extendedAuthors.length, refreshTick, subscribeFeed])
 
   const handleRefresh = () => {
+    setNoMoreOlder(false)
     clearFeedTab(tab)
     setRefreshTick((n) => n + 1)
+  }
+
+  const handleShowNew = () => {
+    flushPendingFeed(tab)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleLoadOlder = async () => {
+    const added = await loadOlderFeed(tab)
+    if (added === 0) setNoMoreOlder(true)
   }
 
   const ids =
@@ -89,6 +137,17 @@ export function FeedPage() {
 
       if (seen.has(targetEv.id)) continue
 
+      // Hide replies in Follows when user has "Hide replies" active (Jumble-style clean feed)
+      if (
+        tab === 'following' &&
+        !showRepliesInFollows &&
+        !repostedBy &&
+        targetEv.kind === 1 &&
+        !isTopLevelNote(targetEv)
+      ) {
+        continue
+      }
+
       if (
         (tab === 'global' || tab === 'trending') &&
         hideRepliesInExplore &&
@@ -123,6 +182,7 @@ export function FeedPage() {
     deletedEventIds,
     isEventMuted,
     tab,
+    showRepliesInFollows,
     spamFilterEnabled,
     hideRepliesInExplore,
     requirePowInExplore,
@@ -158,7 +218,7 @@ export function FeedPage() {
         ))}
       </div>
 
-      {/* Status + Refresh Strip */}
+      {/* Status + Controls Strip */}
       <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1.5 text-[#9a9890] min-w-0 truncate">
           {tab === 'extended' ? (
@@ -177,7 +237,7 @@ export function FeedPage() {
               <Users className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
               <span className="truncate">
                 {pubkey
-                  ? `Following ${follows.length.toLocaleString()} accounts (strict follow-only filter)`
+                  ? `Following ${follows.length.toLocaleString()} accounts`
                   : 'Sign in to view posts from accounts you follow.'}
               </span>
             </>
@@ -196,8 +256,8 @@ export function FeedPage() {
                   ? 'Curated trending notes (trending.relays.land)'
                   : spamFilterEnabled
                     ? spamBlockedCount > 0
-                      ? `Curated Explore (nostr.wine + Primal + Fire Wisp) · ${spamBlockedCount} filtered`
-                      : 'Curated Explore (nostr.wine + Primal + Fire Wisp · anti-spam ON)'
+                      ? `Curated Explore · ${spamBlockedCount} filtered`
+                      : 'Curated Explore (anti-spam ON)'
                     : 'Anti-spam filter paused'}
               </span>
             </>
@@ -205,6 +265,14 @@ export function FeedPage() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          {tab === 'following' && pubkey && (
+            <button
+              onClick={() => setShowRepliesInFollows(!showRepliesInFollows)}
+              className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
+            >
+              {showRepliesInFollows ? 'Hide replies' : 'Show replies'}
+            </button>
+          )}
           {tab === 'global' && (
             <button
               onClick={() => setSpamFilterEnabled(!spamFilterEnabled)}
@@ -226,12 +294,20 @@ export function FeedPage() {
 
       <Composer />
 
-      {loadingFeed && items.length === 0 && (
-        <div className="py-16 flex flex-col items-center gap-2 text-sm text-[#8c8a82]">
-          <Loader2 className="w-6 h-6 animate-spin text-[#e8590c]" />
-          <span>Connecting to Nostr relays…</span>
+      {/* Jumble-style buffered new-notes pill (zero scroll jumping while reading!) */}
+      {pendingCount > 0 && (
+        <div className="sticky top-[102px] md:top-[52px] z-20 flex justify-center py-2 pointer-events-none">
+          <button
+            onClick={handleShowNew}
+            className="pointer-events-auto px-4 py-1.5 rounded-full bg-[#e8590c] hover:bg-[#d9480f] text-white text-xs font-semibold shadow-lg shadow-black/40 flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <ArrowUp className="w-3.5 h-3.5" />
+            Show {pendingCount} new {pendingCount === 1 ? 'note' : 'notes'}
+          </button>
         </div>
       )}
+
+      {loadingFeed && items.length === 0 && <FeedSkeleton />}
 
       {!loadingFeed && items.length === 0 && (
         <div className="py-16 px-6 text-center space-y-2">
@@ -239,7 +315,9 @@ export function FeedPage() {
             {tab === 'firewisp'
               ? 'No posts on firewisp.relay.rtard.de yet — be the first to ignite it!'
               : tab === 'following'
-                ? 'Follow people on Nostr to fill your Following feed.'
+                ? pubkey
+                  ? 'No recent notes from your follows loaded yet.'
+                  : 'Sign in and follow people on Nostr to fill your Follows feed.'
                 : 'No notes received from your configured relays yet.'}
           </p>
           <p className="text-xs text-[#8c8a82]">
@@ -258,6 +336,24 @@ export function FeedPage() {
           />
         ))}
       </div>
+
+      {/* Pagination: Load older notes */}
+      {items.length > 0 && tab !== 'trending' && (
+        <div className="py-6 flex justify-center">
+          {noMoreOlder ? (
+            <span className="text-xs text-[#6f6d66]">No older notes found on these relays</span>
+          ) : (
+            <button
+              disabled={loadingMore}
+              onClick={() => void handleLoadOlder()}
+              className="px-5 py-2 rounded-xl bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-xs font-medium text-[#d4d2cb] disabled:opacity-50 flex items-center gap-2 transition cursor-pointer"
+            >
+              {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#e8590c]" />}
+              {loadingMore ? 'Loading older notes…' : 'Load older notes'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

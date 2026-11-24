@@ -12,27 +12,34 @@ import { Composer } from '../components/Composer'
 export function ThreadPage() {
   const { eventId } = useParams<{ eventId: string }>()
   const navigate = useNavigate()
-  const events = useNostrStore((s) => s.events)
+  const focusEvent = useNostrStore((s) => (eventId ? s.events[eventId] : undefined))
+  const parentRef = useMemo(() => (focusEvent ? extractReplyRefs(focusEvent) : {}), [focusEvent])
+  const rootEvent = useNostrStore((s) =>
+    parentRef.rootId && parentRef.rootId !== parentRef.replyId && parentRef.rootId !== eventId
+      ? s.events[parentRef.rootId]
+      : undefined,
+  )
+  const parentEvent = useNostrStore((s) =>
+    parentRef.replyId && parentRef.replyId !== eventId ? s.events[parentRef.replyId] : undefined,
+  )
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const relays = useSettingsStore((s) => s.relays)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const readRelays = useMemo(
-    () => relays.filter((r) => r.read).map((r) => r.url),
-    [relays],
+    () => [...new Set([...relays.filter((r) => r.read).map((r) => r.url), ...userReadRelays])].slice(0, 10),
+    [relays, userReadRelays],
   )
 
   const [replies, setReplies] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
 
-  const focusEvent = eventId ? events[eventId] : undefined
-  const parentRef = focusEvent ? extractReplyRefs(focusEvent) : {}
-  const parentEvent = parentRef.replyId ? events[parentRef.replyId] : undefined
-
   useEffect(() => {
     if (!eventId) return
     let active = true
     setLoading(true)
+    setReplies([])
 
     void (async () => {
       try {
@@ -45,20 +52,26 @@ export function ThreadPage() {
         for (const ev of replyList) ingestEvent(ev)
 
         const authors = new Set<string>()
-        for (const ev of [...mainList, ...replyList]) authors.add(ev.pubkey)
+        const allIds = new Set<string>([eventId])
+        for (const ev of [...mainList, ...replyList]) {
+          authors.add(ev.pubkey)
+          allIds.add(ev.id)
+        }
 
-        // Fetch parent if this note is itself a reply
-        const main = mainList[0] || events[eventId]
+        // Fetch root + parent if this note is itself a reply
+        const main = mainList[0] || useNostrStore.getState().events[eventId]
         if (main) {
           const refs = extractReplyRefs(main)
-          const ancestorIds = [refs.rootId, refs.replyId].filter(
+          const ancestorIds = [...new Set([refs.rootId, refs.replyId].filter(
             (x): x is string => Boolean(x && x !== eventId),
-          )
+          ))]
           if (ancestorIds.length > 0) {
             const parents = await nostrPool.query(readRelays, { ids: ancestorIds }, 3000)
+            if (!active) return
             for (const p of parents) {
               ingestEvent(p)
               authors.add(p.pubkey)
+              allIds.add(p.id)
             }
           }
         }
@@ -69,6 +82,18 @@ export function ThreadPage() {
             .filter((r) => r.id !== eventId && !isEventMuted(r))
             .sort((a, b) => a.created_at - b.created_at),
         )
+
+        // Load reactions, reposts & zaps for the thread so counters populate
+        void nostrPool
+          .query(
+            readRelays,
+            { kinds: [5, 6, 7, 9735], '#e': [...allIds].slice(0, 40), limit: 250 },
+            3500,
+          )
+          .then((meta) => {
+            if (!active) return
+            for (const m of meta) ingestEvent(m)
+          })
       } finally {
         if (active) setLoading(false)
       }
@@ -92,8 +117,14 @@ export function ThreadPage() {
         <h1 className="font-bold text-base">Thread</h1>
       </div>
 
+      {rootEvent && (
+        <div className="opacity-75 border-l-2 border-[#e8590c]/40 ml-4">
+          <NoteCard event={rootEvent} />
+        </div>
+      )}
+
       {parentEvent && (
-        <div className="opacity-80 border-l-2 border-[#e8590c]/50 ml-4">
+        <div className="opacity-85 border-l-2 border-[#e8590c]/60 ml-4">
           <NoteCard event={parentEvent} />
         </div>
       )}

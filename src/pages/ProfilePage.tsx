@@ -30,20 +30,6 @@ export function ProfilePage() {
   const { pubkey: rawId } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
   const myPubkey = useAuthStore((s) => s.pubkey)
-  const profiles = useNostrStore((s) => s.profiles)
-  const eventsMap = useNostrStore((s) => s.events)
-  const follows = useNostrStore((s) => s.follows)
-  const ingestEvent = useNostrStore((s) => s.ingestEvent)
-  const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
-  const toggleFollow = useNostrStore((s) => s.toggleFollow)
-  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
-  const mutePubkey = useSettingsStore((s) => s.mutePubkey)
-  const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
-  const relays = useSettingsStore((s) => s.relays)
-  const readRelays = useMemo(
-    () => relays.filter((r) => r.read).map((r) => r.url),
-    [relays],
-  )
 
   const hexPubkey = useMemo(() => {
     if (!rawId) return ''
@@ -58,13 +44,29 @@ export function ProfilePage() {
     return ''
   }, [rawId])
 
+  const profile = useNostrStore((s) => (hexPubkey ? s.profiles[hexPubkey] : undefined))
+  const follows = useNostrStore((s) => s.follows)
+  const ingestEvent = useNostrStore((s) => s.ingestEvent)
+  const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
+  const toggleFollow = useNostrStore((s) => s.toggleFollow)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutePubkey = useSettingsStore((s) => s.mutePubkey)
+  const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
+  const relays = useSettingsStore((s) => s.relays)
+  const readRelays = useMemo(
+    () => relays.filter((r) => r.read).map((r) => r.url),
+    [relays],
+  )
+
   const [rawEvents, setRawEvents] = useState<Event[]>([])
+  const [profileRelays, setProfileRelays] = useState<string[]>([])
   const [tab, setTab] = useState<ProfileTab>('notes')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [noMoreOlder, setNoMoreOlder] = useState(false)
   const [zapOpen, setZapOpen] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
 
-  const profile = hexPubkey ? profiles[hexPubkey] : undefined
   const npub = useMemo(() => {
     if (!hexPubkey) return ''
     try {
@@ -84,6 +86,8 @@ export function ProfilePage() {
     if (!hexPubkey) return
     let active = true
     setLoading(true)
+    setNoMoreOlder(false)
+    setTab('notes')
     setRawEvents([])
     void fetchProfiles([hexPubkey])
 
@@ -106,6 +110,7 @@ export function ProfilePage() {
         }
 
         const queryRelays = [...new Set([...readRelays, ...userWriteRelays.slice(0, 6)])]
+        if (active) setProfileRelays(queryRelays)
         const evs = await nostrPool.query(
           queryRelays,
           { kinds: [1, 6, 20, 21, 22], authors: [hexPubkey], limit: 100 },
@@ -131,6 +136,17 @@ export function ProfilePage() {
           void fetchProfiles([...repostTargetAuthors])
         }
         setRawEvents(evs)
+
+        // Background fetch reaction/zap/reply counts for top notes
+        const topIds = evs.slice(0, 40).map((e) => e.id)
+        if (topIds.length > 0) {
+          void nostrPool
+            .query(queryRelays, { kinds: [1, 5, 6, 7, 1111, 9735], '#e': topIds, limit: 250 }, 3500)
+            .then((meta) => {
+              if (!active) return
+              for (const m of meta) ingestEvent(m)
+            })
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -141,9 +157,35 @@ export function ProfilePage() {
     }
   }, [hexPubkey])
 
+  const handleLoadOlder = async () => {
+    if (loadingMore || rawEvents.length === 0 || !hexPubkey) return
+    const oldest = rawEvents[rawEvents.length - 1]?.created_at
+    if (!oldest) return
+    setLoadingMore(true)
+    try {
+      const targetRelays = profileRelays.length > 0 ? profileRelays : readRelays
+      const older = await nostrPool.query(
+        targetRelays,
+        { kinds: [1, 6, 20, 21, 22], authors: [hexPubkey], until: oldest - 1, limit: 60 },
+        4500,
+      )
+      const existingIds = new Set(rawEvents.map((e) => e.id))
+      const fresh = older.filter((e) => !existingIds.has(e.id))
+      if (fresh.length === 0) {
+        setNoMoreOlder(true)
+        return
+      }
+      for (const e of fresh) ingestEvent(e)
+      setRawEvents((prev) => [...prev, ...fresh].sort((a, b) => b.created_at - a.created_at))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   const displayItems = useMemo(() => {
     const out: Array<{ event: Event; repostedBy?: string }> = []
     const seen = new Set<string>()
+    const eventsSnapshot = useNostrStore.getState().events
 
     for (const ev of rawEvents) {
       let target: Event = ev
@@ -151,7 +193,7 @@ export function ProfilePage() {
 
       if (ev.kind === 6) {
         const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
-        const inner = targetId ? eventsMap[targetId] : undefined
+        const inner = targetId ? eventsSnapshot[targetId] : undefined
         if (!inner) continue
         target = inner
         repostedBy = ev.pubkey
@@ -175,7 +217,7 @@ export function ProfilePage() {
       out.push({ event: target, repostedBy })
     }
     return out
-  }, [rawEvents, eventsMap, tab])
+  }, [rawEvents, tab])
 
   if (!hexPubkey) {
     return (
@@ -337,13 +379,29 @@ export function ProfilePage() {
               : 'No public notes found.'}
         </div>
       ) : (
-        displayItems.map(({ event, repostedBy }) => (
-          <NoteCard
-            key={`${event.id}-${repostedBy || 'orig'}`}
-            event={event}
-            repostedByPubkey={repostedBy}
-          />
-        ))
+        <>
+          {displayItems.map(({ event, repostedBy }) => (
+            <NoteCard
+              key={`${event.id}-${repostedBy || 'orig'}`}
+              event={event}
+              repostedByPubkey={repostedBy}
+            />
+          ))}
+          <div className="py-6 flex justify-center">
+            {noMoreOlder ? (
+              <span className="text-xs text-[#6f6d66]">No older notes found on these relays</span>
+            ) : (
+              <button
+                disabled={loadingMore}
+                onClick={() => void handleLoadOlder()}
+                className="px-5 py-2 rounded-xl bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-xs font-medium text-[#d4d2cb] disabled:opacity-50 flex items-center gap-2 transition cursor-pointer"
+              >
+                {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#e8590c]" />}
+                {loadingMore ? 'Loading older notes…' : 'Load older notes'}
+              </button>
+            )}
+          </div>
+        </>
       )}
 
       {zapOpen && profile?.lud16 && (

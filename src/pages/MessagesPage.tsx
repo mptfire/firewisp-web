@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
-import { Lock, Mail, Send, ShieldCheck, Eye, Plus } from 'lucide-react'
+import { ArrowLeft, Lock, Mail, Send, ShieldCheck, Eye, Plus } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -62,6 +62,11 @@ export function MessagesPage() {
     () => dms.filter((m) => m.peerPubkey === selectedPeer),
     [dms, selectedPeer],
   )
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [selectedPeer, activeMessages.length])
 
   const startConversation = () => {
     setError(null)
@@ -161,8 +166,12 @@ export function MessagesPage() {
       )}
 
       <div className="flex-1 flex min-h-0">
-        {/* Conversation list */}
-        <div className="w-44 sm:w-56 border-r border-[#20222c] overflow-y-auto">
+        {/* Conversation list (full-width on mobile when no chat selected, sidebar on sm+) */}
+        <div
+          className={`${
+            selectedPeer ? 'hidden sm:block' : 'block w-full'
+          } sm:w-56 border-r border-[#20222c] overflow-y-auto shrink-0`}
+        >
           {threads.length === 0 ? (
             <p className="p-4 text-xs text-[#8c8a82]">No encrypted chats yet.</p>
           ) : (
@@ -189,13 +198,36 @@ export function MessagesPage() {
         </div>
 
         {/* Active chat pane */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={`${selectedPeer ? 'flex' : 'hidden sm:flex'} flex-1 flex-col min-w-0`}>
           {!selectedPeer ? (
             <div className="flex-1 flex items-center justify-center text-xs text-[#8c8a82] p-6 text-center">
               Select a conversation or paste an npub above to start a NIP-17 encrypted DM.
             </div>
           ) : (
             <>
+              <div className="sm:hidden px-3 py-2 border-b border-[#20222c] bg-[#121319] flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setSelectedPeer('')
+                    setSearchParams({})
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-white/5 text-[#c2bfb7] cursor-pointer"
+                  aria-label="Back to chats"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+                <Avatar
+                  src={profiles[selectedPeer]?.picture}
+                  pubkey={selectedPeer}
+                  name={profiles[selectedPeer]?.display_name || profiles[selectedPeer]?.name}
+                  size="sm"
+                />
+                <span className="text-xs font-semibold truncate">
+                  {profiles[selectedPeer]?.display_name ||
+                    profiles[selectedPeer]?.name ||
+                    `${selectedPeer.slice(0, 12)}…`}
+                </span>
+              </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
                 {activeMessages.map((m) => {
                   const mine = m.senderPubkey === pubkey?.toLowerCase()
@@ -248,6 +280,7 @@ export function MessagesPage() {
                     </div>
                   )
                 })}
+                <div ref={messagesEndRef} />
               </div>
 
               <div className="p-3 border-t border-[#20222c] flex gap-2 bg-[#121319]">

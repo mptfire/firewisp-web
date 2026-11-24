@@ -136,8 +136,14 @@ export function Composer({
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !publishing && !uploading) {
+                e.preventDefault()
+                void handlePublish()
+              }
+            }}
             rows={compact ? 2 : 3}
-            placeholder={placeholder}
+            placeholder={`${placeholder} (Ctrl+Enter to post)`}
             className="w-full bg-transparent resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#6c6a63] focus:outline-none"
           />
 
