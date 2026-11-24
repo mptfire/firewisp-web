@@ -49,7 +49,8 @@ function TrendingPostCard({ eventId }: { eventId: string }) {
   const handle = profile?.nip05 ? profile.nip05.replace(/^_@/, '') : null
   const parsed = parseNoteContent(ev)
   const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
-  const hasVideo = parsed.media.some((m) => m.kind === 'video')
+  const firstVideo = parsed.media.find((m) => m.kind === 'video')
+  const firstYoutube = parsed.youtube[0]
   const snippet = stripPreviewText(ev.content)
   const hasStats = likes > 0 || reposts > 0 || replies > 0 || zapSats > 0
 
@@ -91,14 +92,56 @@ function TrendingPostCard({ eventId }: { eventId: string }) {
             alt=""
             loading="lazy"
             referrerPolicy="no-referrer"
-            className="w-full max-h-32 object-cover group-hover:scale-[1.02] transition duration-300"
+            className="w-full max-h-40 object-cover group-hover:scale-[1.02] transition duration-300"
           />
         </div>
       )}
-      {!firstImg && hasVideo && (
-        <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-[#13141b] border border-[#2a2d3d] text-[11px] text-[#c2bfb7] flex items-center gap-1.5">
-          <Play className="w-3 h-3 text-[#f59f00] fill-[#f59f00]" />
-          <span>Video attachment</span>
+      {!firstImg && firstVideo && (
+        <div className="mt-2 relative rounded-lg overflow-hidden border border-[#2a2d3d] bg-black aspect-video max-h-40">
+          {firstVideo.poster ? (
+            <img
+              src={firstVideo.poster}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
+            />
+          ) : (
+            <video
+              src={`${firstVideo.url}#t=0.001`}
+              preload="metadata"
+              muted
+              playsInline
+              className="w-full h-full object-cover pointer-events-none"
+            />
+          )}
+          <div className="absolute inset-0 bg-black/25 flex items-center justify-center pointer-events-none">
+            <span className="w-9 h-9 rounded-full bg-black/75 border border-white/20 text-white flex items-center justify-center shadow-lg">
+              <Play className="w-4 h-4 fill-white ml-0.5" />
+            </span>
+          </div>
+          <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[9px] font-bold tracking-wider uppercase text-[#f59f00]">
+            Video
+          </span>
+        </div>
+      )}
+      {!firstImg && !firstVideo && firstYoutube && (
+        <div className="mt-2 relative rounded-lg overflow-hidden border border-[#2a2d3d] bg-black aspect-video max-h-40">
+          <img
+            src={firstYoutube.thumbnailUrl}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
+          />
+          <div className="absolute inset-0 bg-black/25 flex items-center justify-center pointer-events-none">
+            <span className="w-9 h-9 rounded-full bg-red-600/90 text-white flex items-center justify-center shadow-lg">
+              <Play className="w-4 h-4 fill-white ml-0.5" />
+            </span>
+          </div>
+          <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[9px] font-bold tracking-wider uppercase text-red-400">
+            YouTube
+          </span>
         </div>
       )}
 

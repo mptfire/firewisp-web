@@ -14,12 +14,15 @@ import {
   ExternalLink,
   Cpu,
   CornerDownRight,
+  Play,
   Radio,
 } from 'lucide-react'
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
+import { buildLiveATag, encodeLiveNaddr, isLiveStreamFresh } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
 import { verifyEventPow } from '../lib/crypto/nip13'
 import { useAuthStore } from '../lib/store/useAuthStore'
+import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
@@ -65,7 +68,85 @@ const MentionChip = memo(function MentionChip({
   )
 })
 
-/** Isolated quoted-note preview card with inline image thumbnail support. */
+/** Rich inline livestream preview card inside a note (pulls thumbnail/title/viewers from useLiveStore if live). */
+const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
+  hostPubkey,
+  dTag,
+  bech32,
+}: {
+  hostPubkey: string
+  dTag: string
+  bech32: string
+}) {
+  const aTag = buildLiveATag(hostPubkey, dTag)
+  const entry = useLiveStore((s) => s.liveStreams[aTag])
+  const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
+  const profile = useNostrStore((s) => s.profiles[displayPk])
+  const [thumbFailed, setThumbFailed] = useState(false)
+
+  const hostName = profile?.display_name || profile?.name || `${displayPk.slice(0, 10)}…`
+  const title = entry?.activity.title || `Live Stream (${dTag.slice(0, 24)})`
+  const thumb = entry?.activity.image
+  const isLive = entry?.activity.status === 'live'
+  const viewers = entry?.activity.currentParticipants
+
+  return (
+    <Link
+      to={`/live/${bech32}`}
+      onClick={(e) => e.stopPropagation()}
+      className="group block mt-2.5 rounded-xl overflow-hidden border border-[#e8590c]/40 hover:border-[#e8590c] bg-[#14151e] transition"
+    >
+      {thumb && !thumbFailed && (
+        <div className="relative aspect-video max-h-64 w-full bg-[#0e0e11] overflow-hidden">
+          <img
+            src={thumb}
+            alt={title}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setThumbFailed(true)}
+            className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center">
+            <span className="w-12 h-12 rounded-full bg-[#e8590c]/95 group-hover:scale-105 transition shadow-xl flex items-center justify-center text-white">
+              <Play className="w-5 h-5 fill-white ml-0.5" />
+            </span>
+          </div>
+          <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow">
+            <Radio className="w-2.5 h-2.5 animate-pulse" />
+            {isLive ? 'LIVE' : 'STREAM'}
+          </span>
+          {viewers !== undefined && viewers > 0 && (
+            <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[11px] font-medium text-[#ece9e1]">
+              {viewers.toLocaleString()} watching
+            </span>
+          )}
+        </div>
+      )}
+      <div className="p-3 flex items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="sm" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              {(!thumb || thumbFailed) && (
+                <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
+                  <Radio className="w-2.5 h-2.5 animate-pulse" />
+                  LIVE
+                </span>
+              )}
+              <span className="text-xs sm:text-sm font-semibold text-white group-hover:text-[#ff922b] truncate transition">
+                {title}
+              </span>
+            </div>
+            <div className="text-[11px] text-[#8c8a82] truncate">{hostName}</div>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-[#ff8a3d] shrink-0">Watch →</span>
+      </div>
+    </Link>
+  )
+})
+
+/** Isolated quoted-note preview card with inline image & video preview support. */
 const QuotedNoteCard = memo(function QuotedNoteCard({
   eventId,
   bech32,
@@ -79,6 +160,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   )
   const parsedQuote = useMemo(() => (quoted ? parseNoteContent(quoted) : null), [quoted])
   const firstImage = parsedQuote?.media.find((m) => m.kind === 'image')
+  const firstVideo = parsedQuote?.media.find((m) => m.kind === 'video')
   const firstYoutube = parsedQuote?.youtube[0]
 
   return (
@@ -106,8 +188,9 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
           </div>
           {quoted.content && (
             <p className="text-[#dcd9d0] text-[13px] line-clamp-3 whitespace-pre-wrap break-words">
-              {quoted.content.replace(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif)(\?\S*)?/gi, '').trim() ||
-                quoted.content}
+              {quoted.content
+                .replace(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif|mp4|webm|mov|m4v)(\?\S*)?/gi, '')
+                .trim() || quoted.content}
             </p>
           )}
           {firstImage && (
@@ -119,7 +202,18 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
               className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734]"
             />
           )}
-          {!firstImage && firstYoutube && (
+          {!firstImage && firstVideo && (
+            <video
+              src={firstVideo.poster ? firstVideo.url : `${firstVideo.url}#t=0.001`}
+              poster={firstVideo.poster}
+              controls
+              playsInline
+              preload="metadata"
+              onClick={(e) => e.stopPropagation()}
+              className="mt-2 rounded-lg max-h-64 w-full bg-black border border-[#242734]"
+            />
+          )}
+          {!firstImage && !firstVideo && firstYoutube && (
             <div className="mt-2">
               <YouTubeCard video={firstYoutube} compact />
             </div>
@@ -209,6 +303,45 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
     profile?.display_name || profile?.name || `${npub.slice(0, 12)}…`
   const powBits = useMemo(() => verifyEventPow(event.id, event.tags), [event.id, event.tags])
   const parsed = useMemo(() => parseNoteContent(event), [event])
+  const liveStreams = useLiveStore((s) => s.liveStreams)
+
+  // If this note announces a livestream (e.g. #livestream / #letsfo_live / /live link without an explicit naddr)
+  // and its author currently has an active LIVE stream in useLiveStore, show their rich stream preview card!
+  const matchedAuthorLive = useMemo(() => {
+    const hasExplicitLive = parsed.segments.some((seg) => seg.type === 'live')
+    if (hasExplicitLive) return null
+    const lowerContent = (event.content || '').toLowerCase()
+    const isLiveAnnouncement =
+      event.tags.some(
+        (t) =>
+          (t[0] === 't' && /^(livestream|letsfo_live|live)$/i.test(t[1] || '')) ||
+          (t[0] === 'software' && /live/i.test(t[1] || '')),
+      ) || /https?:\/\/[^\s]*\/live\b/i.test(lowerContent)
+    if (!isLiveAnnouncement) return null
+
+    const authorPk = event.pubkey.toLowerCase()
+    const nowSec = Math.floor(Date.now() / 1000)
+    for (const entry of Object.values(liveStreams)) {
+      if (!isLiveStreamFresh(entry, nowSec)) continue
+      const matchAuthor =
+        entry.activity.hostPubkey.toLowerCase() === authorPk ||
+        entry.activity.streamerPubkey?.toLowerCase() === authorPk
+      if (!matchAuthor) continue
+      // Only attach to recent announcement notes (within 4 hours of the stream event)
+      if (Math.abs(event.created_at - entry.activity.createdAt) <= 4 * 3600) {
+        return {
+          hostPubkey: entry.activity.hostPubkey,
+          dTag: entry.activity.dTag,
+          bech32: encodeLiveNaddr(
+            entry.activity.hostPubkey,
+            entry.activity.dTag,
+            entry.activity.relayHints,
+          ),
+        }
+      }
+    }
+    return null
+  }, [event, parsed.segments, liveStreams])
 
   const hasVisibleBody = useMemo(
     () => parsed.segments.some((seg) => seg.type !== 'text' || seg.text.trim().length > 0),
@@ -444,22 +577,12 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                   }
                   if (seg.type === 'live') {
                     return (
-                      <Link
+                      <LiveStreamEmbedCard
                         key={i}
-                        to={`/live/${seg.bech32}`}
-                        className="mt-2 p-3 rounded-xl bg-[#161820] border border-[#e8590c]/35 hover:border-[#e8590c] flex items-center justify-between gap-2 transition"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold uppercase flex items-center gap-1 shrink-0">
-                            <Radio className="w-2.5 h-2.5 animate-pulse" />
-                            LIVE
-                          </span>
-                          <span className="text-xs font-semibold text-white truncate">
-                            Open Live Stream ({seg.dTag})
-                          </span>
-                        </div>
-                        <span className="text-xs text-[#ff8a3d] font-medium shrink-0">Watch →</span>
-                      </Link>
+                        hostPubkey={seg.hostPubkey}
+                        dTag={seg.dTag}
+                        bech32={seg.bech32}
+                      />
                     )
                   }
                   return null
@@ -477,6 +600,15 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                 </div>
               )}
             </div>
+          )}
+
+          {/* Author's active livestream preview card for #livestream / /live announcement notes */}
+          {matchedAuthorLive && (
+            <LiveStreamEmbedCard
+              hostPubkey={matchedAuthorLive.hostPubkey}
+              dTag={matchedAuthorLive.dTag}
+              bech32={matchedAuthorLive.bech32}
+            />
           )}
 
           {/* Media gallery with NIP-92 ALT badges */}

@@ -637,6 +637,16 @@ describe('NIP-53 live streaming parser & security guards', () => {
     expect(isPlayableStreamUrl('https://www.twitch.tv/someone')).toBe(false)
     expect(isPlayableStreamUrl('https://example.com/watch.html')).toBe(false)
 
+    // Detects zap.stream/naddr1... URLs in notes as live stream embeds
+    const liveAddr = encodeLiveNaddr('a'.repeat(64), 'zelda-live')
+    const parsedZapStream = parseNoteContent({
+      content: `Come watch https://zap.stream/${liveAddr}`,
+      tags: [],
+    })
+    expect(parsedZapStream.segments.some((s) => s.type === 'live' && s.dTag === 'zelda-live')).toBe(
+      true,
+    )
+
     const baseActivity = {
       hostPubkey: 'a'.repeat(64),
       status: 'live' as const,

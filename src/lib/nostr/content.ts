@@ -109,7 +109,34 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
           ? classifyMediaUrl(safePublicMedia, meta?.mime)
           : null
         const ytRef = extractYouTubeVideo(trimmed)
-        if (ytRef) {
+        // Also detect web stream URLs carrying a NIP-53 naddr1... (e.g. https://zap.stream/naddr1...)
+        const embeddedLiveMatch = !ytRef
+          ? /\/(naddr1[0-9a-z]+)/i.exec(trimmed)
+          : null
+        let embeddedLive: { bech32: string; hostPubkey: string; dTag: string } | null = null
+        if (embeddedLiveMatch) {
+          try {
+            const dec = nip19.decode(embeddedLiveMatch[1])
+            if (dec.type === 'naddr' && dec.data.kind === 30311) {
+              embeddedLive = {
+                bech32: embeddedLiveMatch[1],
+                hostPubkey: dec.data.pubkey.toLowerCase(),
+                dTag: dec.data.identifier,
+              }
+            }
+          } catch {
+            // not a valid naddr
+          }
+        }
+
+        if (embeddedLive) {
+          segments.push({
+            type: 'live',
+            bech32: embeddedLive.bech32,
+            hostPubkey: embeddedLive.hostPubkey,
+            dTag: embeddedLive.dTag,
+          })
+        } else if (ytRef) {
           if (!ytSeen.has(ytRef.videoId) && youtube.length < 4) {
             ytSeen.add(ytRef.videoId)
             youtube.push(ytRef)
