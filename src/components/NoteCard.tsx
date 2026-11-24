@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
@@ -14,12 +14,15 @@ import {
   Cpu,
 } from 'lucide-react'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
+import { nostrPool } from '../lib/nostr/pool'
 import { verifyEventPow } from '../lib/crypto/nip13'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { MediaLightbox } from './MediaLightbox'
 import { ZapModal } from './ZapModal'
+
+const requestedQuotes = new Set<string>()
 
 interface NoteCardProps {
   event: Event
@@ -68,6 +71,19 @@ export function NoteCard({ event, repostedByPubkey }: NoteCardProps) {
     profile?.display_name || profile?.name || `${npub.slice(0, 12)}…`
   const powBits = useMemo(() => verifyEventPow(event.id, event.tags), [event.id, event.tags])
   const parsed = useMemo(() => parseNoteContent(event), [event])
+
+  // Lazily fetch quoted events so embedded quotes & their media show inline
+  useEffect(() => {
+    const missing = parsed.quotes.filter((qid) => !events[qid] && !requestedQuotes.has(qid))
+    if (missing.length === 0) return
+    for (const qid of missing) requestedQuotes.add(qid)
+    const relays = useSettingsStore.getState().getReadRelays()
+    void nostrPool.query(relays, { ids: missing.slice(0, 4) }, 3500).then((evs) => {
+      const store = useNostrStore.getState()
+      for (const q of evs) store.ingestEvent(q)
+      if (evs.length > 0) void store.fetchProfiles(evs.map((q) => q.pubkey))
+    })
+  }, [parsed.quotes])
 
   return (
     <article className="border-b border-[#20222c] px-4 py-3.5 hover:bg-white/[0.015] transition">
@@ -267,8 +283,10 @@ export function NoteCard({ event, repostedByPubkey }: NoteCardProps) {
                   )}
                   {m.kind === 'video' && (
                     <video
-                      src={m.url}
+                      src={m.poster ? m.url : `${m.url}#t=0.001`}
+                      poster={m.poster}
                       controls
+                      playsInline
                       preload="metadata"
                       className="w-full max-h-[460px] bg-black"
                     />

@@ -7,6 +7,7 @@ export interface MediaAttachment {
   kind: 'image' | 'video' | 'audio'
   alt?: string
   mime?: string
+  poster?: string
 }
 
 export type ContentSegment =
@@ -26,13 +27,16 @@ const TOKEN_RE =
 /**
  * Parses NIP-92 `imeta` tags into a map keyed by URL so alt text & MIME metadata attach to rendered media.
  */
-export function extractImetaMap(tags: string[][]): Map<string, { alt?: string; mime?: string }> {
-  const map = new Map<string, { alt?: string; mime?: string }>()
+export function extractImetaMap(
+  tags: string[][],
+): Map<string, { alt?: string; mime?: string; poster?: string }> {
+  const map = new Map<string, { alt?: string; mime?: string; poster?: string }>()
   for (const tag of tags) {
     if (tag[0] !== 'imeta') continue
     let url = ''
     let alt: string | undefined
     let mime: string | undefined
+    let poster: string | undefined
     for (let i = 1; i < tag.length; i++) {
       const part = tag[i]
       const sp = part.indexOf(' ')
@@ -42,9 +46,13 @@ export function extractImetaMap(tags: string[][]): Map<string, { alt?: string; m
       if (key === 'url') url = val
       else if (key === 'alt') alt = val
       else if (key === 'm') mime = val
+      else if (key === 'image' || key === 'thumb') {
+        const safePoster = sanitizeHttpUrl(val)
+        if (safePoster && safePoster.startsWith('https://')) poster = safePoster
+      }
     }
     const safe = sanitizeHttpUrl(url)
-    if (safe) map.set(safe, { alt, mime })
+    if (safe) map.set(safe, { alt, mime, poster })
   }
   return map
 }
@@ -97,7 +105,13 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
         if (mediaKind) {
           if (!mediaSeen.has(safe)) {
             mediaSeen.add(safe)
-            media.push({ url: safe, kind: mediaKind, alt: meta?.alt, mime: meta?.mime })
+            media.push({
+              url: safe,
+              kind: mediaKind,
+              alt: meta?.alt,
+              mime: meta?.mime,
+              poster: meta?.poster,
+            })
           }
         } else {
           segments.push({
@@ -139,12 +153,25 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
     segments.push({ type: 'text', text: content.slice(lastIndex) })
   }
 
-  // Also include imeta attachments for kind-20 gallery posts whose URLs aren't inline in content.
+  // Also include imeta attachments for kind-20 gallery & kind-21/22 video posts whose URLs aren't inline in content.
   for (const [url, meta] of imeta.entries()) {
+    if (!url.startsWith('https://')) continue
     if (!mediaSeen.has(url)) {
       const kind = classifyMediaUrl(url, meta.mime) || 'image'
       mediaSeen.add(url)
-      media.push({ url, kind, alt: meta.alt, mime: meta.mime })
+      media.push({ url, kind, alt: meta.alt, mime: meta.mime, poster: meta.poster })
+    }
+  }
+
+  // Support legacy NIP-71 `url` tag if no imeta/inline video matched
+  for (const tag of event.tags) {
+    if (tag[0] !== 'url' || !tag[1]) continue
+    const safe = sanitizeHttpUrl(tag[1])
+    if (!safe || !safe.startsWith('https://') || mediaSeen.has(safe)) continue
+    const kind = classifyMediaUrl(safe)
+    if (kind) {
+      mediaSeen.add(safe)
+      media.push({ url: safe, kind })
     }
   }
 

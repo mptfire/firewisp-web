@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
-import type { Event } from 'nostr-tools/pure'
+import { verifyEvent, type Event } from 'nostr-tools/pure'
 import {
   ArrowLeft,
   Zap,
@@ -14,7 +14,9 @@ import {
   Loader2,
 } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
-import { sanitizeHttpUrl } from '../lib/sanitize'
+import { parseNoteContent } from '../lib/nostr/content'
+import { isTopLevelNote } from '../lib/nostr/spamFilter'
+import { sanitizeHttpUrl, sanitizeRelayUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -22,11 +24,14 @@ import { Avatar } from '../components/Avatar'
 import { NoteCard } from '../components/NoteCard'
 import { ZapModal } from '../components/ZapModal'
 
+type ProfileTab = 'notes' | 'replies' | 'media'
+
 export function ProfilePage() {
   const { pubkey: rawId } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
   const myPubkey = useAuthStore((s) => s.pubkey)
   const profiles = useNostrStore((s) => s.profiles)
+  const eventsMap = useNostrStore((s) => s.events)
   const follows = useNostrStore((s) => s.follows)
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
@@ -53,7 +58,8 @@ export function ProfilePage() {
     return ''
   }, [rawId])
 
-  const [notes, setNotes] = useState<Event[]>([])
+  const [rawEvents, setRawEvents] = useState<Event[]>([])
+  const [tab, setTab] = useState<ProfileTab>('notes')
   const [loading, setLoading] = useState(true)
   const [zapOpen, setZapOpen] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
@@ -78,23 +84,98 @@ export function ProfilePage() {
     if (!hexPubkey) return
     let active = true
     setLoading(true)
+    setRawEvents([])
     void fetchProfiles([hexPubkey])
 
-    void nostrPool
-      .query(readRelays, { kinds: [1, 20], authors: [hexPubkey], limit: 50 }, 4500)
-      .then((evs) => {
+    void (async () => {
+      try {
+        // Discover the user's NIP-65 write relays so notes & media hosted on personal relays always load
+        const relayListEvents = await nostrPool.query(
+          readRelays,
+          { kinds: [10002], authors: [hexPubkey], limit: 2 },
+          2500,
+        )
+        const userWriteRelays: string[] = []
+        if (relayListEvents.length > 0) {
+          for (const tag of relayListEvents[0].tags) {
+            if (tag[0] !== 'r' || !tag[1]) continue
+            if (tag[2] && tag[2] === 'read') continue
+            const clean = sanitizeRelayUrl(tag[1])
+            if (clean) userWriteRelays.push(clean)
+          }
+        }
+
+        const queryRelays = [...new Set([...readRelays, ...userWriteRelays.slice(0, 6)])]
+        const evs = await nostrPool.query(
+          queryRelays,
+          { kinds: [1, 6, 20, 21, 22], authors: [hexPubkey], limit: 100 },
+          5000,
+        )
         if (!active) return
-        for (const e of evs) ingestEvent(e)
-        setNotes(evs)
-      })
-      .finally(() => {
+
+        const repostTargetAuthors = new Set<string>()
+        for (const e of evs) {
+          ingestEvent(e)
+          if (e.kind === 6 && e.content?.startsWith('{')) {
+            try {
+              const inner = JSON.parse(e.content) as Event
+              if (inner?.pubkey && verifyEvent(inner)) {
+                repostTargetAuthors.add(inner.pubkey)
+              }
+            } catch {
+              // ignore invalid JSON
+            }
+          }
+        }
+        if (repostTargetAuthors.size > 0) {
+          void fetchProfiles([...repostTargetAuthors])
+        }
+        setRawEvents(evs)
+      } finally {
         if (active) setLoading(false)
-      })
+      }
+    })()
 
     return () => {
       active = false
     }
   }, [hexPubkey])
+
+  const displayItems = useMemo(() => {
+    const out: Array<{ event: Event; repostedBy?: string }> = []
+    const seen = new Set<string>()
+
+    for (const ev of rawEvents) {
+      let target: Event = ev
+      let repostedBy: string | undefined
+
+      if (ev.kind === 6) {
+        const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
+        const inner = targetId ? eventsMap[targetId] : undefined
+        if (!inner) continue
+        target = inner
+        repostedBy = ev.pubkey
+      }
+
+      const key = `${target.id}-${repostedBy || 'orig'}`
+      if (seen.has(key)) continue
+
+      if (tab === 'notes') {
+        // Top-level notes, media posts, and reposts
+        if (!repostedBy && target.kind === 1 && !isTopLevelNote(target)) continue
+      } else if (tab === 'replies') {
+        if (repostedBy || target.kind !== 1 || isTopLevelNote(target)) continue
+      } else if (tab === 'media') {
+        const parsed = parseNoteContent(target)
+        const isVideoKind = target.kind === 20 || target.kind === 21 || target.kind === 22
+        if (parsed.media.length === 0 && !isVideoKind) continue
+      }
+
+      seen.add(key)
+      out.push({ event: target, repostedBy })
+    }
+    return out
+  }, [rawEvents, eventsMap, tab])
 
   if (!hexPubkey) {
     return (
@@ -115,7 +196,7 @@ export function ProfilePage() {
         </button>
         <div className="min-w-0">
           <h1 className="font-bold text-base truncate">{displayName}</h1>
-          <p className="text-xs text-[#8c8a82]">{notes.length} notes loaded</p>
+          <p className="text-xs text-[#8c8a82]">{rawEvents.length} events loaded</p>
         </div>
       </div>
 
@@ -220,14 +301,49 @@ export function ProfilePage() {
         )}
       </div>
 
-      {loading && notes.length === 0 ? (
+      {/* Profile Tabs: Notes / Replies / Media */}
+      <div className="grid grid-cols-3 border-b border-[#20222c] text-sm font-medium bg-[#0e0e11]">
+        {(
+          [
+            ['notes', 'Notes'],
+            ['replies', 'Replies'],
+            ['media', 'Media'],
+          ] as [ProfileTab, string][]
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`py-3 border-b-2 transition cursor-pointer ${
+              tab === id
+                ? 'border-[#e8590c] text-white'
+                : 'border-transparent text-[#8c8a82] hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {loading && displayItems.length === 0 ? (
         <div className="py-16 flex justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-[#e8590c]" />
         </div>
-      ) : notes.length === 0 ? (
-        <div className="py-12 text-center text-sm text-[#8c8a82]">No public notes found.</div>
+      ) : displayItems.length === 0 ? (
+        <div className="py-12 text-center text-sm text-[#8c8a82]">
+          {tab === 'media'
+            ? 'No photos or videos found on this profile.'
+            : tab === 'replies'
+              ? 'No replies loaded.'
+              : 'No public notes found.'}
+        </div>
       ) : (
-        notes.map((ev) => <NoteCard key={ev.id} event={ev} />)
+        displayItems.map(({ event, repostedBy }) => (
+          <NoteCard
+            key={`${event.id}-${repostedBy || 'orig'}`}
+            event={event}
+            repostedByPubkey={repostedBy}
+          />
+        ))
       )}
 
       {zapOpen && profile?.lud16 && (
