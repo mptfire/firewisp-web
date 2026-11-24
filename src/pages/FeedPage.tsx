@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Flame, Users, Globe, TrendingUp, Network, Loader2, ShieldCheck } from 'lucide-react'
+import { Flame, Users, Globe, TrendingUp, Network, Loader2, ShieldCheck, RefreshCw } from 'lucide-react'
 import type { Event } from 'nostr-tools/pure'
 import { evaluateNoteSpam, isTopLevelNote } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -25,6 +25,7 @@ export function FeedPage() {
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
   const loadingFeed = useNostrStore((s) => s.loadingFeed)
   const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
+  const clearFeedTab = useNostrStore((s) => s.clearFeedTab)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
@@ -32,10 +33,16 @@ export function FeedPage() {
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
   const [tab, setTab] = useState<FeedTab>('global')
+  const [refreshTick, setRefreshTick] = useState(0)
 
   useEffect(() => {
     return subscribeFeed(tab)
-  }, [tab, pubkey, follows.length, userReadRelays.length, extendedAuthors.length, subscribeFeed])
+  }, [tab, pubkey, follows.length, userReadRelays.length, extendedAuthors.length, refreshTick, subscribeFeed])
+
+  const handleRefresh = () => {
+    clearFeedTab(tab)
+    setRefreshTick((n) => n + 1)
+  }
 
   const ids =
     tab === 'firewisp'
@@ -53,7 +60,8 @@ export function FeedPage() {
     const seen = new Set<string>()
     const seenContentAuthors = new Map<string, Set<string>>()
     const authorCounts = new Map<string, number>()
-    const followSet = new Set(follows)
+    const followSet = new Set(follows.map((p) => p.toLowerCase()))
+    const myPk = pubkey?.toLowerCase()
     let blocked = 0
 
     const shouldSpamFilter = (tab === 'global' || tab === 'trending') && spamFilterEnabled
@@ -62,6 +70,12 @@ export function FeedPage() {
       if (deletedEventIds[id]) continue
       const ev = events[id]
       if (!ev || isEventMuted(ev)) continue
+
+      // STRICT FOLLOWS GATE: never render unfollowed accounts inside Follows
+      if (tab === 'following') {
+        const evAuthor = ev.pubkey.toLowerCase()
+        if (evAuthor !== myPk && !followSet.has(evAuthor)) continue
+      }
 
       let targetEv: Event = ev
       let repostedBy: string | undefined
@@ -144,45 +158,71 @@ export function FeedPage() {
         ))}
       </div>
 
-      {(tab === 'global' || tab === 'trending') && (
-        <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-[#9a9890]">
-            <ShieldCheck
-              className={`w-3.5 h-3.5 ${spamFilterEnabled ? 'text-emerald-400' : 'text-[#6f6d66]'}`}
-            />
-            <span>
-              {tab === 'trending'
-                ? 'Curated trending feed (trending.relays.land)'
-                : spamFilterEnabled
-                  ? spamBlockedCount > 0
-                    ? `Curated Explore (nostr.wine + Primal + Fire Wisp) · ${spamBlockedCount} filtered`
-                    : 'Curated Explore (nostr.wine + Primal + Fire Wisp · anti-spam ON)'
-                  : 'Anti-spam filter paused'}
-            </span>
-          </div>
+      {/* Status + Refresh Strip */}
+      <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-1.5 text-[#9a9890] min-w-0 truncate">
+          {tab === 'extended' ? (
+            <>
+              <Network className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+              <span className="truncate">
+                {loadingExtendedGraph
+                  ? 'Building your 2-hop Web of Trust graph…'
+                  : extendedAuthors.length > 0
+                    ? `2-hop Web of Trust · ${extendedAuthors.length} accounts endorsed by your follows`
+                    : 'Sign in and follow accounts to build your spam-free 2-hop Extended feed.'}
+              </span>
+            </>
+          ) : tab === 'following' ? (
+            <>
+              <Users className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+              <span className="truncate">
+                {pubkey
+                  ? `Following ${follows.length.toLocaleString()} accounts (strict follow-only filter)`
+                  : 'Sign in to view posts from accounts you follow.'}
+              </span>
+            </>
+          ) : tab === 'firewisp' ? (
+            <>
+              <Flame className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+              <span className="truncate">Fire Wisp anti-spam relay (wss://firewisp.relay.rtard.de)</span>
+            </>
+          ) : (
+            <>
+              <ShieldCheck
+                className={`w-3.5 h-3.5 shrink-0 ${spamFilterEnabled ? 'text-emerald-400' : 'text-[#6f6d66]'}`}
+              />
+              <span className="truncate">
+                {tab === 'trending'
+                  ? 'Curated trending notes (trending.relays.land)'
+                  : spamFilterEnabled
+                    ? spamBlockedCount > 0
+                      ? `Curated Explore (nostr.wine + Primal + Fire Wisp) · ${spamBlockedCount} filtered`
+                      : 'Curated Explore (nostr.wine + Primal + Fire Wisp · anti-spam ON)'
+                    : 'Anti-spam filter paused'}
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0">
           {tab === 'global' && (
             <button
               onClick={() => setSpamFilterEnabled(!spamFilterEnabled)}
-              className="text-[11px] text-[#ff8a3d] hover:underline shrink-0 cursor-pointer"
+              className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
             >
               {spamFilterEnabled ? 'Pause' : 'Enable'}
             </button>
           )}
+          <button
+            onClick={handleRefresh}
+            className="text-[11px] text-[#c2bfb7] hover:text-white flex items-center gap-1 cursor-pointer"
+            title="Refresh feed from relays"
+          >
+            <RefreshCw className={`w-3 h-3 ${loadingFeed ? 'animate-spin text-[#e8590c]' : ''}`} />
+            Refresh
+          </button>
         </div>
-      )}
-
-      {tab === 'extended' && (
-        <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 text-xs text-[#9a9890] flex items-center gap-1.5">
-          <Network className="w-3.5 h-3.5 text-[#f59f00]" />
-          <span>
-            {loadingExtendedGraph
-              ? 'Building your 2-hop Web of Trust graph…'
-              : extendedAuthors.length > 0
-                ? `2-hop Web of Trust · ${extendedAuthors.length} accounts endorsed by your follows`
-                : 'Sign in and follow accounts to build your spam-free 2-hop Extended feed.'}
-          </span>
-        </div>
-      )}
+      </div>
 
       <Composer />
 

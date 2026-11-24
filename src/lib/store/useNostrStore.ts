@@ -74,6 +74,8 @@ export interface NostrState {
   fetchProfiles: (pubkeys: string[]) => Promise<void>
   loadUserGraph: (pubkey: string) => Promise<void>
   loadExtendedNetwork: () => Promise<string[]>
+  clearFeedTab: (tab: 'firewisp' | 'following' | 'extended' | 'trending' | 'global') => void
+  resetUserState: () => void
   subscribeFeed: (tab: 'firewisp' | 'following' | 'extended' | 'trending' | 'global') => () => void
   subscribeNotifications: (pubkey: string) => () => void
   subscribeDms: () => () => void
@@ -176,6 +178,27 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   toastMessage: null,
 
   setToast: (toastMessage) => set({ toastMessage }),
+
+  clearFeedTab: (tab) => {
+    if (tab === 'firewisp') set({ firewispFeedIds: [] })
+    else if (tab === 'following') set({ followingFeedIds: [] })
+    else if (tab === 'extended') set({ extendedFeedIds: [] })
+    else if (tab === 'trending') set({ trendingFeedIds: [] })
+    else set({ globalFeedIds: [] })
+  },
+
+  resetUserState: () => {
+    set({
+      follows: [],
+      userReadRelays: [],
+      userWriteRelays: [],
+      followingFeedIds: [],
+      extendedFeedIds: [],
+      extendedAuthors: [],
+      notificationIds: [],
+      dms: [],
+    })
+  },
 
   initPoolListener: () => {
     return nostrPool.onStatusChange((relayStatuses) => set({ relayStatuses }))
@@ -466,6 +489,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const extendedAuthors = get().extendedAuthors
     const myPubkey = useAuthStore.getState().pubkey
 
+    if (tab === 'following' && !myPubkey) {
+      set({ loadingFeed: false })
+      return () => {}
+    }
+
     if (tab === 'extended' && extendedAuthors.length === 0) {
       if (follows.length > 0) {
         void get().loadExtendedNetwork()
@@ -474,6 +502,17 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }
       return () => {}
     }
+
+    const allowedFollowingAuthors =
+      tab === 'following'
+        ? new Set(
+            [...(myPubkey ? [myPubkey.toLowerCase()] : []), ...follows.map((p) => p.toLowerCase())],
+          )
+        : null
+    const allowedExtendedAuthors =
+      tab === 'extended'
+        ? new Set(extendedAuthors.map((p) => p.toLowerCase()))
+        : null
 
     const authorBatch = new Set<string>()
     let batchTimer: ReturnType<typeof setTimeout> | null = null
@@ -486,6 +525,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
 
     const handleEvent = (ev: Event) => {
+      // STRICT AUTHOR GATE: never allow buggy relays or race conditions to leak unfollowed spam into Follows/Extended
+      if (allowedFollowingAuthors && !allowedFollowingAuthors.has(ev.pubkey.toLowerCase())) {
+        return
+      }
+      if (allowedExtendedAuthors && !allowedExtendedAuthors.has(ev.pubkey.toLowerCase())) {
+        return
+      }
+
       get().ingestEvent(ev)
       authorBatch.add(ev.pubkey)
       if (!batchTimer) {
@@ -517,9 +564,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             }
           }
           if (tab === 'trending') {
+            // Preserve trending relay order (newest/hottest first without letting stale items stick on refresh)
+            if (s.trendingFeedIds.includes(ev.id)) return { events: eventsMap }
+            const next = [...s.trendingFeedIds, ev.id].slice(0, 150)
             return {
               events: eventsMap,
-              trendingFeedIds: insertSortedUnique(s.trendingFeedIds, ev, eventsMap),
+              trendingFeedIds: next,
             }
           }
           return {
@@ -533,8 +583,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     // Build filters — chunk large follow lists (e.g. 890+ follows) into batches of 250 authors
     // so EVERY followed account's posts are fetched without hitting per-REQ filter limits.
     const filters = (() => {
-      if (tab === 'following' && (follows.length > 0 || myPubkey)) {
-        const allAuthors = [...new Set([...(myPubkey ? [myPubkey] : []), ...follows])]
+      if (tab === 'following') {
+        const allAuthors = [...(allowedFollowingAuthors || [])]
+        if (allAuthors.length === 0) return []
         const since = Math.floor(Date.now() / 1000) - 3 * 86400
         const chunks: Array<{ kinds: number[]; authors: string[]; since: number; limit: number }> = []
         for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
@@ -550,8 +601,17 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (tab === 'extended') {
         return [{ kinds: [1, 20, 21, 22], authors: extendedAuthors.slice(0, 200), limit: 80 }]
       }
+      if (tab === 'trending') {
+        // trending.relays.land serves curated kind-1 trending notes directly
+        return [{ kinds: [1], limit: 80 }]
+      }
       return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
     })()
+
+    if (filters.length === 0) {
+      set({ loadingFeed: false })
+      return () => {}
+    }
 
     let eoseRemaining = filters.length
     const subs: SubCloser[] = filters.map((filter) =>
