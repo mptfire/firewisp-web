@@ -1,0 +1,35 @@
+export interface RelayEntry {
+  url: string
+  read: boolean
+  write: boolean
+}
+
+export const FIREWISP_RELAY = 'wss://firewisp.relay.rtard.de'
+export const FIREWISP_BLOSSOM = 'https://firewisp.blossom.rtard.de'
+export const FALLBACK_BLOSSOM = 'https://blossom.primal.net'
+
+export const ANDROID_APP_URL = 'https://app.firewisp.rtard.de/'
+export const ZAPSTORE_URL = 'https://zapstore.dev/'
+export const SOURCE_REPO_URL = 'https://github.com/mptfire/wisp'
+
+export const DEFAULT_RELAYS: RelayEntry[] = [
+  { url: FIREWISP_RELAY, read: true, write: true },
+  { url: 'wss://relay.damus.io', read: true, write: true },
+  { url: 'wss://relay.primal.net', read: true, write: true },
+  { url: 'wss://nos.lol', read: true, write: true },
+  { url: 'wss://purplepag.es', read: true, write: false },
+]
+
+export const DEFAULT_BLOSSOM_SERVERS: string[] = [
+  FIREWISP_BLOSSOM,
+  FALLBACK_BLOSSOM,
+]
+
+export const DEFAULT_NOTE_POW_BITS = 16
+export const DEFAULT_REACTION_POW_BITS = 12
+
+export const NIP49_MIN_LOG_N = 12
+export const NIP49_MAX_LOG_N = 20
+
+export const MAX_BLOSSOM_UPLOAD_BYTES = 10 * 1024 * 1024 // 10 MB
+export const CLIENT_TAG_VALUE = 'Fire Wisp'
