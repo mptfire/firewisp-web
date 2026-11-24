@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -36,9 +36,10 @@ import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
-  // Clicking the nav item for the page you're already on scrolls back to the top (like Twitter/Primal)
-  const scrollTopIfCurrent = (to: string) => {
-    if (location.pathname === to) {
+  // Clicking the nav item (or logo) for the page you're already on scrolls back to the top without pushing duplicate history entries
+  const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
+    if (location.pathname === to && !location.search && !location.hash) {
+      e.preventDefault()
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }
@@ -100,7 +101,11 @@ export function Layout({ children }: { children: ReactNode }) {
         {/* Left Sidebar (desktop) */}
         <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen overflow-y-auto gap-3.5">
           <div>
-            <Link to="/" className="flex items-center gap-2.5 px-3 py-2 mb-4">
+            <Link
+              to="/"
+              onClick={(e) => scrollTopIfCurrent(e, '/')}
+              className="flex items-center gap-2.5 px-3 py-2 mb-4"
+            >
               <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl" />
               <div>
                 <div className="font-bold text-lg leading-tight tracking-tight">Fire Wisp</div>
@@ -114,7 +119,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   key={to}
                   to={to}
                   end={end}
-                  onClick={() => scrollTopIfCurrent(to)}
+                  onClick={(e) => scrollTopIfCurrent(e, to)}
                   className={({ isActive }) =>
                     `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
                       isActive
@@ -304,7 +309,11 @@ export function Layout({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 border-r border-[#20222c] pb-20 md:pb-6">
           {/* Mobile top bar */}
           <header className="md:hidden sticky top-0 z-30 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-2.5 flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2">
+            <Link
+              to="/"
+              onClick={(e) => scrollTopIfCurrent(e, '/')}
+              className="flex items-center gap-2"
+            >
               <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-7 h-7 rounded-lg" />
               <span className="font-bold text-base">Fire Wisp</span>
             </Link>
@@ -369,7 +378,7 @@ export function Layout({ children }: { children: ReactNode }) {
             key={to}
             to={to}
             end={end}
-            onClick={() => scrollTopIfCurrent(to)}
+            onClick={(e) => scrollTopIfCurrent(e, to)}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 text-[10px] px-1.5 py-0.5 min-w-0 ${
                 isActive ? 'text-[#ff8a3d]' : 'text-[#8c8a82]'

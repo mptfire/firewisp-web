@@ -306,7 +306,14 @@ export function FeedPage() {
         {visibleTabs.map(([id, label, Icon]) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
+            onClick={() => {
+              if (tab === id) {
+                window.scrollTo({ top: 0, behavior: 'smooth' })
+              } else {
+                setTab(id)
+                window.scrollTo({ top: 0, behavior: 'smooth' })
+              }
+            }}
             className={`flex-1 min-w-[74px] py-3.5 px-2 flex items-center justify-center gap-1.5 border-b-2 transition whitespace-nowrap cursor-pointer ${
               tab === id
                 ? 'border-[#e8590c] text-white'
