@@ -32,6 +32,7 @@ import {
   decodeLiveNaddr,
   encodeLiveNaddr,
   parseLiveActivity,
+  sortLiveStreams,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
 import { parseSharedQueryParams } from '../shareTarget'
@@ -552,6 +553,52 @@ describe('NIP-53 live streaming parser & security guards', () => {
     const parsedReq = JSON.parse(capturedZapReq) as { tags: string[][] }
     expect(parsedReq.tags).toContainEqual(['a', aTag])
     signer.destroy()
+  })
+
+  it('orders live streams by follow list first, then by highest follower count', () => {
+    const pkFollowedSmall = '1'.repeat(64)
+    const pkFollowedBig = '2'.repeat(64)
+    const pkStrangerHuge = '3'.repeat(64)
+    const pkStrangerMid = '4'.repeat(64)
+
+    const ranked = sortLiveStreams(
+      [
+        {
+          id: 'stranger-mid',
+          activity: { hostPubkey: pkStrangerMid, createdAt: 100 },
+          chatters: ['a', 'b'],
+        },
+        {
+          id: 'stranger-huge',
+          activity: { hostPubkey: pkStrangerHuge, createdAt: 90 },
+          chatters: [],
+        },
+        {
+          id: 'followed-small',
+          activity: { hostPubkey: pkFollowedSmall, createdAt: 80 },
+          chatters: [],
+        },
+        {
+          id: 'followed-big',
+          activity: { hostPubkey: pkFollowedBig, createdAt: 70 },
+          chatters: [],
+        },
+      ],
+      new Set([pkFollowedSmall, pkFollowedBig]),
+      {
+        [pkFollowedSmall]: 120,
+        [pkFollowedBig]: 4500,
+        [pkStrangerHuge]: 50000,
+        [pkStrangerMid]: 800,
+      },
+    )
+
+    expect(ranked.map((r) => r.id)).toEqual([
+      'followed-big',
+      'followed-small',
+      'stranger-huge',
+      'stranger-mid',
+    ])
   })
 })
 

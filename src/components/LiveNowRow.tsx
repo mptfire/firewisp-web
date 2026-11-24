@@ -1,14 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Play, Radio } from 'lucide-react'
-import { encodeLiveNaddr } from '../lib/nostr/nip53'
+import {
+  encodeLiveNaddr,
+  getStreamPrimaryPubkey,
+  isStreamFollowed,
+  sortLiveStreams,
+} from '../lib/nostr/nip53'
 import { useLiveStore, type LiveStreamEntry } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 
-function LiveStreamPreviewCard({ stream }: { stream: LiveStreamEntry }) {
-  const displayPubkey = stream.activity.streamerPubkey || stream.activity.hostPubkey
+function formatCompactCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return String(n)
+}
+
+function LiveStreamPreviewCard({
+  stream,
+  isFollowed,
+  followerCount,
+}: {
+  stream: LiveStreamEntry
+  isFollowed: boolean
+  followerCount?: number
+}) {
+  const displayPubkey = getStreamPrimaryPubkey(stream.activity)
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
   const [imgFailed, setImgFailed] = useState(false)
 
@@ -41,7 +60,11 @@ function LiveStreamPreviewCard({ stream }: { stream: LiveStreamEntry }) {
   return (
     <Link
       to={`/live/${naddr}`}
-      className="w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border border-[#262938] hover:border-[#e8590c]/60 overflow-hidden transition shrink-0 group flex flex-col"
+      className={`w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border overflow-hidden transition shrink-0 group flex flex-col ${
+        isFollowed
+          ? 'border-emerald-500/45 hover:border-emerald-400'
+          : 'border-[#262938] hover:border-[#e8590c]/60'
+      }`}
     >
       {/* 16:9 Stream Thumbnail Preview */}
       <div className="relative aspect-video w-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] overflow-hidden">
@@ -62,11 +85,18 @@ function LiveStreamPreviewCard({ stream }: { stream: LiveStreamEntry }) {
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25 pointer-events-none" />
 
-        {/* Top-left LIVE badge */}
-        <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-red-600/95 text-white text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shadow">
-          <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-          LIVE
-        </span>
+        {/* Top-left LIVE + Following badges */}
+        <div className="absolute top-2 left-2 flex items-center gap-1">
+          <span className="px-1.5 py-0.5 rounded bg-red-600/95 text-white text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shadow">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            LIVE
+          </span>
+          {isFollowed && (
+            <span className="px-1.5 py-0.5 rounded bg-emerald-600/95 text-white text-[9px] font-bold tracking-wide shadow">
+              Following
+            </span>
+          )}
+        </div>
 
         {/* Hover play icon */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
@@ -90,8 +120,13 @@ function LiveStreamPreviewCard({ stream }: { stream: LiveStreamEntry }) {
           <div className="text-xs font-semibold text-[#f4f1ea] group-hover:text-[#ff922b] truncate leading-tight transition">
             {title}
           </div>
-          <div className="text-[11px] text-[#8c8a82] truncate leading-tight mt-0.5">
-            {hostName}
+          <div className="text-[11px] text-[#8c8a82] truncate leading-tight mt-0.5 flex items-center gap-1">
+            <span className="truncate">{hostName}</span>
+            {typeof followerCount === 'number' && followerCount > 0 && (
+              <span className="text-[10px] text-[#6f6d66] shrink-0">
+                · {formatCompactCount(followerCount)}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -102,29 +137,31 @@ function LiveStreamPreviewCard({ stream }: { stream: LiveStreamEntry }) {
 export function LiveNowRow() {
   const showLiveNowBar = useSettingsStore((s) => s.showLiveNowBar)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const follows = useNostrStore((s) => s.follows)
   const liveStreams = useLiveStore((s) => s.liveStreams)
+  const followerCounts = useLiveStore((s) => s.streamerFollowerCounts)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
 
+  const followSet = useMemo(
+    () => new Set(follows.map((p) => p.toLowerCase())),
+    [follows],
+  )
+
   const activeStreams = useMemo(() => {
     const cutoff = Math.floor(Date.now() / 1000) - 6 * 3600
-    return Object.values(liveStreams)
-      .filter((s) => {
-        if (s.activity.status !== 'live' || !s.activity.streamingUrl) return false
-        const hostPk = (s.activity.streamerPubkey || s.activity.hostPubkey).toLowerCase()
-        if (mutedPubkeys.includes(hostPk) || mutedPubkeys.includes(s.activity.hostPubkey)) {
-          return false
-        }
-        // Match Wisp Android: surface streams with active chatters or freshly started within 6h
-        return s.chatters.length > 0 || s.activity.createdAt >= cutoff
-      })
-      .sort((a, b) => {
-        if (b.chatters.length !== a.chatters.length) return b.chatters.length - a.chatters.length
-        return b.activity.createdAt - a.activity.createdAt
-      })
-      .slice(0, 15)
-  }, [liveStreams, mutedPubkeys])
+    const filtered = Object.values(liveStreams).filter((s) => {
+      if (s.activity.status !== 'live' || !s.activity.streamingUrl) return false
+      const hostPk = getStreamPrimaryPubkey(s.activity)
+      if (mutedPubkeys.includes(hostPk) || mutedPubkeys.includes(s.activity.hostPubkey)) {
+        return false
+      }
+      // Match Wisp Android: surface streams with active chatters or freshly started within 6h
+      return s.chatters.length > 0 || s.activity.createdAt >= cutoff
+    })
+    return sortLiveStreams(filtered, followSet, followerCounts).slice(0, 15)
+  }, [liveStreams, mutedPubkeys, followSet, followerCounts])
 
   const updateScrollArrows = () => {
     const el = scrollRef.current
@@ -198,9 +235,19 @@ export function LiveNowRow() {
         }}
         className="live-scroll flex items-stretch gap-2.5 overflow-x-auto pb-2"
       >
-        {activeStreams.map((stream) => (
-          <LiveStreamPreviewCard key={stream.aTagValue} stream={stream} />
-        ))}
+        {activeStreams.map((stream) => {
+          const pk = getStreamPrimaryPubkey(stream.activity)
+          return (
+            <LiveStreamPreviewCard
+              key={stream.aTagValue}
+              stream={stream}
+              isFollowed={isStreamFollowed(stream.activity, followSet)}
+              followerCount={
+                followerCounts[pk] ?? followerCounts[stream.activity.hostPubkey.toLowerCase()]
+              }
+            />
+          )
+        })}
       </div>
     </div>
   )

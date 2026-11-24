@@ -141,3 +141,56 @@ export function decodeLiveNaddr(raw: string): {
   }
   return null
 }
+
+export interface RankableLiveStream {
+  activity: Pick<LiveActivity, 'hostPubkey' | 'streamerPubkey' | 'currentParticipants' | 'createdAt'>
+  chatters: string[]
+}
+
+export function isStreamFollowed(
+  activity: Pick<LiveActivity, 'hostPubkey' | 'streamerPubkey'>,
+  followSet: ReadonlySet<string>,
+): boolean {
+  if (followSet.size === 0) return false
+  const hostPk = activity.hostPubkey.toLowerCase()
+  if (followSet.has(hostPk)) return true
+  const streamerPk = activity.streamerPubkey?.toLowerCase()
+  return Boolean(streamerPk && followSet.has(streamerPk))
+}
+
+export function getStreamPrimaryPubkey(
+  activity: Pick<LiveActivity, 'hostPubkey' | 'streamerPubkey'>,
+): string {
+  return (activity.streamerPubkey || activity.hostPubkey).toLowerCase()
+}
+
+/**
+ * Ranks live streams in preferred order:
+ * 1. Streamers in the user's follow list first
+ * 2. Highest Nostr follower count (NIP-45 kind-3 COUNT)
+ * 3. Most active viewers / chatters
+ * 4. Most recently started
+ */
+export function sortLiveStreams<T extends RankableLiveStream>(
+  streams: T[],
+  followSet: ReadonlySet<string>,
+  followerCounts: Readonly<Record<string, number>>,
+): T[] {
+  return [...streams].sort((a, b) => {
+    const followedA = isStreamFollowed(a.activity, followSet) ? 1 : 0
+    const followedB = isStreamFollowed(b.activity, followSet) ? 1 : 0
+    if (followedB !== followedA) return followedB - followedA
+
+    const pkA = getStreamPrimaryPubkey(a.activity)
+    const pkB = getStreamPrimaryPubkey(b.activity)
+    const followersA = followerCounts[pkA] ?? followerCounts[a.activity.hostPubkey.toLowerCase()] ?? 0
+    const followersB = followerCounts[pkB] ?? followerCounts[b.activity.hostPubkey.toLowerCase()] ?? 0
+    if (followersB !== followersA) return followersB - followersA
+
+    const activityA = (a.activity.currentParticipants || 0) + a.chatters.length
+    const activityB = (b.activity.currentParticipants || 0) + b.chatters.length
+    if (activityB !== activityA) return activityB - activityA
+
+    return b.activity.createdAt - a.activity.createdAt
+  })
+}

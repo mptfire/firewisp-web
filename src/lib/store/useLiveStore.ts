@@ -35,6 +35,7 @@ export interface LiveStreamEntry {
 
 interface LiveState {
   liveStreams: Record<string, LiveStreamEntry>
+  streamerFollowerCounts: Record<string, number>
   activeATag: string | null
   activeActivity: LiveActivity | null
   activeChatRelays: string[]
@@ -43,6 +44,7 @@ interface LiveState {
   loadingStream: boolean
 
   subscribeLiveDiscovery: () => () => void
+  fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
   subscribeActiveStream: (
     hostPubkey: string,
     dTag: string,
@@ -59,15 +61,110 @@ interface LiveState {
 
 const pendingChatters = new Map<string, Set<string>>()
 const pendingChatAt = new Map<string, number>()
+const fetchedFollowerPubkeys = new Set<string>()
+const NIP45_COUNT_RELAYS = ['wss://relay.primal.net', 'wss://nos.lol']
+
+/**
+ * Queries NIP-45 `COUNT` (`kind: 3`, `#p`) over a single multiplexed WebSocket
+ * for a batch of streamer pubkeys, with automatic fallback relay.
+ */
+async function queryNip45FollowerBatch(
+  relayUrl: string,
+  pubkeys: string[],
+  timeoutMs = 3500,
+): Promise<Record<string, number>> {
+  if (typeof WebSocket === 'undefined' || pubkeys.length === 0) return {}
+  return new Promise((resolve) => {
+    const counts: Record<string, number> = {}
+    const subToPk = new Map<string, string>()
+    let settled = false
+    let ws: WebSocket | null = null
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        ws?.close()
+      } catch {
+        // ignore close errors
+      }
+      resolve(counts)
+    }
+
+    const timer = setTimeout(finish, timeoutMs)
+
+    try {
+      ws = new WebSocket(relayUrl)
+      ws.onopen = () => {
+        pubkeys.forEach((pk, idx) => {
+          const subId = `fc_${idx}`
+          subToPk.set(subId, pk)
+          ws?.send(JSON.stringify(['COUNT', subId, { kinds: [3], '#p': [pk] }]))
+        })
+      }
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(String(ev.data)) as unknown[]
+          if (msg[0] === 'COUNT' && typeof msg[1] === 'string') {
+            const pk = subToPk.get(msg[1])
+            const payload = msg[2] as { count?: unknown } | undefined
+            if (pk && typeof payload?.count === 'number' && Number.isFinite(payload.count)) {
+              counts[pk] = Math.max(0, Math.floor(payload.count))
+              if (Object.keys(counts).length >= pubkeys.length) {
+                finish()
+              }
+            }
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      }
+      ws.onerror = finish
+      ws.onclose = finish
+    } catch {
+      finish()
+    }
+  })
+}
 
 export const useLiveStore = create<LiveState>((set, get) => ({
   liveStreams: {},
+  streamerFollowerCounts: {},
   activeATag: null,
   activeActivity: null,
   activeChatRelays: [],
   currentChatMessages: [],
   streamZapTotal: 0,
   loadingStream: false,
+
+  fetchStreamerFollowerCounts: async (pubkeys) => {
+    const pending = [
+      ...new Set(
+        pubkeys
+          .map((p) => p.toLowerCase())
+          .filter((p) => /^[0-9a-f]{64}$/.test(p) && !fetchedFollowerPubkeys.has(p)),
+      ),
+    ].slice(0, 25)
+    if (pending.length === 0) return
+
+    for (const pk of pending) fetchedFollowerPubkeys.add(pk)
+
+    let counts: Record<string, number> = {}
+    for (const relay of NIP45_COUNT_RELAYS) {
+      counts = await queryNip45FollowerBatch(relay, pending, 3500)
+      if (Object.keys(counts).length > 0) break
+    }
+
+    if (Object.keys(counts).length > 0) {
+      set((s) => ({
+        streamerFollowerCounts: { ...s.streamerFollowerCounts, ...counts },
+      }))
+    } else {
+      // Allow retry later if both relays timed out
+      for (const pk of pending) fetchedFollowerPubkeys.delete(pk)
+    }
+  },
 
   subscribeLiveDiscovery: () => {
     const readRelays = useSettingsStore.getState().getReadRelays()
@@ -83,7 +180,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           profileTimer = null
           const list = [...profileBatch]
           profileBatch.clear()
-          if (list.length > 0) void useNostrStore.getState().fetchProfiles(list)
+          if (list.length > 0) {
+            void useNostrStore.getState().fetchProfiles(list)
+            void get().fetchStreamerFollowerCounts(list)
+          }
         }, 450)
       }
     }
