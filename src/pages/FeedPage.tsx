@@ -54,6 +54,7 @@ export function FeedPage() {
   const events = useNostrStore((s) => s.events)
   const deletedEventIds = useNostrStore((s) => s.deletedEventIds)
   const forYouFeedIds = useNostrStore((s) => s.forYouFeedIds)
+  const forYouSuppIds = useNostrStore((s) => s.forYouSuppIds)
   const firewispFeedIds = useNostrStore((s) => s.firewispFeedIds)
   const followingFeedIds = useNostrStore((s) => s.followingFeedIds)
   const extendedFeedIds = useNostrStore((s) => s.extendedFeedIds)
@@ -132,6 +133,7 @@ export function FeedPage() {
     const seenContentAuthors = new Map<string, Set<string>>()
     const authorCounts = new Map<string, number>()
     const followSet = new Set(follows.map((p) => p.toLowerCase()))
+    const extendedSet = new Set(extendedAuthors.map((p) => p.toLowerCase()))
     const myPk = pubkey?.toLowerCase()
     let blocked = 0
 
@@ -146,6 +148,19 @@ export function FeedPage() {
       if (tab === 'following') {
         const evAuthor = ev.pubkey.toLowerCase()
         if (evAuthor !== myPk && !followSet.has(evAuthor)) continue
+      }
+
+      // STRICT FOR YOU GATE (when signed in): only Follows, loaded Extended WoT, or vetted Trending/Topic picks
+      if (tab === 'foryou' && myPk) {
+        const evAuthor = ev.pubkey.toLowerCase()
+        if (
+          evAuthor !== myPk &&
+          !followSet.has(evAuthor) &&
+          !extendedSet.has(evAuthor) &&
+          !forYouSuppIds[ev.id]
+        ) {
+          continue
+        }
       }
 
       let targetEv: Event = ev
@@ -211,6 +226,8 @@ export function FeedPage() {
     requirePowInExplore,
     pubkey,
     follows,
+    extendedAuthors,
+    forYouSuppIds,
   ])
 
   return (

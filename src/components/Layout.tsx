@@ -25,6 +25,7 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
+import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
   const pubkey = useAuthStore((s) => s.pubkey)
@@ -196,8 +197,10 @@ export function Layout({ children }: { children: ReactNode }) {
         </main>
 
         {/* Right Info Sidebar (large desktop) */}
-        <aside className="hidden lg:flex flex-col w-72 shrink-0 px-4 py-4 gap-4 sticky top-0 h-screen overflow-y-auto">
-          <div className="p-4 rounded-2xl bg-[#15161c] border border-[#232530]">
+        <aside className="hidden lg:flex flex-col w-[304px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-screen overflow-y-auto">
+          <TrendingSidebar />
+
+          <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
                 <Radio className="w-3.5 h-3.5 text-[#f59f00]" />

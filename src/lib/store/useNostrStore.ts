@@ -6,6 +6,7 @@ import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, FIREWISP_RELAY, TRENDING_RELA
 import { sanitizeRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
+import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import { createGiftWrappedDm, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
 import { useSettingsStore } from './useSettingsStore'
@@ -99,6 +100,7 @@ export interface NostrState {
 
   // Feeds
   forYouFeedIds: string[]
+  forYouSuppIds: Record<string, boolean>
   firewispFeedIds: string[]
   followingFeedIds: string[]
   extendedFeedIds: string[]
@@ -108,6 +110,9 @@ export interface NostrState {
   extendedAuthors: string[]
   loadingExtendedGraph: boolean
   loadingMore: boolean
+  trendingSidebarIds: string[]
+  trendingHashtags: Array<{ tag: string; count: number }>
+  loadingTrends: boolean
   notificationIds: string[]
   dms: DecryptedDm[]
 
@@ -120,6 +125,7 @@ export interface NostrState {
   setShowRepliesInFollows: (show: boolean) => void
   flushPendingFeed: (tab: FeedTab) => void
   loadOlderFeed: (tab: FeedTab) => Promise<number>
+  loadTrendingSidebar: (force?: boolean) => Promise<void>
   initPoolListener: () => () => void
   ingestEvent: (event: Event) => void
   fetchProfiles: (pubkeys: string[]) => Promise<void>
@@ -253,6 +259,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   showRepliesInFollows: false,
 
   forYouFeedIds: [],
+  forYouSuppIds: {},
   firewispFeedIds: [],
   followingFeedIds: [],
   extendedFeedIds: [],
@@ -269,6 +276,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   extendedAuthors: [],
   loadingExtendedGraph: false,
   loadingMore: false,
+  trendingSidebarIds: [],
+  trendingHashtags: [],
+  loadingTrends: false,
   notificationIds: [],
   dms: [],
 
@@ -315,7 +325,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   clearFeedTab: (tab) => {
     set((s) => {
       const nextPending = { ...s.pendingFeedIds, [tab]: [] }
-      if (tab === 'foryou') return { forYouFeedIds: [], pendingFeedIds: nextPending }
+      if (tab === 'foryou') return { forYouFeedIds: [], forYouSuppIds: {}, pendingFeedIds: nextPending }
       if (tab === 'firewisp') return { firewispFeedIds: [], pendingFeedIds: nextPending }
       if (tab === 'following') return { followingFeedIds: [], pendingFeedIds: nextPending }
       if (tab === 'extended') return { extendedFeedIds: [], pendingFeedIds: nextPending }
@@ -331,6 +341,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       userReadRelays: [],
       userWriteRelays: [],
       forYouFeedIds: [],
+      forYouSuppIds: {},
       followingFeedIds: [],
       extendedFeedIds: [],
       extendedAuthors: [],
@@ -589,7 +600,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             .map((t) => t[1].toLowerCase()),
         ),
       ]
-      set({ follows })
+      // Clear any signed-out For You notes when the user's real follow graph arrives
+      set({ follows, forYouFeedIds: [], forYouSuppIds: {} })
       void get().fetchProfiles([pubkey, ...follows.slice(0, 60)])
     } else {
       void get().fetchProfiles([pubkey])
@@ -652,6 +664,86 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return qualified
     } finally {
       set({ loadingExtendedGraph: false })
+    }
+  },
+
+  loadTrendingSidebar: async (force = false) => {
+    if (get().loadingTrends) return
+    if (!force && get().trendingSidebarIds.length > 0) return
+    set({ loadingTrends: true })
+    try {
+      const raw = await nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 120 }, 4500)
+      if (raw.length === 0) return
+
+      const seenContentAuthors = new Map<string, Set<string>>()
+      const authorCounts = new Map<string, number>()
+      const clean: Event[] = []
+      for (const ev of raw) {
+        if (!isTopLevelNote(ev)) continue
+        if (get().isEventMuted(ev)) continue
+        const verdict = evaluateNoteSpam(ev, {
+          seenContentAuthors,
+          authorCounts,
+          maxPerAuthor: 2,
+        })
+        if (!verdict.isSpam) clean.push(ev)
+      }
+
+      // Compute Trending #keywords by unique authors (prevents single-author tag stuffing)
+      const tagAuthors = new Map<string, Set<string>>()
+      for (const ev of clean) {
+        const tags = extractEventHashtags(ev)
+        if (tags.length > 6) continue // skip hashtag-heavy posts
+        const pk = ev.pubkey.toLowerCase()
+        for (const t of tags) {
+          if (t.length < 2 || t.length > 24 || /^\d+$/.test(t)) continue
+          let setForTag = tagAuthors.get(t)
+          if (!setForTag) {
+            setForTag = new Set<string>()
+            tagAuthors.set(t, setForTag)
+          }
+          setForTag.add(pk)
+        }
+      }
+      const rankedTags = [...tagAuthors.entries()]
+        .map(([tag, authors]) => ({ tag, count: authors.size }))
+        .sort((a, b) => b.count - a.count)
+      const popularTags = rankedTags.filter((x) => x.count >= 2).slice(0, 8)
+      const trendingHashtags = popularTags.length >= 4 ? popularTags : rankedTags.slice(0, 8)
+
+      // Pick top 5 Hot Posts from distinct authors with readable text or media
+      const hotAuthors = new Set<string>()
+      const hotPosts: Event[] = []
+      for (const ev of clean) {
+        const pk = ev.pubkey.toLowerCase()
+        if (hotAuthors.has(pk)) continue
+        const textOnly = ev.content
+          .replace(/https?:\/\/[^\s]+/gi, '')
+          .replace(/nostr:[0-9a-z]+/gi, '')
+          .trim()
+        const hasMedia = /https?:\/\/[^\s]+\.(png|jpe?g|gif|webp|avif|mp4|webm)/i.test(ev.content)
+        if (textOnly.length < 20 && !hasMedia) continue
+        hotAuthors.add(pk)
+        hotPosts.push(ev)
+        if (hotPosts.length >= 5) break
+      }
+
+      for (const ev of hotPosts) get().ingestEvent(ev)
+      if (hotPosts.length > 0) {
+        void get().fetchProfiles(hotPosts.map((e) => e.pubkey))
+      }
+
+      set((s) => {
+        const eventsMap = { ...s.events }
+        for (const ev of hotPosts) eventsMap[ev.id] = ev
+        return {
+          events: eventsMap,
+          trendingSidebarIds: hotPosts.map((e) => e.id),
+          trendingHashtags,
+        }
+      })
+    } finally {
+      set({ loadingTrends: false })
     }
   },
 
@@ -820,6 +912,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
+    // While signed in and waiting for kind-3 follows to load, NEVER fall back to global explore!
+    if ((tab === 'foryou' || tab === 'following') && myPubkey && follows.length === 0) {
+      return () => {}
+    }
+
     if (tab === 'extended' && extendedAuthors.length === 0) {
       if (follows.length > 0) {
         void get().loadExtendedNetwork()
@@ -829,6 +926,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
+    const allowedForYouAuthors =
+      tab === 'foryou' && myPubkey && follows.length > 0
+        ? new Set([
+            myPubkey.toLowerCase(),
+            ...follows.map((p) => p.toLowerCase()),
+            ...extendedAuthors.slice(0, 150).map((p) => p.toLowerCase()),
+          ])
+        : null
     const allowedFollowingAuthors =
       tab === 'following'
         ? new Set(
@@ -852,7 +957,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     let initialEoseDone = false
     const handleEvent = (ev: Event) => {
-      // STRICT AUTHOR GATE: never allow buggy relays or race conditions to leak unfollowed spam into Follows/Extended
+      // STRICT AUTHOR GATE: never allow buggy relays or race conditions to leak unfollowed spam into For You/Follows/Extended
+      if (allowedForYouAuthors && !allowedForYouAuthors.has(ev.pubkey.toLowerCase())) {
+        return
+      }
       if (allowedFollowingAuthors && !allowedFollowingAuthors.has(ev.pubkey.toLowerCase())) {
         return
       }
@@ -1047,34 +1155,57 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }),
     )
 
-    // Wisp Android For You supplementary sources: capped Trending (24h) + followed NIP-51 hashtags
-    // Note: trending.relays.land ignores `limit` and returns 160+ notes, so cap client-side!
+    // Wisp Android For You supplementary sources: strictly spam-filtered Trending (24h, max 10)
+    // + followed NIP-51 hashtags queried ONLY from curated anti-spam relays (max 10)
     let cancelled = false
     if (tab === 'foryou') {
       const since24h = Math.floor(Date.now() / 1000) - 86400
+      const suppSeenContent = new Map<string, Set<string>>()
+      const suppAuthorCounts = new Map<string, number>()
+      const filterCleanSupp = (evs: Event[], cap: number) => {
+        const out: Event[] = []
+        for (const e of evs) {
+          if (e.created_at < since24h) continue
+          if (!isTopLevelNote(e)) continue
+          if (get().isEventMuted(e)) continue
+          if (extractEventHashtags(e).length > 4) continue
+          const verdict = evaluateNoteSpam(e, {
+            myPubkey,
+            follows: allowedForYouAuthors || undefined,
+            seenContentAuthors: suppSeenContent,
+            authorCounts: suppAuthorCounts,
+            maxPerAuthor: 1,
+          })
+          if (verdict.isSpam) continue
+          out.push(e)
+          if (out.length >= cap) break
+        }
+        return out
+      }
+
       const trendingPromise = nostrPool
         .query([TRENDING_RELAY], { kinds: [1], limit: 20 }, 4000)
-        .then((evs) => evs.filter((e) => e.created_at >= since24h).slice(0, 15))
+        .then((evs) => filterCleanSupp(evs, 10))
 
       const hashtagQueries: Promise<Event[]>[] = []
       if (followedHashtags.length > 0) {
+        const curatedTagRelays = ['wss://nostr.wine', FIREWISP_RELAY]
         for (let i = 0; i < Math.min(followedHashtags.length, 20); i += 10) {
           hashtagQueries.push(
             nostrPool
               .query(
-                mergedFollowingRelays,
+                curatedTagRelays,
                 { kinds: [1], '#t': followedHashtags.slice(i, i + 10), since: since24h, limit: 20 },
                 4500,
               )
-              .then((evs) => evs.slice(0, 15)),
+              .then((evs) => filterCleanSupp(evs, 10)),
           )
         }
       }
 
-      const signedOutFallback =
-        !myPubkey || follows.length === 0
-          ? [nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 20 }, 3500)]
-          : []
+      const signedOutFallback = !myPubkey
+        ? [nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 20 }, 3500)]
+        : []
 
       void Promise.allSettled([trendingPromise, ...hashtagQueries, ...signedOutFallback]).then((results) => {
         if (cancelled) return
@@ -1091,12 +1222,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         if (suppAuthors.size > 0) void get().fetchProfiles([...suppAuthors])
         set((st) => {
           const eventsMap = { ...st.events }
+          const nextSuppIds = { ...st.forYouSuppIds }
           let nextIds = st.forYouFeedIds
           for (const ev of suppEvents) {
             eventsMap[ev.id] = ev
+            nextSuppIds[ev.id] = true
             nextIds = insertSortedUnique(nextIds, ev, eventsMap)
           }
-          return { events: eventsMap, forYouFeedIds: nextIds }
+          return { events: eventsMap, forYouFeedIds: nextIds, forYouSuppIds: nextSuppIds }
         })
       })
     }
