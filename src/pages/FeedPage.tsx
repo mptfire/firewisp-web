@@ -207,11 +207,10 @@ export function FeedPage() {
 
       if (seen.has(targetEv.id)) return null
 
-      // Hide replies in Follows & For You when "Hide replies" is active (clean top-level feed)
+      // Hide replies (including reposted replies) in Follows, For You, Extended & Fire Wisp when replies are hidden
       if (
-        (tab === 'following' || tab === 'foryou') &&
+        (tab === 'following' || tab === 'foryou' || tab === 'extended' || tab === 'firewisp') &&
         !showRepliesInFollows &&
-        !repostedBy &&
         targetEv.kind === 1 &&
         !isTopLevelNote(targetEv)
       ) {
@@ -368,12 +367,18 @@ export function FeedPage() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          {(tab === 'following' || tab === 'foryou') && pubkey && (
+          {(tab === 'following' || tab === 'foryou' || tab === 'extended' || tab === 'firewisp') && (
             <button
+              type="button"
               onClick={() => setShowRepliesInFollows(!showRepliesInFollows)}
-              className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
+              className={`px-2 py-0.5 rounded-md text-[11px] font-medium border transition cursor-pointer ${
+                showRepliesInFollows
+                  ? 'bg-[#e8590c]/15 border-[#e8590c]/40 text-[#ff922b]'
+                  : 'bg-[#181a24] border-[#282b3a] text-[#9a9890] hover:text-white'
+              }`}
+              title={showRepliesInFollows ? 'Click to hide replies in this feed' : 'Click to show replies in this feed'}
             >
-              {showRepliesInFollows ? 'Hide replies' : 'Show replies'}
+              {showRepliesInFollows ? 'Replies: On' : 'Replies: Off'}
             </button>
           )}
           {tab === 'global' && (

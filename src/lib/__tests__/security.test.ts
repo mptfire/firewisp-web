@@ -456,6 +456,10 @@ describe('Explore anti-spam filter (matching Android NSpam heuristics)', () => {
     expect(
       isTopLevelNote({ tags: [['e', '1'.repeat(64), '', 'reply']] }),
     ).toBe(false)
+    // NIP-10 "mention" e-tag is a quote post, NOT a reply
+    expect(
+      isTopLevelNote({ tags: [['e', '1'.repeat(64), '', 'mention']] }),
+    ).toBe(true)
 
     // Followed accounts are always exempt
     expect(

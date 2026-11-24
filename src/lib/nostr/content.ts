@@ -213,9 +213,11 @@ export function extractReplyRefs(event: Pick<Event, 'tags'>): {
     return { rootId: markedRoot || markedReply, replyId: markedReply || markedRoot }
   }
 
-  // Legacy positional NIP-10 fallback
-  if (eTags.length === 1) return { rootId: eTags[0][1], replyId: eTags[0][1] }
-  return { rootId: eTags[0][1], replyId: eTags[eTags.length - 1][1] }
+  // Legacy positional NIP-10 fallback — exclude explicit mention/quote markers
+  const positional = eTags.filter((t) => !t[3] || (t[3] !== 'mention' && t[3] !== 'quote'))
+  if (positional.length === 0) return {}
+  if (positional.length === 1) return { rootId: positional[0][1], replyId: positional[0][1] }
+  return { rootId: positional[0][1], replyId: positional[positional.length - 1][1] }
 }
 
 /**
