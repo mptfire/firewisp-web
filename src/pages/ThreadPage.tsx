@@ -132,7 +132,7 @@ export function ThreadPage() {
       {focusEvent ? (
         <>
           <div className="bg-[#14151c]">
-            <NoteCard event={focusEvent} />
+            <NoteCard event={focusEvent} hideParentPreview={Boolean(parentEvent || rootEvent)} />
           </div>
           <Composer
             replyTo={focusEvent}
@@ -156,7 +156,7 @@ export function ThreadPage() {
       </div>
 
       {replies.map((r) => (
-        <NoteCard key={r.id} event={r} />
+        <NoteCard key={r.id} event={r} hideParentPreview />
       ))}
     </div>
   )

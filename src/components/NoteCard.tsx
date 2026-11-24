@@ -32,12 +32,45 @@ import { YouTubeCard } from './YouTubeCard'
 import { ZapModal } from './ZapModal'
 
 const requestedQuotes = new Set<string>()
+const requestedParents = new Set<string>()
+const parentBatchQueue = new Set<string>()
+let parentBatchTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushParentBatch() {
+  parentBatchTimer = null
+  const batch = [...parentBatchQueue].slice(0, 40)
+  for (const id of batch) parentBatchQueue.delete(id)
+  if (parentBatchQueue.size > 0) {
+    parentBatchTimer = setTimeout(flushParentBatch, 150)
+  }
+  if (batch.length === 0) return
+  const st = useNostrStore.getState()
+  const relays = [
+    ...new Set([...useSettingsStore.getState().getReadRelays(), ...st.userReadRelays]),
+  ].slice(0, 8)
+  void nostrPool.query(relays, { ids: batch }, 3500).then((evs) => {
+    const store = useNostrStore.getState()
+    for (const ev of evs) store.ingestEvent(ev)
+    if (evs.length > 0) void store.fetchProfiles(evs.map((e) => e.pubkey))
+  })
+}
+
+function queueParentEventFetch(eventId: string) {
+  if (!eventId || requestedParents.has(eventId)) return
+  if (useNostrStore.getState().events[eventId]) return
+  requestedParents.add(eventId)
+  parentBatchQueue.add(eventId)
+  if (parentBatchTimer) return
+  parentBatchTimer = setTimeout(flushParentBatch, 150)
+}
+
 const LONG_NOTE_CHAR_LIMIT = 900
 const LONG_NOTE_LINE_LIMIT = 12
 
 interface NoteCardProps {
   event: Event
   repostedByPubkey?: string
+  hideParentPreview?: boolean
 }
 
 function formatRelativeTime(unixSec: number): string {
@@ -276,17 +309,34 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
 
 const ReplyContextLine = memo(function ReplyContextLine({
   event,
+  hideParentPreview = false,
 }: {
   event: Event
+  hideParentPreview?: boolean
 }) {
   const refs = useMemo(() => extractReplyRefs(event), [event])
   const replyTargetId = refs.replyId || refs.rootId
-  const replyToPubkey = useMemo(() => {
+  const parentEvent = useNostrStore((s) =>
+    replyTargetId ? s.events[replyTargetId] : undefined,
+  )
+  const fallbackPubkey = useMemo(() => {
     const pTag = event.tags.find((t) => t[0] === 'p' && t[1] && t[1] !== event.pubkey)?.[1]
     return pTag?.toLowerCase()
   }, [event])
+  const parentPubkey = parentEvent?.pubkey?.toLowerCase() || fallbackPubkey
   const parentProfile = useNostrStore((s) =>
-    replyToPubkey ? s.profiles[replyToPubkey] : undefined,
+    parentPubkey ? s.profiles[parentPubkey] : undefined,
+  )
+
+  useEffect(() => {
+    if (!hideParentPreview && replyTargetId && !parentEvent) {
+      queueParentEventFetch(replyTargetId)
+    }
+  }, [hideParentPreview, replyTargetId, parentEvent])
+
+  const parsedParent = useMemo(
+    () => (!hideParentPreview && parentEvent ? parseNoteContent(parentEvent) : null),
+    [hideParentPreview, parentEvent],
   )
 
   if (!replyTargetId) return null
@@ -294,23 +344,92 @@ const ReplyContextLine = memo(function ReplyContextLine({
   const label =
     parentProfile?.display_name ||
     parentProfile?.name ||
-    (replyToPubkey ? `${replyToPubkey.slice(0, 10)}…` : 'a note')
+    (parentPubkey ? `${parentPubkey.slice(0, 10)}…` : 'a note')
+
+  if (hideParentPreview || !parentEvent) {
+    return (
+      <div className="flex items-center gap-1 text-xs text-[#8a8880] mb-1">
+        <CornerDownRight className="w-3 h-3 shrink-0" />
+        <span>Replying to</span>
+        <Link
+          to={`/e/${replyTargetId}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-[#ff8a3d]/90 hover:underline truncate max-w-[220px]"
+        >
+          @{label}
+        </Link>
+      </div>
+    )
+  }
+
+  const parentSnippet = (parentEvent.content || '')
+    .replace(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif|mp4|webm|mov|m4v)(\?\S*)?/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const parentImage = parsedParent?.media.find((m) => m.kind === 'image')?.url
+  const parentVideo = parsedParent?.media.find((m) => m.kind === 'video')
+  const parentYoutube = parsedParent?.youtube[0]
+  const parentThumb = parentImage || parentYoutube?.thumbnailUrl || parentVideo?.poster
 
   return (
-    <div className="flex items-center gap-1 text-xs text-[#8a8880] mb-1">
-      <CornerDownRight className="w-3 h-3 shrink-0" />
-      <span>Replying to</span>
-      <Link
-        to={`/e/${replyTargetId}`}
-        className="text-[#ff8a3d]/90 hover:underline truncate max-w-[200px]"
-      >
-        @{label}
-      </Link>
-    </div>
+    <Link
+      to={`/e/${replyTargetId}`}
+      onClick={(e) => e.stopPropagation()}
+      className="block mt-1.5 mb-2 p-2.5 rounded-xl bg-[#14161e] border border-[#252836] border-l-2 border-l-[#ff8a3d]/70 hover:border-[#3b4057] hover:border-l-[#ff8a3d] transition group"
+    >
+      <div className="flex items-center gap-1.5 text-[11px] text-[#8a8880] mb-1">
+        <CornerDownRight className="w-3 h-3 text-[#ff8a3d] shrink-0" />
+        <Avatar
+          src={parentProfile?.picture}
+          pubkey={parentEvent.pubkey}
+          name={label}
+          size="sm"
+        />
+        <span className="font-semibold text-[#d4d2cb] group-hover:text-white truncate">
+          {label}
+        </span>
+        <span className="text-[#6f6d66] shrink-0">
+          · {formatRelativeTime(parentEvent.created_at)}
+        </span>
+      </div>
+      <div className="flex items-start gap-2.5">
+        <p className="flex-1 min-w-0 text-xs text-[#b8b5ad] line-clamp-3 leading-relaxed break-words">
+          {parentSnippet ||
+            (parentYoutube
+              ? '[YouTube video]'
+              : parentVideo
+                ? '[Video]'
+                : parentThumb
+                  ? '[Image]'
+                  : 'View original note')}
+        </p>
+        {parentThumb ? (
+          <img
+            src={parentThumb}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="w-12 h-12 rounded-lg object-cover shrink-0 border border-[#2a2d3d] bg-[#0b0b0e]"
+          />
+        ) : parentVideo ? (
+          <video
+            src={`${parentVideo.url}#t=0.001`}
+            muted
+            playsInline
+            preload="metadata"
+            className="w-12 h-12 rounded-lg object-cover shrink-0 border border-[#2a2d3d] bg-[#0b0b0e]"
+          />
+        ) : null}
+      </div>
+    </Link>
   )
 })
 
-export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: NoteCardProps) {
+export const NoteCard = memo(function NoteCard({
+  event,
+  repostedByPubkey,
+  hideParentPreview = false,
+}: NoteCardProps) {
   const navigate = useNavigate()
   const profile = useNostrStore((s) => s.profiles[event.pubkey])
   const reposterProfile = useNostrStore((s) =>
@@ -571,7 +690,7 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
             </div>
           </div>
 
-          <ReplyContextLine event={event} />
+          <ReplyContextLine event={event} hideParentPreview={hideParentPreview} />
 
           {/* Body segments (collapses long walls of text cleanly like Jumble) */}
           {hasVisibleBody && (
