@@ -74,6 +74,14 @@ function scheduleSaveProfiles() {
   }, 1500)
 }
 
+export interface TrendingKeyword {
+  tag: string
+  accounts: number
+  uses: number
+  /** 7 chronological activity buckets over the last 24h for Ditto-style sparklines */
+  buckets: number[]
+}
+
 export interface NostrState {
   relayStatuses: Record<string, RelayStatus>
   events: Record<string, Event>
@@ -111,7 +119,7 @@ export interface NostrState {
   loadingExtendedGraph: boolean
   loadingMore: boolean
   trendingSidebarIds: string[]
-  trendingHashtags: Array<{ tag: string; count: number }>
+  trendingHashtags: TrendingKeyword[]
   loadingTrends: boolean
   notificationIds: string[]
   dms: DecryptedDm[]
@@ -672,51 +680,89 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (!force && get().trendingSidebarIds.length > 0) return
     set({ loadingTrends: true })
     try {
-      const raw = await nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 120 }, 4500)
-      if (raw.length === 0) return
+      const nowSec = Math.floor(Date.now() / 1000)
+      const since24h = nowSec - 86400
+      const [trendingRaw, curatedRaw] = await Promise.all([
+        nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 150 }, 4500),
+        nostrPool.query(['wss://nostr.wine', FIREWISP_RELAY], { kinds: [1], since: since24h, limit: 120 }, 4000),
+      ])
+
+      const dedupById = new Map<string, Event>()
+      for (const ev of [...trendingRaw, ...curatedRaw]) {
+        if (!dedupById.has(ev.id)) dedupById.set(ev.id, ev)
+      }
+      if (dedupById.size === 0) return
 
       const seenContentAuthors = new Map<string, Set<string>>()
       const authorCounts = new Map<string, number>()
-      const clean: Event[] = []
-      for (const ev of raw) {
+      const cleanAll: Event[] = []
+      for (const ev of dedupById.values()) {
         if (!isTopLevelNote(ev)) continue
         if (get().isEventMuted(ev)) continue
         const verdict = evaluateNoteSpam(ev, {
           seenContentAuthors,
           authorCounts,
-          maxPerAuthor: 2,
+          maxPerAuthor: 3,
         })
-        if (!verdict.isSpam) clean.push(ev)
+        if (!verdict.isSpam) cleanAll.push(ev)
       }
 
-      // Compute Trending #keywords by unique authors (prevents single-author tag stuffing)
-      const tagAuthors = new Map<string, Set<string>>()
-      for (const ev of clean) {
+      // Compute Ditto-style Trending #keywords: unique people, total posts, and 7-bucket 24h sparkline
+      const BUCKETS = 7
+      const bucketSpan = Math.ceil(86400 / BUCKETS)
+      const tagStats = new Map<
+        string,
+        { authors: Set<string>; uses: number; buckets: number[] }
+      >()
+
+      for (const ev of cleanAll) {
         const tags = extractEventHashtags(ev)
-        if (tags.length > 6) continue // skip hashtag-heavy posts
+        if (tags.length === 0 || tags.length > 6) continue // ignore hashtag stuffers
         const pk = ev.pubkey.toLowerCase()
+        const ageSec = Math.max(0, nowSec - ev.created_at)
+        const bucketIdx = Math.max(
+          0,
+          Math.min(BUCKETS - 1, BUCKETS - 1 - Math.floor(ageSec / bucketSpan)),
+        )
         for (const t of tags) {
           if (t.length < 2 || t.length > 24 || /^\d+$/.test(t)) continue
-          let setForTag = tagAuthors.get(t)
-          if (!setForTag) {
-            setForTag = new Set<string>()
-            tagAuthors.set(t, setForTag)
+          let stat = tagStats.get(t)
+          if (!stat) {
+            stat = { authors: new Set<string>(), uses: 0, buckets: new Array(BUCKETS).fill(0) }
+            tagStats.set(t, stat)
           }
-          setForTag.add(pk)
+          stat.authors.add(pk)
+          stat.uses += 1
+          if (ev.created_at >= since24h) {
+            stat.buckets[bucketIdx] += 1
+          } else {
+            stat.buckets[0] += 1
+          }
         }
       }
-      const rankedTags = [...tagAuthors.entries()]
-        .map(([tag, authors]) => ({ tag, count: authors.size }))
-        .sort((a, b) => b.count - a.count)
-      const popularTags = rankedTags.filter((x) => x.count >= 2).slice(0, 8)
-      const trendingHashtags = popularTags.length >= 4 ? popularTags : rankedTags.slice(0, 8)
 
-      // Pick top 5 Hot Posts from distinct authors with readable text or media
+      const rankedTags: TrendingKeyword[] = [...tagStats.entries()]
+        .map(([tag, st]) => ({
+          tag,
+          accounts: st.authors.size,
+          uses: st.uses,
+          buckets: st.buckets,
+        }))
+        .sort((a, b) => b.accounts * 3 + b.uses - (a.accounts * 3 + a.uses))
+
+      const popularTags = rankedTags.filter((x) => x.accounts >= 2).slice(0, 6)
+      const trendingHashtags = popularTags.length >= 4 ? popularTags : rankedTags.slice(0, 6)
+
+      // Pick top 5 Hot Posts from trending relay (distinct authors, readable text or media)
+      const hotSeenContent = new Map<string, Set<string>>()
       const hotAuthors = new Set<string>()
       const hotPosts: Event[] = []
-      for (const ev of clean) {
+      for (const ev of trendingRaw) {
+        if (!isTopLevelNote(ev) || get().isEventMuted(ev)) continue
         const pk = ev.pubkey.toLowerCase()
         if (hotAuthors.has(pk)) continue
+        const verdict = evaluateNoteSpam(ev, { seenContentAuthors: hotSeenContent, maxPerAuthor: 1 })
+        if (verdict.isSpam) continue
         const textOnly = ev.content
           .replace(/https?:\/\/[^\s]+/gi, '')
           .replace(/nostr:[0-9a-z]+/gi, '')

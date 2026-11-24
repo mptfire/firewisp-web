@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useId } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Flame, Hash, RefreshCw, TrendingUp } from 'lucide-react'
+import { Flame, RefreshCw, TrendingUp } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { Avatar } from './Avatar'
@@ -19,6 +19,59 @@ function stripPreviewText(raw: string): string {
     .replace(/nostr:[0-9a-z]+/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+/** Smooth Ditto-style 24h activity sparkline SVG */
+function TrendSparkline({ buckets }: { buckets: number[] }) {
+  const gradId = useId()
+  const w = 56
+  const h = 24
+  const pad = 2
+  const maxVal = Math.max(...buckets, 1)
+  const stepX = buckets.length > 1 ? (w - pad * 2) / (buckets.length - 1) : 0
+
+  const coords = buckets.map((v, i) => ({
+    x: pad + i * stepX,
+    y: h - pad - (v / maxVal) * (h - pad * 2 - 2),
+  }))
+
+  let linePath = `M ${coords[0].x.toFixed(1)} ${coords[0].y.toFixed(1)}`
+  for (let i = 1; i < coords.length; i++) {
+    const prev = coords[i - 1]
+    const curr = coords[i]
+    const cx = ((prev.x + curr.x) / 2).toFixed(1)
+    linePath += ` Q ${prev.x.toFixed(1)} ${prev.y.toFixed(1)}, ${cx} ${((prev.y + curr.y) / 2).toFixed(1)}`
+    if (i === coords.length - 1) {
+      linePath += ` T ${curr.x.toFixed(1)} ${curr.y.toFixed(1)}`
+    }
+  }
+  const areaPath = `${linePath} L ${(w - pad).toFixed(1)} ${h} L ${pad} ${h} Z`
+
+  return (
+    <svg
+      width={w}
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      className="shrink-0 overflow-visible"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#e8590c" stopOpacity="0.38" />
+          <stop offset="100%" stopColor="#e8590c" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gradId})`} />
+      <path
+        d={linePath}
+        fill="none"
+        stroke="#ff8a3d"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 function HotPostRow({ eventId }: { eventId: string }) {
@@ -81,9 +134,9 @@ export function TrendingSidebar() {
 
   return (
     <>
-      {/* Trending #Keywords (Ditto-style) */}
+      {/* Trending #Keywords with sparklines (Ditto-style) */}
       <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
-        <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
             <TrendingUp className="w-3.5 h-3.5 text-[#f59f00]" />
             Trending
@@ -99,24 +152,37 @@ export function TrendingSidebar() {
         </div>
 
         {loadingTrends && trendingHashtags.length === 0 ? (
-          <div className="flex flex-wrap gap-1.5 animate-pulse">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-6 w-16 rounded-full bg-[#1f212b]" />
+          <div className="space-y-2.5 animate-pulse pt-1">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="h-3.5 w-24 rounded bg-[#1f212b]" />
+                  <div className="h-2.5 w-20 rounded bg-[#1b1d26]" />
+                </div>
+                <div className="h-5 w-14 rounded bg-[#1b1d26]" />
+              </div>
             ))}
           </div>
         ) : trendingHashtags.length === 0 ? (
           <p className="text-xs text-[#6f6d66]">No trending tags yet.</p>
         ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {trendingHashtags.map(({ tag, count }) => (
+          <div className="divide-y divide-[#1f212b] -mx-1">
+            {trendingHashtags.map(({ tag, accounts, uses, buckets }) => (
               <Link
                 key={tag}
                 to={`/search?q=%23${encodeURIComponent(tag)}`}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#1b1d26] hover:bg-[#e8590c]/20 border border-[#272a38] hover:border-[#e8590c]/40 text-xs text-[#e0ded7] hover:text-[#ff922b] transition"
+                className="flex items-center justify-between gap-2 px-2 py-2 rounded-xl hover:bg-white/[0.04] transition group"
               >
-                <Hash className="w-3 h-3 text-[#f59f00]" />
-                <span>{tag}</span>
-                <span className="text-[10px] text-[#7c7a72] ml-0.5">{count}</span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-white group-hover:text-[#ff922b] truncate transition">
+                    #{tag}
+                  </div>
+                  <div className="text-[11px] text-[#8c8a82] truncate">
+                    {accounts} {accounts === 1 ? 'person' : 'people'} · {uses}{' '}
+                    {uses === 1 ? 'post' : 'posts'}
+                  </div>
+                </div>
+                <TrendSparkline buckets={buckets} />
               </Link>
             ))}
           </div>
