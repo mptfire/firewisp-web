@@ -32,6 +32,7 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
 import { FloatingStreamPlayer } from './FloatingStreamPlayer'
+import { LiveZapsCard } from './LiveZapsCard'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
 
@@ -45,6 +46,7 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }
   const isTheaterMode = location.pathname.startsWith('/live/')
+  const isFeedPage = location.pathname === '/'
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
@@ -61,6 +63,11 @@ export function Layout({ children }: { children: ReactNode }) {
   const setToast = useNostrStore((s) => s.setToast)
   const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
   const [relaysExpanded, setRelaysExpanded] = useState(false)
+  const [isDesktopMd, setIsDesktopMd] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 768px)').matches
+      : true,
+  )
   const [isDesktopLg, setIsDesktopLg] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(min-width: 1024px)').matches
@@ -69,11 +76,18 @@ export function Layout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const mq = window.matchMedia('(min-width: 1024px)')
-    const onChange = (e: MediaQueryListEvent) => setIsDesktopLg(e.matches)
-    setIsDesktopLg(mq.matches)
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
+    const mqMd = window.matchMedia('(min-width: 768px)')
+    const mqLg = window.matchMedia('(min-width: 1024px)')
+    const onChangeMd = (e: MediaQueryListEvent) => setIsDesktopMd(e.matches)
+    const onChangeLg = (e: MediaQueryListEvent) => setIsDesktopLg(e.matches)
+    setIsDesktopMd(mqMd.matches)
+    setIsDesktopLg(mqLg.matches)
+    mqMd.addEventListener('change', onChangeMd)
+    mqLg.addEventListener('change', onChangeLg)
+    return () => {
+      mqMd.removeEventListener('change', onChangeMd)
+      mqLg.removeEventListener('change', onChangeLg)
+    }
   }, [])
 
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
@@ -273,11 +287,15 @@ export function Layout({ children }: { children: ReactNode }) {
               )}
             </div>
 
-            {isTheaterMode && (
+            {isDesktopMd && isTheaterMode ? (
               <div className="mt-3">
                 <StreamTopZappersCard />
               </div>
-            )}
+            ) : isDesktopMd && isFeedPage ? (
+              <div className="mt-3">
+                <LiveZapsCard />
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-auto shrink-0 p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">

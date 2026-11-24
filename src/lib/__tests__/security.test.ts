@@ -42,6 +42,7 @@ import {
   sortLiveStreams,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
+import { computeLiveZapsStats, parseLiveZapReceipt } from '../nostr/zapsFeed'
 import { parseSharedQueryParams } from '../shareTarget'
 import { useLiveStore } from '../store/useLiveStore'
 import { useNostrStore } from '../store/useNostrStore'
@@ -940,5 +941,103 @@ describe('Full code-audit regression & security hardening', () => {
       '3'.repeat(64), // 210 sats, 4 zaps
       '1'.repeat(64), // 210 sats, 2 zaps
     ])
+  })
+
+  it('parses live NIP-57 zap receipts strictly, encodes stream targets, and rejects spoofed amounts', () => {
+    const sender = '1'.repeat(64)
+    const recipient = '2'.repeat(64)
+    const noteId = '3'.repeat(64)
+    const now = 1_800_000_000
+
+    // Valid note zap (21 sats = lnbc210n1...)
+    const noteZap = parseLiveZapReceipt(
+      {
+        id: 'a'.repeat(64),
+        kind: 9735,
+        pubkey: '9'.repeat(64),
+        created_at: now - 120,
+        tags: [
+          ['p', recipient],
+          ['e', noteId],
+          ['bolt11', 'lnbc210n1p0livezapnote'],
+          [
+            'description',
+            JSON.stringify({
+              pubkey: sender,
+              content: 'GM 🧡',
+              tags: [['amount', '21000']],
+            }),
+          ],
+        ],
+      },
+      now,
+    )
+    expect(noteZap).toMatchObject({
+      senderPubkey: sender,
+      recipientPubkey: recipient,
+      sats: 21,
+      comment: 'GM 🧡',
+      targetEventId: noteId,
+    })
+
+    // Valid live stream zap (100 sats = lnbc1u1..., #a tag 30311:...)
+    const streamZap = parseLiveZapReceipt(
+      {
+        id: 'b'.repeat(64),
+        kind: 9735,
+        pubkey: '9'.repeat(64),
+        created_at: now - 60,
+        tags: [
+          ['p', recipient],
+          ['a', `30311:${recipient}:radio-live`],
+          ['bolt11', 'lnbc1u1p0livezapstream'],
+          ['description', JSON.stringify({ pubkey: sender, content: 'Nice track!' })],
+        ],
+      },
+      now,
+    )
+    expect(streamZap?.sats).toBe(100)
+    expect(streamZap?.targetLiveNaddr).toMatch(/^naddr1/)
+    expect(streamZap?.targetEventId).toBeUndefined()
+
+    // Spoofed amount mismatch (request claims 50,000 sats, invoice is only 21 sats) -> rejected
+    const spoofed = parseLiveZapReceipt(
+      {
+        id: 'c'.repeat(64),
+        kind: 9735,
+        pubkey: '9'.repeat(64),
+        created_at: now - 30,
+        tags: [
+          ['p', recipient],
+          ['bolt11', 'lnbc210n1p0spoof'],
+          ['description', JSON.stringify({ pubkey: sender, tags: [['amount', '50000000']] })],
+        ],
+      },
+      now,
+    )
+    expect(spoofed).toBeNull()
+
+    // Far-future timestamp -> rejected
+    const futureZap = parseLiveZapReceipt(
+      {
+        id: 'd'.repeat(64),
+        kind: 9735,
+        pubkey: '9'.repeat(64),
+        created_at: now + 900,
+        tags: [
+          ['p', recipient],
+          ['bolt11', 'lnbc210n1p0future'],
+          ['description', JSON.stringify({ pubkey: sender })],
+        ],
+      },
+      now,
+    )
+    expect(futureZap).toBeNull()
+
+    // Stats computation
+    const stats = computeLiveZapsStats([noteZap!, streamZap!], now)
+    expect(stats.totalSats).toBe(121)
+    expect(stats.zapCount).toBe(2)
+    expect(stats.zapsPerMinute).toBe(1)
   })
 })
