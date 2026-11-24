@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   Ban,
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   CornerDownRight,
   ImagePlus,
@@ -33,6 +35,7 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
+import { LiveNowRow } from '../components/LiveNowRow'
 import { MediaLightbox } from '../components/MediaLightbox'
 import { YouTubeCard } from '../components/YouTubeCard'
 import { ZapModal } from '../components/ZapModal'
@@ -430,6 +433,7 @@ export function LiveStreamPage() {
   const [replyTarget, setReplyTarget] = useState<LiveChatMessage | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [showOtherStreams, setShowOtherStreams] = useState(false)
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -1021,6 +1025,31 @@ export function LiveStreamPage() {
             <p className="text-xs text-[#c2bfb7] leading-relaxed whitespace-pre-wrap">
               {activeActivity.summary}
             </p>
+          )}
+        </div>
+
+        {/* Reveal other live streams (hidden by default, same carousel as the main page) */}
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setShowOtherStreams((v) => !v)}
+            aria-expanded={showOtherStreams}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-[#15161c] hover:bg-[#1b1d26] border border-[#232530] text-xs font-semibold text-[#d4d2cb] flex items-center justify-between gap-2 transition cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <Radio className="w-3.5 h-3.5 text-red-500" />
+              {showOtherStreams ? 'Hide other live streams' : 'Show other live streams'}
+            </span>
+            {showOtherStreams ? (
+              <ChevronUp className="w-4 h-4 text-[#8c8a82]" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-[#8c8a82]" />
+            )}
+          </button>
+          {showOtherStreams && (
+            <div className="rounded-2xl overflow-hidden border border-[#232530]">
+              <LiveNowRow forceShow excludeATag={aTag} />
+            </div>
           )}
         </div>
       </div>

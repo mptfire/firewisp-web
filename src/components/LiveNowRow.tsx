@@ -214,8 +214,17 @@ function LiveStreamPreviewCard({
   )
 }
 
-export function LiveNowRow() {
-  const showLiveNowBar = useSettingsStore((s) => s.showLiveNowBar)
+export function LiveNowRow({
+  forceShow = false,
+  excludeATag,
+}: {
+  /** Render regardless of the global "Show Live Now bar" setting (used by the stream page reveal panel). */
+  forceShow?: boolean
+  /** Hide the stream currently being watched. */
+  excludeATag?: string
+} = {}) {
+  const showLiveNowBarSetting = useSettingsStore((s) => s.showLiveNowBar)
+  const showLiveNowBar = forceShow || showLiveNowBarSetting
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const follows = useNostrStore((s) => s.follows)
   const liveStreams = useLiveStore((s) => s.liveStreams)
@@ -239,6 +248,7 @@ export function LiveNowRow() {
   const activeStreams = useMemo(() => {
     const filtered = Object.values(liveStreams).filter((s) => {
       if (!isLiveStreamFresh(s, nowSec)) return false
+      if (excludeATag && s.aTagValue === excludeATag) return false
       const hostPk = getStreamPrimaryPubkey(s.activity)
       if (mutedPubkeys.includes(hostPk) || mutedPubkeys.includes(s.activity.hostPubkey)) {
         return false
@@ -246,7 +256,7 @@ export function LiveNowRow() {
       return true
     })
     return sortLiveStreams(filtered, followSet, followerCounts).slice(0, 15)
-  }, [liveStreams, mutedPubkeys, followSet, followerCounts, nowSec])
+  }, [liveStreams, mutedPubkeys, followSet, followerCounts, nowSec, excludeATag])
 
   const updateScrollArrows = () => {
     const el = scrollRef.current
