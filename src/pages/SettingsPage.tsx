@@ -413,14 +413,20 @@ export function SettingsPage() {
 
       {/* Lightning NWC */}
       <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <Wallet className="w-4 h-4 text-[#f59f00]" />
-          Lightning Wallet (NWC — NIP-47)
-        </h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <Wallet className="w-4 h-4 text-[#f59f00]" />
+            Lightning Wallet (NWC — NIP-47)
+          </h2>
+          {settings.nwcUri && (
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-semibold text-emerald-300">
+              Connected
+            </span>
+          )}
+        </div>
         <p className="text-xs text-[#8c8a82]">
           Connect Alby, Primal, CoinOS, or Zeus for one-click zaps (or use WebLN / QR invoices
-          without connecting a wallet). Stored in memory for this session only — never written to
-          browser storage.
+          without connecting a wallet). Best practice: use a spending-capped zap budget URI.
         </p>
         <div className="flex gap-2">
           <input
@@ -436,6 +442,7 @@ export function SettingsPage() {
             className="flex-1 px-3 py-2 rounded-xl bg-[#15161c] border border-[#2a2d3a] text-xs font-mono focus:outline-none focus:border-[#e8590c]"
           />
           <button
+            type="button"
             onClick={() => {
               if (!nwcInput.trim()) {
                 settings.setNwcUri('')
@@ -446,14 +453,47 @@ export function SettingsPage() {
                 setNwcStatus('Invalid nostr+walletconnect:// URI')
                 return
               }
-              settings.setNwcUri(nwcInput)
-              setNwcStatus('NWC wallet saved')
+              settings.setNwcUri(nwcInput, settings.nwcRememberDevice)
+              setNwcStatus(
+                settings.nwcRememberDevice
+                  ? 'NWC wallet saved on this device (wiped automatically on Sign Out)'
+                  : 'NWC wallet saved for this browser tab session',
+              )
             }}
             className="px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold cursor-pointer"
           >
             Save
           </button>
+          {settings.nwcUri && (
+            <button
+              type="button"
+              onClick={() => {
+                settings.setNwcUri('')
+                setNwcInput('')
+                setNwcStatus('Disconnected NWC wallet')
+              }}
+              className="px-3 py-2 rounded-xl bg-[#1a1c24] hover:bg-red-500/20 border border-[#2a2d3a] hover:border-red-500/40 text-xs text-red-300 cursor-pointer"
+            >
+              Disconnect
+            </button>
+          )}
         </div>
+        <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Remember NWC wallet on this device</div>
+            <div className="text-[#8c8a82]">
+              {settings.nwcRememberDevice
+                ? 'Stays connected across refreshes and browser restarts (cleared on Sign Out).'
+                : 'Tab session only — survives page refreshes, clears when you close the tab.'}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.nwcRememberDevice}
+            onChange={(e) => settings.setNwcRememberDevice(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
         {nwcStatus && <p className="text-xs text-[#f59f00]">{nwcStatus}</p>}
       </section>
 

@@ -9,6 +9,43 @@ import {
 import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
 
 const STORAGE_KEY = 'firewisp_settings_v1'
+const NWC_STORAGE_KEY = 'firewisp_nwc_v1'
+
+function loadStoredNwc(): { nwcUri: string; remember: boolean } {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const persisted = localStorage.getItem(NWC_STORAGE_KEY)?.trim()
+      if (persisted) return { nwcUri: persisted, remember: true }
+    }
+    if (typeof sessionStorage !== 'undefined') {
+      const session = sessionStorage.getItem(NWC_STORAGE_KEY)?.trim()
+      if (session) return { nwcUri: session, remember: false }
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  return { nwcUri: '', remember: true }
+}
+
+function saveStoredNwc(uri: string, remember: boolean) {
+  const clean = uri.trim()
+  try {
+    if (!clean) {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(NWC_STORAGE_KEY)
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(NWC_STORAGE_KEY)
+      return
+    }
+    if (remember) {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(NWC_STORAGE_KEY, clean)
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(NWC_STORAGE_KEY)
+    } else {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(NWC_STORAGE_KEY, clean)
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(NWC_STORAGE_KEY)
+    }
+  } catch {
+    // ignore quota/private-mode errors
+  }
+}
 
 export interface SettingsState {
   relays: RelayEntry[]
@@ -37,6 +74,7 @@ export interface SettingsState {
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   nwcUri: string
+  nwcRememberDevice: boolean
 
   addRelay: (url: string) => boolean
   removeRelay: (url: string) => void
@@ -73,7 +111,8 @@ export interface SettingsState {
   setShowLiveNowBar: (enabled: boolean) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
-  setNwcUri: (uri: string) => void
+  setNwcUri: (uri: string, remember?: boolean) => void
+  setNwcRememberDevice: (remember: boolean) => void
 
   getReadRelays: () => string[]
   getWriteRelays: () => string[]
@@ -106,12 +145,15 @@ interface PersistedSettings {
 
 function loadInitial(): PersistedSettings & {
   nwcUri: string
+  nwcRememberDevice: boolean
   privateMutedPubkeys: string[]
   privateMutedHashtags: string[]
   privateMutedWords: string[]
 } {
+  const storedNwc = loadStoredNwc()
   const defaults: PersistedSettings & {
     nwcUri: string
+    nwcRememberDevice: boolean
     privateMutedPubkeys: string[]
     privateMutedHashtags: string[]
     privateMutedWords: string[]
@@ -140,7 +182,8 @@ function loadInitial(): PersistedSettings & {
     showLiveNowBar: true,
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
-    nwcUri: '',
+    nwcUri: storedNwc.nwcUri,
+    nwcRememberDevice: storedNwc.remember,
   }
   if (typeof localStorage === 'undefined') return defaults
   try {
@@ -189,11 +232,13 @@ function loadInitial(): PersistedSettings & {
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
       privateMutedWords: [],
-      nwcUri: '',
+      nwcUri: storedNwc.nwcUri,
+      nwcRememberDevice: storedNwc.remember,
     }
     if (hadLegacyNwc) {
       const {
         nwcUri: _drop,
+        nwcRememberDevice: _dropRem,
         privateMutedPubkeys: _p1,
         privateMutedHashtags: _p2,
         privateMutedWords: _p3,
@@ -429,6 +474,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }))
   },
   clearPrivateSessionMutes: () => {
+    saveStoredNwc('', false)
     set({
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
@@ -481,9 +527,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ inlineMediaPlayback })
     persist(get())
   },
-  setNwcUri: (nwcUri) => {
-    // Session-only in memory — intentionally never written to localStorage.
-    set({ nwcUri: nwcUri.trim() })
+  setNwcUri: (nwcUri, remember) => {
+    const clean = nwcUri.trim()
+    const shouldRemember = remember !== undefined ? remember : get().nwcRememberDevice
+    saveStoredNwc(clean, shouldRemember)
+    set({ nwcUri: clean, nwcRememberDevice: shouldRemember })
+  },
+  setNwcRememberDevice: (remember) => {
+    const currentUri = get().nwcUri
+    if (currentUri) {
+      saveStoredNwc(currentUri, remember)
+    }
+    set({ nwcRememberDevice: remember })
   },
 
   getReadRelays: () => get().relays.filter((r) => r.read).map((r) => r.url),

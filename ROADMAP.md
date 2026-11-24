@@ -22,7 +22,7 @@ Public roadmap for the **Fire Wisp** Nostr ecosystem (Web/PWA, Android APK, and 
 
 Register and cut over to **`firewisp.de`** as the primary canonical domain for the full release while keeping `*.firewisp.rtard.de` alive as redirects/aliases so existing users never break:
 
-- [ ] Register **`firewisp.de`** and configure DNS (A/AAAA records pointing to `ecoblu`).
+- [x] Register **`firewisp.de`** at Netcup (ordered — awaiting activation) and configure DNS (A/AAAA records pointing to `ecoblu` `178.254.39.208`).
 - [ ] **Web / PWA (`https://firewisp.de`)**:
   - Issue Caddy TLS certificate and serve Fire Wisp Web at `https://firewisp.de/`.
   - Add 301 redirect from `https://firewisp.rtard.de/*` → `https://firewisp.de/*` (note: migrating origin resets `localStorage` unless a one-time export/import helper or notice is provided for NIP-49 vaults & settings!).
