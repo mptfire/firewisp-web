@@ -16,6 +16,7 @@ export type ContentSegment =
   | { type: 'hashtag'; tag: string }
   | { type: 'mention'; bech32: string; pubkey: string }
   | { type: 'quote'; bech32: string; eventId?: string }
+  | { type: 'live'; bech32: string; hostPubkey: string; dTag: string }
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v)(\?.*)?$/i
@@ -139,6 +140,13 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
         } else if (decoded.type === 'nevent') {
           quotes.push(decoded.data.id)
           segments.push({ type: 'quote', bech32, eventId: decoded.data.id })
+        } else if (decoded.type === 'naddr' && decoded.data.kind === 30311) {
+          segments.push({
+            type: 'live',
+            bech32,
+            hostPubkey: decoded.data.pubkey.toLowerCase(),
+            dTag: decoded.data.identifier,
+          })
         } else {
           segments.push({ type: 'text', text: token })
         }

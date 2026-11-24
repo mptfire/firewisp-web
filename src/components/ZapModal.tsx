@@ -14,6 +14,7 @@ interface ZapModalProps {
   recipientName: string
   lud16: string
   eventId?: string
+  eventATag?: string
   onClose: () => void
 }
 
@@ -24,6 +25,7 @@ export function ZapModal({
   recipientName,
   lud16,
   eventId,
+  eventATag,
   onClose,
 }: ZapModalProps) {
   const signer = useAuthStore((s) => s.signer)
@@ -68,6 +70,7 @@ export function ZapModal({
           amountSats: amount,
           recipientPubkey,
           eventId,
+          eventATag,
           comment,
           relays: readRelays,
           signer,

@@ -35,6 +35,17 @@ export function SearchPage() {
       navigate(`/p/${q}`)
       return
     }
+    if (lower.startsWith('naddr1')) {
+      try {
+        const dec = nip19.decode(lower)
+        if (dec.type === 'naddr' && dec.data.kind === 30311) {
+          navigate(`/live/${lower}`)
+          return
+        }
+      } catch {
+        // fall through
+      }
+    }
     if (lower.startsWith('note1') || lower.startsWith('nevent1')) {
       try {
         const dec = nip19.decode(lower)

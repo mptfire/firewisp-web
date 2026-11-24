@@ -67,6 +67,21 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Show Live Now streaming bar</div>
+            <div className="text-[#8c8a82]">
+              Displays active NIP-53 Nostr live streams at the top of your feed.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showLiveNowBar}
+            onChange={(e) => settings.setShowLiveNowBar(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Show Fire Wisp relay tab</div>
             <div className="text-[#8c8a82]">
               Dedicated feed for wss://firewisp.relay.rtard.de (12-bit PoW community relay).

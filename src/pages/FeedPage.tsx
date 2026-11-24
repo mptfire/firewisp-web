@@ -17,6 +17,7 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore, type FeedTab } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Composer } from '../components/Composer'
+import { LiveNowRow } from '../components/LiveNowRow'
 import { NoteCard } from '../components/NoteCard'
 
 function FeedSkeleton() {
@@ -393,6 +394,8 @@ export function FeedPage() {
           </button>
         </div>
       </div>
+
+      <LiveNowRow />
 
       <Composer />
 

@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Cpu,
   CornerDownRight,
+  Radio,
 } from 'lucide-react'
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { nostrPool } from '../lib/nostr/pool'
@@ -427,6 +428,26 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                 }
                 if (seg.type === 'quote' && seg.eventId) {
                   return <QuotedNoteCard key={i} eventId={seg.eventId} bech32={seg.bech32} />
+                }
+                if (seg.type === 'live') {
+                  return (
+                    <Link
+                      key={i}
+                      to={`/live/${seg.bech32}`}
+                      className="mt-2 p-3 rounded-xl bg-[#161820] border border-[#e8590c]/35 hover:border-[#e8590c] flex items-center justify-between gap-2 transition"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold uppercase flex items-center gap-1 shrink-0">
+                          <Radio className="w-2.5 h-2.5 animate-pulse" />
+                          LIVE
+                        </span>
+                        <span className="text-xs font-semibold text-white truncate">
+                          Open Live Stream ({seg.dTag})
+                        </span>
+                      </div>
+                      <span className="text-xs text-[#ff8a3d] font-medium shrink-0">Watch →</span>
+                    </Link>
+                  )
                 }
                 return null
               })}

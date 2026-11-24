@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
   Search,
@@ -27,6 +27,8 @@ import { AuthModal } from './AuthModal'
 import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const isTheaterMode = location.pathname.startsWith('/live/')
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
@@ -115,7 +117,36 @@ export function Layout({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            <div className="mt-3.5 pt-3.5 border-t border-[#20222c]">
+            <div className="mt-3 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 text-[#f59f00]" />
+                  Relay Network
+                </span>
+                <span className="text-[11px] text-emerald-400 font-medium">
+                  {connectedCount}/{totalCount} live
+                </span>
+              </div>
+              <div className="text-xs text-[#c2bfb7] space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono text-[10px]">firewisp.relay.rtard.de</span>
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      firewispRelayUp ? 'bg-emerald-400' : 'bg-amber-400'
+                    }`}
+                  />
+                </div>
+                <p className="text-[10px] text-[#8c8a82] leading-relaxed">
+                  Anti-spam PoW relay (12b+). Media via{' '}
+                  <span className="font-mono text-[#c2bfb7]">
+                    {DEFAULT_BLOSSOM_PRIMARY.replace('https://', '')}
+                  </span>
+                  .
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-[#20222c]">
               {pubkey ? (
                 <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-[#15161c] border border-[#232530]">
                   <Link to={`/p/${pubkey}`} className="flex items-center gap-2 min-w-0">
@@ -194,47 +225,19 @@ export function Layout({ children }: { children: ReactNode }) {
           {children}
         </main>
 
-        {/* Right Info Sidebar (large desktop) */}
-        <aside className="hidden lg:flex flex-col w-[304px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-screen overflow-y-auto">
-          <TrendingSidebar />
+        {/* Right Info Sidebar (large desktop; hidden on /live/* for wide theater video + chat) */}
+        {!isTheaterMode && (
+          <aside className="hidden lg:flex flex-col w-[304px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-screen overflow-y-auto">
+            <TrendingSidebar />
 
-          <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-[#f59f00]" />
-                Relay Network
-              </span>
-              <span className="text-xs text-emerald-400 font-medium">
-                {connectedCount}/{totalCount} live
-              </span>
-            </div>
-            <div className="text-xs text-[#c2bfb7] space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="truncate font-mono text-[11px]">firewisp.relay.rtard.de</span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    firewispRelayUp ? 'bg-emerald-400' : 'bg-amber-400'
-                  }`}
-                />
+            <footer className="text-[11px] text-[#6f6d66] px-1 space-y-1">
+              <div>Zero analytics · Zero trackers · Zero Google Sign-In</div>
+              <div>
+                Relay: <span className="font-mono">{FIREWISP_RELAY.replace('wss://', '')}</span>
               </div>
-              <p className="text-[11px] text-[#8c8a82] leading-relaxed">
-                Anti-spam community relay with NIP-13 PoW (12b+) &amp; rate limiting. Media uploads
-                default to{' '}
-                <span className="font-mono text-[#c2bfb7]">
-                  {DEFAULT_BLOSSOM_PRIMARY.replace('https://', '')}
-                </span>{' '}
-                (configurable in Settings).
-              </p>
-            </div>
-          </div>
-
-          <footer className="text-[11px] text-[#6f6d66] px-1 space-y-1">
-            <div>Zero analytics · Zero trackers · Zero Google Sign-In</div>
-            <div>
-              Relay: <span className="font-mono">{FIREWISP_RELAY.replace('wss://', '')}</span>
-            </div>
-          </footer>
-        </aside>
+            </footer>
+          </aside>
+        )}
       </div>
 
       {/* Mobile Bottom Nav */}

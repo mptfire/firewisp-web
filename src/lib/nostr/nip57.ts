@@ -95,6 +95,7 @@ export async function requestZapInvoice(params: {
   amountSats: number
   recipientPubkey: string
   eventId?: string
+  eventATag?: string
   comment?: string
   relays: string[]
   signer?: FireWispSigner | null
@@ -119,6 +120,7 @@ export async function requestZapInvoice(params: {
       ['p', params.recipientPubkey],
     ]
     if (params.eventId) tags.push(['e', params.eventId])
+    if (params.eventATag) tags.push(['a', params.eventATag])
     const zapRequest = await params.signer.signEvent({
       kind: 9734,
       created_at: Math.floor(Date.now() / 1000),

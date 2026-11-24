@@ -27,6 +27,12 @@ import {
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
 import { parseBolt11AmountSats, parseNwcUri, requestZapInvoice, resolveLud16ToUrl } from '../nostr/nip57'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
+import {
+  buildLiveATag,
+  decodeLiveNaddr,
+  encodeLiveNaddr,
+  parseLiveActivity,
+} from '../nostr/nip53'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -455,5 +461,94 @@ describe('Explore anti-spam filter (matching Android NSpam heuristics)', () => {
         { follows: new Set(['9'.repeat(64)]) },
       ).isSpam,
     ).toBe(false)
+  })
+})
+
+describe('NIP-53 live streaming parser & security guards', () => {
+  it('parses valid kind-30311 events, resolves Host role, and round-trips naddr', () => {
+    const hostPk = 'a'.repeat(64)
+    const streamerPk = 'b'.repeat(64)
+    const parsed = parseLiveActivity({
+      id: '1'.repeat(64),
+      kind: 30311,
+      pubkey: hostPk,
+      created_at: 1732400000,
+      tags: [
+        ['d', 'fire-stream-1'],
+        ['title', 'Fire Wisp Live'],
+        ['status', 'live'],
+        ['streaming', 'https://stream.zap.stream/hls/test/live.m3u8'],
+        ['image', 'https://blossom.primal.net/thumb.png'],
+        ['p', streamerPk, '', 'Host'],
+        ['relays', 'wss://relay.snort.social', 'ws://insecure.example'],
+      ],
+    })
+    expect(parsed).not.toBeNull()
+    expect(parsed?.streamerPubkey).toBe(streamerPk)
+    expect(parsed?.streamingUrl).toBe('https://stream.zap.stream/hls/test/live.m3u8')
+    expect(parsed?.relayHints).toEqual(['wss://relay.snort.social'])
+    expect(buildLiveATag(hostPk, 'fire-stream-1')).toBe(`30311:${hostPk}:fire-stream-1`)
+
+    const naddr = encodeLiveNaddr(hostPk, 'fire-stream-1', ['wss://relay.snort.social'])
+    const decoded = decodeLiveNaddr(naddr)
+    expect(decoded).toEqual({
+      hostPubkey: hostPk,
+      dTag: 'fire-stream-1',
+      relays: ['wss://relay.snort.social'],
+    })
+  })
+
+  it('rejects cleartext http:// and private/LAN streaming and image URLs in kind-30311', () => {
+    const parsed = parseLiveActivity({
+      id: '2'.repeat(64),
+      kind: 30311,
+      pubkey: 'c'.repeat(64),
+      created_at: 1732400000,
+      tags: [
+        ['d', 'evil-stream'],
+        ['status', 'live'],
+        ['streaming', 'https://192.168.1.10/live.m3u8'],
+        ['image', 'http://insecure.example/thumb.png'],
+        ['recording', 'https://[fd00::1]/rec.mp4'],
+      ],
+    })
+    expect(parsed?.streamingUrl).toBeUndefined()
+    expect(parsed?.image).toBeUndefined()
+    expect(parsed?.recordingUrl).toBeUndefined()
+  })
+
+  it('attaches #a tag to signed kind-9734 zap requests when zapping a live stream', async () => {
+    const signer = new LocalKeySigner(hexToBytes('33'.repeat(32)))
+    let capturedZapReq = ''
+    const mockFetch: typeof fetch = async (input) => {
+      const u = new URL(String(input))
+      if (u.pathname.includes('.well-known/lnurlp')) {
+        return new Response(
+          JSON.stringify({
+            callback: 'https://ln.example/cb',
+            minSendable: 1000,
+            maxSendable: 1_000_000_000,
+            allowsNostr: true,
+          }),
+          { status: 200 },
+        )
+      }
+      capturedZapReq = u.searchParams.get('nostr') || ''
+      return new Response(JSON.stringify({ pr: 'lnbc210n1p0streamzap' }), { status: 200 })
+    }
+
+    const aTag = `30311:${'a'.repeat(64)}:stream-1`
+    await requestZapInvoice({
+      lud16: 'host@ln.example',
+      amountSats: 21,
+      recipientPubkey: 'a'.repeat(64),
+      eventATag: aTag,
+      relays: ['wss://firewisp.relay.rtard.de'],
+      signer,
+      fetchImpl: mockFetch,
+    })
+    const parsedReq = JSON.parse(capturedZapReq) as { tags: string[][] }
+    expect(parsedReq.tags).toContainEqual(['a', aTag])
+    signer.destroy()
   })
 })

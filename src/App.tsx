@@ -1,6 +1,7 @@
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from './lib/store/useAuthStore'
+import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
 import { Layout } from './components/Layout'
 import { FeedPage } from './pages/FeedPage'
@@ -10,6 +11,7 @@ import { NotificationsPage } from './pages/NotificationsPage'
 import { SearchPage } from './pages/SearchPage'
 import { BookmarksPage } from './pages/BookmarksPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { LiveStreamPage } from './pages/LiveStreamPage'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
@@ -48,14 +50,20 @@ export function App() {
   const restoreSession = useAuthStore((s) => s.restoreSession)
   const pubkey = useAuthStore((s) => s.pubkey)
   const initPoolListener = useNostrStore((s) => s.initPoolListener)
+  const subscribeLiveDiscovery = useLiveStore((s) => s.subscribeLiveDiscovery)
   const loadUserGraph = useNostrStore((s) => s.loadUserGraph)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
 
   useEffect(() => {
     void restoreSession()
-    return initPoolListener()
-  }, [restoreSession, initPoolListener])
+    const unsubPool = initPoolListener()
+    const unsubLive = subscribeLiveDiscovery()
+    return () => {
+      unsubPool()
+      unsubLive()
+    }
+  }, [restoreSession, initPoolListener, subscribeLiveDiscovery])
 
   useEffect(() => {
     if (pubkey) {
@@ -81,6 +89,7 @@ export function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/bookmarks" element={<BookmarksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/live/:naddr" element={<LiveStreamPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

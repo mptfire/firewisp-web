@@ -28,6 +28,7 @@ export interface SettingsState {
   showFireWispTab: boolean
   showExtendedTab: boolean
   showExploreTab: boolean
+  showLiveNowBar: boolean
   nwcUri: string
 
   addRelay: (url: string) => boolean
@@ -57,6 +58,7 @@ export interface SettingsState {
   setShowFireWispTab: (enabled: boolean) => void
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
+  setShowLiveNowBar: (enabled: boolean) => void
   setNwcUri: (uri: string) => void
 
   getReadRelays: () => string[]
@@ -81,6 +83,7 @@ interface PersistedSettings {
   showFireWispTab: boolean
   showExtendedTab: boolean
   showExploreTab: boolean
+  showLiveNowBar: boolean
   // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
@@ -103,6 +106,7 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     showFireWispTab: false,
     showExtendedTab: false,
     showExploreTab: false,
+    showLiveNowBar: true,
     nwcUri: '',
   }
   if (typeof localStorage === 'undefined') return defaults
@@ -166,6 +170,7 @@ function persist(state: SettingsState) {
     showFireWispTab: state.showFireWispTab,
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
+    showLiveNowBar: state.showLiveNowBar,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -319,6 +324,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowExploreTab: (showExploreTab) => {
     set({ showExploreTab })
+    persist(get())
+  },
+  setShowLiveNowBar: (showLiveNowBar) => {
+    set({ showLiveNowBar })
     persist(get())
   },
   setNwcUri: (nwcUri) => {
