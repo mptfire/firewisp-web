@@ -1510,16 +1510,25 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       ? current.filter((p) => p !== clean)
       : [...current, clean]
 
-    const ev = await signer.signEvent({
-      kind: 3,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: next.map((p) => ['p', p]),
-      content: '',
-    })
-    set({ follows: next })
-    const writeRelays = [...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays])]
-    await nostrPool.publish(writeRelays, ev)
-    set({ toastMessage: current.includes(clean) ? 'Unfollowed' : 'Followed' })
+    const wasFollowing = current.includes(clean)
+    try {
+      const ev = await signer.signEvent({
+        kind: 3,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: next.map((p) => ['p', p]),
+        content: '',
+      })
+      set({ follows: next })
+      const writeRelays = [
+        ...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays]),
+      ]
+      await nostrPool.publish(writeRelays, ev)
+      set({ toastMessage: wasFollowing ? 'Unfollowed' : 'Followed' })
+    } catch (err) {
+      set({
+        toastMessage: err instanceof Error ? err.message : 'Failed to update follow list',
+      })
+    }
   },
 
   toggleBookmark: async (eventId) => {

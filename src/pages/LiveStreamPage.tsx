@@ -828,9 +828,9 @@ export function LiveStreamPage() {
               {!isMe && hostPubkey && (
                 <button
                   onClick={() => void toggleFollow(hostPubkey)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isFollowing
-                      ? 'bg-[#1d1f29] border border-[#2e3242] text-white'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white'
                       : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                   }`}
                 >

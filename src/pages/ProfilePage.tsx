@@ -75,8 +75,8 @@ export function ProfilePage() {
     }
   }, [hexPubkey])
 
-  const isMe = Boolean(myPubkey && hexPubkey && myPubkey.toLowerCase() === hexPubkey)
-  const isFollowing = Boolean(hexPubkey && follows.includes(hexPubkey))
+  const isMe = Boolean(myPubkey && hexPubkey && myPubkey.toLowerCase() === hexPubkey.toLowerCase())
+  const isFollowing = Boolean(hexPubkey && follows.includes(hexPubkey.toLowerCase()))
   const isMuted = Boolean(hexPubkey && mutedPubkeys.includes(hexPubkey))
   const bannerUrl = sanitizePublicHttpsUrl(profile?.banner)
   const displayName = profile?.display_name || profile?.name || `${npub.slice(0, 14)}…`
@@ -286,9 +286,9 @@ export function ProfilePage() {
                 </button>
                 <button
                   onClick={() => void toggleFollow(hexPubkey)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isFollowing
-                      ? 'bg-[#1d1f29] border border-[#2e3242] text-white hover:border-red-500/40'
+                      ? 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white'
                       : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                   }`}
                 >
