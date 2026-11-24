@@ -25,7 +25,7 @@ import {
   sanitizeRelayUrl,
 } from '../sanitize'
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
-import { parseNwcUri, resolveLud16ToUrl } from '../nostr/nip57'
+import { parseBolt11AmountSats, parseNwcUri, requestZapInvoice, resolveLud16ToUrl } from '../nostr/nip57'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -117,9 +117,9 @@ describe('NIP-13 Proof-of-Work mining & verification', () => {
 })
 
 describe('Blossom BUD-02/05/11 auth, fallback, and fail-closed SHA-256 verification', () => {
-  it('defaults to firewisp.blossom.rtard.de with primal.net fallback', () => {
+  it('defaults to free public Blossom servers (blossom.nostr.build -> blossom.primal.net)', () => {
     expect(buildCandidateServers([])).toEqual([
-      'https://firewisp.blossom.rtard.de',
+      'https://blossom.nostr.build',
       'https://blossom.primal.net',
     ])
   })
@@ -143,11 +143,11 @@ describe('Blossom BUD-02/05/11 auth, fallback, and fail-closed SHA-256 verificat
     const fakeFetch: typeof fetch = async (input) => {
       const url = String(input)
       calls.push(url)
-      if (url.startsWith('https://firewisp.blossom.rtard.de')) {
+      if (url.startsWith('https://blossom.nostr.build')) {
         // Malicious/corrupted sha256 mismatch
         return new Response(
           JSON.stringify({
-            url: 'https://firewisp.blossom.rtard.de/bad.bin',
+            url: 'https://blossom.nostr.build/bad.bin',
             sha256: '0'.repeat(64),
             size: payload.size,
             type: 'application/octet-stream',
@@ -167,7 +167,7 @@ describe('Blossom BUD-02/05/11 auth, fallback, and fail-closed SHA-256 verificat
 
     const res = await uploadToBlossom(payload, 'application/octet-stream', signer, [], fakeFetch)
     expect(calls).toEqual([
-      'https://firewisp.blossom.rtard.de/upload',
+      'https://blossom.nostr.build/upload',
       'https://blossom.primal.net/upload',
     ])
     expect(res.url).toBe('https://blossom.primal.net/good.bin')
@@ -302,5 +302,46 @@ describe('Sanitization, SSRF guards, NIP-92 imeta, and NWC/LNURL parsing', () =>
     expect(bytesToHex(signer.exportSecretKey())).toBe('11'.repeat(32))
     signer.destroy()
     expect(() => signer.exportSecretKey()).toThrow(/wiped/)
+  })
+
+  it('refuses cleartext http:// inline media embedding', () => {
+    const parsed = parseNoteContent({
+      content: 'Cleartext image http://insecure.example/photo.png',
+      tags: [],
+    })
+    expect(parsed.media).toHaveLength(0)
+    expect(parsed.segments.some((s) => s.type === 'link')).toBe(true)
+  })
+
+  it('verifies BOLT-11 invoice amount pre-pay and rejects tampered LNURL invoices', async () => {
+    expect(parseBolt11AmountSats('lnbc210n1p0testinvoice')).toBe(21)
+    expect(parseBolt11AmountSats('lnbc1m1p0testinvoice')).toBe(100_000)
+    expect(parseBolt11AmountSats('lnbc1p0amountless')).toBeNull()
+
+    const evilFetch: typeof fetch = async (input) => {
+      const u = String(input)
+      if (u.includes('.well-known/lnurlp')) {
+        return new Response(
+          JSON.stringify({
+            callback: 'https://evil.example/cb',
+            minSendable: 1000,
+            maxSendable: 1_000_000_000,
+          }),
+          { status: 200 },
+        )
+      }
+      // User requested 21 sats, evil server returns 100,000 sats invoice!
+      return new Response(JSON.stringify({ pr: 'lnbc1m1p0tamperedinvoice' }), { status: 200 })
+    }
+
+    await expect(
+      requestZapInvoice({
+        lud16: 'alice@evil.example',
+        amountSats: 21,
+        recipientPubkey: 'a'.repeat(64),
+        relays: ['wss://firewisp.relay.rtard.de'],
+        fetchImpl: evilFetch,
+      }),
+    ).rejects.toThrow(/Invoice amount mismatch/)
   })
 })

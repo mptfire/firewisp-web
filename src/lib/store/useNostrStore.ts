@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Event, UnsignedEvent } from 'nostr-tools/pure'
+import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
 import { CLIENT_TAG_VALUE, FIREWISP_RELAY } from '../constants'
@@ -250,17 +250,17 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (event.kind === 6) {
       if (state.deletedEventIds[event.id]) return
       const targetId = event.tags.find((t) => t[0] === 'e' && t[1])?.[1]
-      // Also parse embedded reposted note if valid JSON
+      // Also parse embedded reposted note ONLY if its cryptographic signature verifies
       if (event.content && event.content.startsWith('{')) {
         try {
           const inner = JSON.parse(event.content) as Event
-          if (inner?.id && inner?.pubkey && inner?.kind === 1) {
+          if (inner?.id && inner?.pubkey && inner?.kind === 1 && verifyEvent(inner)) {
             if (!state.events[inner.id]) {
               set((s) => ({ events: { ...s.events, [inner.id]: inner } }))
             }
           }
         } catch {
-          // ignore
+          // ignore invalid or forged embedded JSON
         }
       }
       if (!targetId || repostSeen.has(event.id)) return

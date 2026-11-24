@@ -45,11 +45,14 @@ export function resolveLud16ToUrl(lud16: string): string | null {
   return sanitizePublicHttpsUrl(`https://${domain}/.well-known/lnurlp/${encodeURIComponent(name)}`)
 }
 
-export async function fetchLnurlPayMetadata(lud16: string): Promise<LnurlPayMetadata> {
+export async function fetchLnurlPayMetadata(
+  lud16: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<LnurlPayMetadata> {
   const url = resolveLud16ToUrl(lud16)
   if (!url) throw new Error('Invalid or unsafe Lightning Address')
 
-  const resp = await fetch(url, { headers: { Accept: 'application/json' } })
+  const resp = await fetchImpl(url, { headers: { Accept: 'application/json' } })
   if (!resp.ok) throw new Error(`Lightning provider returned HTTP ${resp.status}`)
   const data = (await resp.json()) as Partial<LnurlPayMetadata> & { status?: string; reason?: string }
   if (data.status === 'ERROR') {
@@ -68,6 +71,25 @@ export async function fetchLnurlPayMetadata(lud16: string): Promise<LnurlPayMeta
   }
 }
 
+export function parseBolt11AmountSats(invoice: string): number | null {
+  const m = invoice.trim().toLowerCase().match(/^ln(?:bc|tb|bcrt)(\d+)([munp])1/)
+  if (!m) return null
+  const num = Number(m[1])
+  if (!Number.isFinite(num) || num <= 0) return null
+  switch (m[2]) {
+    case 'm':
+      return Math.round(num * 100_000)
+    case 'u':
+      return Math.round(num * 100)
+    case 'n':
+      return Math.round(num * 0.1)
+    case 'p':
+      return Math.round(num * 0.0001)
+    default:
+      return null
+  }
+}
+
 export async function requestZapInvoice(params: {
   lud16: string
   amountSats: number
@@ -76,8 +98,10 @@ export async function requestZapInvoice(params: {
   comment?: string
   relays: string[]
   signer?: FireWispSigner | null
+  fetchImpl?: typeof fetch
 }): Promise<string> {
-  const meta = await fetchLnurlPayMetadata(params.lud16)
+  const fetchFn = params.fetchImpl || fetch
+  const meta = await fetchLnurlPayMetadata(params.lud16, fetchFn)
   const amountMsats = Math.round(params.amountSats * 1000)
   if (amountMsats < meta.minSendable || amountMsats > meta.maxSendable) {
     throw new Error(
@@ -106,7 +130,7 @@ export async function requestZapInvoice(params: {
     cbUrl.searchParams.set('comment', params.comment.trim().slice(0, 200))
   }
 
-  const resp = await fetch(cbUrl.toString())
+  const resp = await fetchFn(cbUrl.toString())
   if (!resp.ok) throw new Error(`Invoice fetch failed (HTTP ${resp.status})`)
   const data = (await resp.json()) as { pr?: string; status?: string; reason?: string }
   if (data.status === 'ERROR' || !data.pr) {
@@ -115,6 +139,13 @@ export async function requestZapInvoice(params: {
   const invoice = data.pr.trim()
   if (!/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(invoice)) {
     throw new Error('Provider returned an invalid BOLT-11 invoice')
+  }
+  // CRITICAL: Pre-pay BOLT-11 amount verification (fail-closed against malicious LNURL servers)
+  const invoicedSats = parseBolt11AmountSats(invoice)
+  if (invoicedSats === null || invoicedSats !== Math.round(params.amountSats)) {
+    throw new Error(
+      `Invoice amount mismatch: requested ${params.amountSats} sats, provider returned ${invoicedSats ?? 'amountless'} sats`,
+    )
   }
   return invoice
 }

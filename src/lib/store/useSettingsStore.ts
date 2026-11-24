@@ -60,11 +60,11 @@ interface PersistedSettings {
   mutedHashtags: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
-  nwcUri: string
+  // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
-function loadInitial(): PersistedSettings {
-  const defaults: PersistedSettings = {
+function loadInitial(): PersistedSettings & { nwcUri: string } {
+  const defaults: PersistedSettings & { nwcUri: string } = {
     relays: DEFAULT_RELAYS,
     blossomServers: DEFAULT_BLOSSOM_SERVERS,
     notePowEnabled: true,
@@ -81,19 +81,38 @@ function loadInitial(): PersistedSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaults
-    const parsed = JSON.parse(raw) as Partial<PersistedSettings>
-    return {
+    const parsed = JSON.parse(raw) as Partial<PersistedSettings & { nwcUri?: string }>
+    // Scrub any legacy nwcUri that may have been stored before session-only hardening
+    const hadLegacyNwc = Boolean(parsed.nwcUri)
+    let blossomServers =
+      Array.isArray(parsed.blossomServers) && parsed.blossomServers.length > 0
+        ? parsed.blossomServers
+        : DEFAULT_BLOSSOM_SERVERS
+
+    // Migrate old untouched default pair away from private firewisp.blossom.rtard.de
+    if (
+      blossomServers.length === 2 &&
+      blossomServers[0] === 'https://firewisp.blossom.rtard.de' &&
+      blossomServers[1] === 'https://blossom.primal.net'
+    ) {
+      blossomServers = DEFAULT_BLOSSOM_SERVERS
+    }
+
+    const merged: PersistedSettings & { nwcUri: string } = {
       ...defaults,
       ...parsed,
       relays:
         Array.isArray(parsed.relays) && parsed.relays.length > 0
           ? parsed.relays
           : DEFAULT_RELAYS,
-      blossomServers:
-        Array.isArray(parsed.blossomServers) && parsed.blossomServers.length > 0
-          ? parsed.blossomServers
-          : DEFAULT_BLOSSOM_SERVERS,
+      blossomServers,
+      nwcUri: '',
     }
+    if (hadLegacyNwc) {
+      const { nwcUri: _drop, ...cleanSnap } = merged
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanSnap))
+    }
+    return merged
   } catch {
     return defaults
   }
@@ -112,7 +131,6 @@ function persist(state: SettingsState) {
     mutedHashtags: state.mutedHashtags,
     dmAutoLoadMedia: state.dmAutoLoadMedia,
     clientTagEnabled: state.clientTagEnabled,
-    nwcUri: state.nwcUri,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -225,8 +243,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist(get())
   },
   setNwcUri: (nwcUri) => {
+    // Session-only in memory — intentionally never written to localStorage.
     set({ nwcUri: nwcUri.trim() })
-    persist(get())
   },
 
   getReadRelays: () => get().relays.filter((r) => r.read).map((r) => r.url),

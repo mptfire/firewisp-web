@@ -15,7 +15,12 @@ import {
   ExternalLink,
   Radio,
 } from 'lucide-react'
-import { ANDROID_APP_URL, FIREWISP_BLOSSOM, FIREWISP_RELAY, ZAPSTORE_URL } from '../lib/constants'
+import {
+  ANDROID_APP_URL,
+  DEFAULT_BLOSSOM_PRIMARY,
+  FIREWISP_RELAY,
+  ZAPSTORE_URL,
+} from '../lib/constants'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { Avatar } from './Avatar'
@@ -199,11 +204,11 @@ export function Layout({ children }: { children: ReactNode }) {
               </div>
               <p className="text-[11px] text-[#8c8a82] leading-relaxed">
                 Anti-spam community relay with NIP-13 PoW (12b+) &amp; rate limiting. Media uploads
-                use{' '}
+                default to{' '}
                 <span className="font-mono text-[#c2bfb7]">
-                  {FIREWISP_BLOSSOM.replace('https://', '')}
+                  {DEFAULT_BLOSSOM_PRIMARY.replace('https://', '')}
                 </span>{' '}
-                with EXIF stripping.
+                (configurable in Settings).
               </p>
             </div>
           </div>

@@ -237,7 +237,8 @@ export function SettingsPage() {
         </h2>
         <p className="text-xs text-[#8c8a82]">
           Connect Alby, Primal, CoinOS, or Zeus for one-click zaps (or use WebLN / QR invoices
-          without connecting a wallet).
+          without connecting a wallet). Stored in memory for this session only — never written to
+          browser storage.
         </p>
         <div className="flex gap-2">
           <input

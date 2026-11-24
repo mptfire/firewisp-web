@@ -91,7 +91,9 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
       const safe = sanitizeHttpUrl(trimmed)
       if (safe) {
         const meta = imeta.get(safe)
-        const mediaKind = classifyMediaUrl(safe, meta?.mime)
+        const mediaKind = safe.startsWith('https://')
+          ? classifyMediaUrl(safe, meta?.mime)
+          : null
         if (mediaKind) {
           if (!mediaSeen.has(safe)) {
             mediaSeen.add(safe)

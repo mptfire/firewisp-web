@@ -1,8 +1,8 @@
 import { bytesToHex } from 'nostr-tools/utils'
 import type { FireWispSigner } from './signer'
 import {
-  FALLBACK_BLOSSOM,
-  FIREWISP_BLOSSOM,
+  DEFAULT_BLOSSOM_FALLBACK,
+  DEFAULT_BLOSSOM_PRIMARY,
   MAX_BLOSSOM_UPLOAD_BYTES,
 } from '../constants'
 import { sanitizeBlossomUrl, sanitizeHttpUrl } from '../sanitize'
@@ -57,7 +57,7 @@ export async function buildBlossomAuthHeader(
 export function buildCandidateServers(userServers: string[]): string[] {
   const out: string[] = []
   const seen = new Set<string>()
-  for (const raw of [...userServers, FIREWISP_BLOSSOM, FALLBACK_BLOSSOM]) {
+  for (const raw of [...userServers, DEFAULT_BLOSSOM_PRIMARY, DEFAULT_BLOSSOM_FALLBACK]) {
     const clean = sanitizeBlossomUrl(raw)
     if (clean && !seen.has(clean)) {
       seen.add(clean)

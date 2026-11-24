@@ -5,8 +5,8 @@ export interface RelayEntry {
 }
 
 export const FIREWISP_RELAY = 'wss://firewisp.relay.rtard.de'
-export const FIREWISP_BLOSSOM = 'https://firewisp.blossom.rtard.de'
-export const FALLBACK_BLOSSOM = 'https://blossom.primal.net'
+export const DEFAULT_BLOSSOM_PRIMARY = 'https://blossom.nostr.build'
+export const DEFAULT_BLOSSOM_FALLBACK = 'https://blossom.primal.net'
 
 export const ANDROID_APP_URL = 'https://app.firewisp.rtard.de/'
 export const ZAPSTORE_URL = 'https://zapstore.dev/'
@@ -21,8 +21,8 @@ export const DEFAULT_RELAYS: RelayEntry[] = [
 ]
 
 export const DEFAULT_BLOSSOM_SERVERS: string[] = [
-  FIREWISP_BLOSSOM,
-  FALLBACK_BLOSSOM,
+  DEFAULT_BLOSSOM_PRIMARY,
+  DEFAULT_BLOSSOM_FALLBACK,
 ]
 
 export const DEFAULT_NOTE_POW_BITS = 16
