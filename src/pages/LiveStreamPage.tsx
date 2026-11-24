@@ -416,7 +416,8 @@ export function LiveStreamPage() {
   })
 
   const [companion, setCompanion] = useState<WatchWithSelection | null>(null)
-  const [focusedSlot, setFocusedSlot] = useState<'primary' | 'companion'>('primary')
+  const [audioSlot, setAudioSlot] = useState<'primary' | 'companion'>('primary')
+  const [chatSlot, setChatSlot] = useState<'primary' | 'companion'>('primary')
   const [watchWithOpen, setWatchWithOpen] = useState(false)
   const pendingSwapRef = useRef<WatchWithSelection | null>(null)
 
@@ -468,15 +469,16 @@ export function LiveStreamPage() {
   const prevATagRef = useRef(currentATagStr)
 
   const isSplitView = Boolean(companion && companionATag && companionATag !== currentATagStr)
-  const activeSlot: 'primary' | 'companion' = isSplitView ? focusedSlot : 'primary'
+  const activeAudioSlot: 'primary' | 'companion' = isSplitView ? audioSlot : 'primary'
+  const activeChatSlot: 'primary' | 'companion' = isSplitView ? chatSlot : 'primary'
   const focusedChatHost =
-    activeSlot === 'companion' && companion ? companion.hostPubkey : decoded?.hostPubkey || ''
+    activeChatSlot === 'companion' && companion ? companion.hostPubkey : decoded?.hostPubkey || ''
   const focusedChatDTag =
-    activeSlot === 'companion' && companion ? companion.dTag : decoded?.dTag || ''
+    activeChatSlot === 'companion' && companion ? companion.dTag : decoded?.dTag || ''
   const focusedChatATag =
     focusedChatHost && focusedChatDTag ? buildLiveATag(focusedChatHost, focusedChatDTag) : ''
   const focusedChatRelays =
-    activeSlot === 'companion' && companion
+    activeChatSlot === 'companion' && companion
       ? companionActivity?.relayHints?.length
         ? companionActivity.relayHints
         : companion.relays
@@ -484,7 +486,7 @@ export function LiveStreamPage() {
         ? activeActivity.relayHints
         : decoded?.relays || []
   const focusedChatTitleRaw =
-    activeSlot === 'companion'
+    activeChatSlot === 'companion'
       ? companionActivity?.title ||
         companionHostProfile?.display_name ||
         companionHostProfile?.name ||
@@ -541,10 +543,12 @@ export function LiveStreamPage() {
       if (pendingSwapRef.current) {
         setCompanion(pendingSwapRef.current)
         pendingSwapRef.current = null
-        setFocusedSlot('primary')
+        setAudioSlot('primary')
+        setChatSlot('primary')
       } else {
         setCompanion(null)
-        setFocusedSlot('primary')
+        setAudioSlot('primary')
+        setChatSlot('primary')
       }
     }
     if (!currentATagStr) {
@@ -634,19 +638,19 @@ export function LiveStreamPage() {
   const companionPlayableUrl = isPlayableStreamUrl(companionRawUrl) ? companionRawUrl : undefined
   const companionTitle = companionActivity?.title || `${companionHostName}'s stream`
 
-  // Active focused stream metadata drives Stream Info, Zap, Follow, Share, Chat & Top Zappers
-  const focusedActivity = activeSlot === 'companion' ? companionActivity : activeActivity
-  const hostPubkey = activeSlot === 'companion' ? companionHostPubkey : primaryHostPubkey
-  const hostProfile = activeSlot === 'companion' ? companionHostProfile : primaryHostProfile
-  const hostName = activeSlot === 'companion' ? companionHostName : primaryHostName
-  const focusedIsLive = activeSlot === 'companion' ? companionIsLive : isLive
-  const focusedTitle = activeSlot === 'companion' ? companionTitle : primaryTitle
-  const focusedATag = activeSlot === 'companion' && companionATag ? companionATag : aTag
+  // Active chat tab drives Stream Info, Zap, Follow, Share, Live Chat & Top Zappers (independent of Audio!)
+  const focusedActivity = activeChatSlot === 'companion' ? companionActivity : activeActivity
+  const hostPubkey = activeChatSlot === 'companion' ? companionHostPubkey : primaryHostPubkey
+  const hostProfile = activeChatSlot === 'companion' ? companionHostProfile : primaryHostProfile
+  const hostName = activeChatSlot === 'companion' ? companionHostName : primaryHostName
+  const focusedIsLive = activeChatSlot === 'companion' ? companionIsLive : isLive
+  const focusedTitle = activeChatSlot === 'companion' ? companionTitle : primaryTitle
+  const focusedATag = activeChatSlot === 'companion' && companionATag ? companionATag : aTag
   const focusedPublisherPubkey =
-    activeSlot === 'companion' && companion ? companion.hostPubkey : decoded.hostPubkey
-  const focusedDTag = activeSlot === 'companion' && companion ? companion.dTag : decoded.dTag
+    activeChatSlot === 'companion' && companion ? companion.hostPubkey : decoded.hostPubkey
+  const focusedDTag = activeChatSlot === 'companion' && companion ? companion.dTag : decoded.dTag
   const focusedRelays =
-    activeSlot === 'companion' && companion
+    activeChatSlot === 'companion' && companion
       ? companionActivity?.relayHints?.length
         ? companionActivity.relayHints
         : companion.relays
@@ -657,17 +661,28 @@ export function LiveStreamPage() {
   const isFollowing = Boolean(hostPubkey && follows.includes(hostPubkey.toLowerCase()))
 
   const handlePopOutMiniPlayer = () => {
-    const targetUrl = activeSlot === 'companion' ? companionPlayableUrl : playableUrl
+    const useCompanion = activeAudioSlot === 'companion' && Boolean(companionPlayableUrl && companion)
+    const targetUrl = useCompanion ? companionPlayableUrl : playableUrl
     if (!targetUrl) return
-    const addr = encodeLiveNaddr(focusedPublisherPubkey, focusedDTag, focusedRelays)
+    const targetPub = useCompanion && companion ? companion.hostPubkey : decoded.hostPubkey
+    const targetDTag = useCompanion && companion ? companion.dTag : decoded.dTag
+    const targetRelays =
+      useCompanion && companion
+        ? companionActivity?.relayHints?.length
+          ? companionActivity.relayHints
+          : companion.relays
+        : activeActivity?.relayHints?.length
+          ? activeActivity.relayHints
+          : decoded.relays
+    const addr = encodeLiveNaddr(targetPub, targetDTag, targetRelays)
     openMiniPlayer({
-      aTag: focusedATag,
+      aTag: useCompanion ? companionATag : aTag,
       naddr: addr,
       streamUrl: targetUrl,
-      posterUrl: focusedActivity?.image,
-      title: focusedTitle,
-      hostName,
-      isLive: focusedIsLive,
+      posterUrl: (useCompanion ? companionActivity : activeActivity)?.image,
+      title: useCompanion ? companionTitle : primaryTitle,
+      hostName: useCompanion ? companionHostName : primaryHostName,
+      isLive: useCompanion ? companionIsLive : isLive,
     })
     navigate('/')
   }
@@ -794,7 +809,7 @@ export function LiveStreamPage() {
             title={
               isSplitView
                 ? 'Change second stream or exit split view'
-                : 'Watch With — add a second stream side-by-side (1 audio & chat active at a time)'
+                : 'Watch With — add a second stream side-by-side (1 audio at a time, switch chats freely)'
             }
             className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition cursor-pointer ${
               isSplitView
@@ -805,7 +820,7 @@ export function LiveStreamPage() {
             <Columns2 className={`w-3.5 h-3.5 ${isSplitView ? 'text-white' : 'text-[#ff922b]'}`} />
             <span className="hidden sm:inline">{isSplitView ? 'Watching 2' : 'Watch With'}</span>
           </button>
-          {(activeSlot === 'companion' ? companionPlayableUrl : playableUrl) && (
+          {(activeAudioSlot === 'companion' ? companionPlayableUrl : playableUrl) && (
             <button
               type="button"
               onClick={handlePopOutMiniPlayer}
@@ -842,7 +857,7 @@ export function LiveStreamPage() {
               className={
                 isSplitView
                   ? `rounded-xl overflow-hidden border transition bg-[#12131a] ${
-                      activeSlot === 'primary'
+                      activeAudioSlot === 'primary'
                         ? 'border-[#e8590c] ring-1 ring-[#e8590c]/45'
                         : 'border-[#232530]'
                     }`
@@ -862,22 +877,29 @@ export function LiveStreamPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setFocusedSlot('primary')}
+                    onClick={() =>
+                      setAudioSlot((prev) => (prev === 'primary' ? 'companion' : 'primary'))
+                    }
+                    title={
+                      activeAudioSlot === 'primary'
+                        ? 'Audio playing here — click to swap audio to the other stream'
+                        : 'Swap audio to this stream (mutes the other)'
+                    }
                     className={`px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1 shrink-0 transition cursor-pointer ${
-                      activeSlot === 'primary'
-                        ? 'bg-[#e8590c] text-white'
+                      activeAudioSlot === 'primary'
+                        ? 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                         : 'bg-[#1e202c] hover:bg-[#2a2d3d] text-[#b8b5ad] hover:text-white'
                     }`}
                   >
-                    {activeSlot === 'primary' ? (
+                    {activeAudioSlot === 'primary' ? (
                       <>
                         <Volume2 className="w-3 h-3" />
-                        Audio &amp; Chat
+                        Audio On
                       </>
                     ) : (
                       <>
                         <VolumeX className="w-3 h-3" />
-                        Switch Audio &amp; Chat
+                        Audio Swap
                       </>
                     )}
                   </button>
@@ -897,8 +919,8 @@ export function LiveStreamPage() {
                   isLive={isLive}
                   autoStart={resumedFromMini}
                   compact={isSplitView}
-                  forceMuted={isSplitView ? activeSlot !== 'primary' : undefined}
-                  onRequestFocus={isSplitView ? () => setFocusedSlot('primary') : undefined}
+                  forceMuted={isSplitView ? activeAudioSlot !== 'primary' : undefined}
+                  onRequestFocus={isSplitView ? () => setAudioSlot('primary') : undefined}
                   onPlaybackStart={() => {
                     // Stop any other stream running in mini-player or inline feed to prevent duplicate audio
                     if (useLiveStore.getState().miniPlayer) closeMiniPlayer()
@@ -931,7 +953,7 @@ export function LiveStreamPage() {
             {isSplitView && companion && (
               <div
                 className={`rounded-xl overflow-hidden border transition bg-[#12131a] ${
-                  activeSlot === 'companion'
+                  activeAudioSlot === 'companion'
                     ? 'border-[#e8590c] ring-1 ring-[#e8590c]/45'
                     : 'border-[#232530]'
                 }`}
@@ -951,22 +973,29 @@ export function LiveStreamPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setFocusedSlot('companion')}
+                      onClick={() =>
+                        setAudioSlot((prev) => (prev === 'companion' ? 'primary' : 'companion'))
+                      }
+                      title={
+                        activeAudioSlot === 'companion'
+                          ? 'Audio playing here — click to swap audio to the other stream'
+                          : 'Swap audio to this stream (mutes the other)'
+                      }
                       className={`px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer ${
-                        activeSlot === 'companion'
-                          ? 'bg-[#e8590c] text-white'
+                        activeAudioSlot === 'companion'
+                          ? 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                           : 'bg-[#1e202c] hover:bg-[#2a2d3d] text-[#b8b5ad] hover:text-white'
                       }`}
                     >
-                      {activeSlot === 'companion' ? (
+                      {activeAudioSlot === 'companion' ? (
                         <>
                           <Volume2 className="w-3 h-3" />
-                          Audio &amp; Chat
+                          Audio On
                         </>
                       ) : (
                         <>
                           <VolumeX className="w-3 h-3" />
-                          Switch Audio &amp; Chat
+                          Audio Swap
                         </>
                       )}
                     </button>
@@ -992,7 +1021,8 @@ export function LiveStreamPage() {
                       type="button"
                       onClick={() => {
                         setCompanion(null)
-                        setFocusedSlot('primary')
+                        setAudioSlot('primary')
+                        setChatSlot('primary')
                       }}
                       title="Close second stream"
                       aria-label="Close second stream"
@@ -1012,8 +1042,8 @@ export function LiveStreamPage() {
                     isLive={companionIsLive}
                     autoStart
                     compact
-                    forceMuted={activeSlot !== 'companion'}
-                    onRequestFocus={() => setFocusedSlot('companion')}
+                    forceMuted={activeAudioSlot !== 'companion'}
+                    onRequestFocus={() => setAudioSlot('companion')}
                     onPlaybackStart={() => {
                       if (useLiveStore.getState().miniPlayer) closeMiniPlayer()
                       useLiveStore.getState().setActiveInlineStream(null)
@@ -1074,28 +1104,60 @@ export function LiveStreamPage() {
                 dragOver ? 'border-[#e8590c] ring-2 ring-[#e8590c]/40' : 'border-[#232530]'
               }`}
             >
-              <div className="px-3 py-2 border-b border-[#20222c] flex items-center justify-between gap-2 text-xs font-semibold text-[#d4d2cb] shrink-0">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <MessageCircle className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
-                  <span className="truncate">
-                    {isSplitView ? `Chat · ${focusedTitle}` : 'Live Chat'}
+              <div className="border-b border-[#20222c] shrink-0">
+                <div className="px-3 py-2 flex items-center justify-between gap-2 text-xs font-semibold text-[#d4d2cb]">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <MessageCircle className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+                    <span className="truncate">Live Chat</span>
                   </span>
-                </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {isSplitView && (
+                  <span className="text-[11px] font-normal text-[#8c8a82] shrink-0">
+                    {messages.length}
+                  </span>
+                </div>
+
+                {/* Independent Chat Tabs in Watch With mode — switch chats freely without changing audio */}
+                {isSplitView && (
+                  <div
+                    role="tablist"
+                    aria-label="Switch live stream chat"
+                    className="grid grid-cols-2 border-t border-[#20222c] bg-[#0f1016]"
+                  >
                     <button
                       type="button"
-                      onClick={() =>
-                        setFocusedSlot((prev) => (prev === 'primary' ? 'companion' : 'primary'))
-                      }
-                      title="Switch active Audio & Chat to the other stream"
-                      className="px-1.5 py-0.5 rounded bg-[#1d1f29] hover:bg-[#e8590c] text-[10px] font-medium text-[#ff922b] hover:text-white transition cursor-pointer"
+                      role="tab"
+                      aria-selected={activeChatSlot === 'primary'}
+                      onClick={() => setChatSlot('primary')}
+                      title={`View chat for ${primaryTitle}`}
+                      className={`px-2.5 py-2 text-[11px] font-semibold flex items-center justify-center gap-1.5 min-w-0 border-b-2 transition cursor-pointer ${
+                        activeChatSlot === 'primary'
+                          ? 'border-[#e8590c] bg-[#161822] text-white'
+                          : 'border-transparent text-[#8c8a82] hover:text-white hover:bg-white/[0.03]'
+                      }`}
                     >
-                      Switch
+                      {activeAudioSlot === 'primary' && (
+                        <Volume2 className="w-3 h-3 text-[#ff922b] shrink-0" />
+                      )}
+                      <span className="truncate">{primaryTitle}</span>
                     </button>
-                  )}
-                  <span className="text-[11px] font-normal text-[#8c8a82]">{messages.length}</span>
-                </div>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={activeChatSlot === 'companion'}
+                      onClick={() => setChatSlot('companion')}
+                      title={`View chat for ${companionTitle}`}
+                      className={`px-2.5 py-2 text-[11px] font-semibold flex items-center justify-center gap-1.5 min-w-0 border-b-2 border-l border-l-[#20222c] transition cursor-pointer ${
+                        activeChatSlot === 'companion'
+                          ? 'border-[#e8590c] bg-[#161822] text-white'
+                          : 'border-transparent text-[#8c8a82] hover:text-white hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      {activeAudioSlot === 'companion' && (
+                        <Volume2 className="w-3 h-3 text-[#ff922b] shrink-0" />
+                      )}
+                      <span className="truncate">{companionTitle}</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {dragOver && (
@@ -1413,7 +1475,8 @@ export function LiveStreamPage() {
           }}
           onClearCompanion={() => {
             setCompanion(null)
-            setFocusedSlot('primary')
+            setAudioSlot('primary')
+            setChatSlot('primary')
           }}
           onClose={() => setWatchWithOpen(false)}
         />

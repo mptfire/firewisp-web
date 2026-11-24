@@ -159,7 +159,7 @@ export function WatchWithModal({
                 Watch With — Split Stream
               </h2>
               <p className="text-[11px] text-[#8c8a82] truncate">
-                Watch 2 streams side-by-side · 1 active audio, chat &amp; top zappers at a time
+                Watch 2 streams side-by-side · 1 active audio at a time, switch chats freely
               </p>
             </div>
           </div>
