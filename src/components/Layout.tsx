@@ -26,10 +26,12 @@ import {
 } from '../lib/constants'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { useAuthStore } from '../lib/store/useAuthStore'
+import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
+import { FloatingStreamPlayer } from './FloatingStreamPlayer'
 import { TrendingSidebar } from './TrendingSidebar'
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -49,6 +51,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
+  const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
   const [relaysExpanded, setRelaysExpanded] = useState(false)
 
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
@@ -369,12 +372,17 @@ export function Layout({ children }: { children: ReactNode }) {
       {toastMessage && !powBusyMessage && (
         <button
           onClick={() => setToast(null)}
-          className="fixed bottom-16 md:bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl bg-[#1a1c24] border border-[#2f3344] shadow-xl text-xs text-[#f4f1ea] hover:border-[#e8590c] cursor-pointer"
+          className={`fixed z-50 px-4 py-2.5 rounded-xl bg-[#1a1c24] border border-[#2f3344] shadow-xl text-xs text-[#f4f1ea] hover:border-[#e8590c] cursor-pointer ${
+            hasMiniPlayer
+              ? 'bottom-16 md:bottom-5 left-1/2 -translate-x-1/2'
+              : 'bottom-16 md:bottom-5 right-5'
+          }`}
         >
           {toastMessage}
         </button>
       )}
 
+      <FloatingStreamPlayer />
       <AuthModal />
     </div>
   )

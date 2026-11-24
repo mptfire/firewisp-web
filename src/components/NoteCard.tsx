@@ -117,6 +117,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const aTag = buildLiveATag(hostPubkey, dTag)
   const entry = useLiveStore((s) => s.liveStreams[aTag])
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
@@ -177,6 +178,18 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           title={title}
           isLive={isLive}
           autoStart
+          onPopOut={() => {
+            setPlayingInline(false)
+            openMiniPlayer({
+              aTag,
+              naddr: bech32,
+              streamUrl,
+              posterUrl: thumb,
+              title,
+              hostName,
+              isLive,
+            })
+          }}
           onStreamOffline={() => markStreamOffline(aTag)}
         />
       ) : streamUrl ? (
@@ -359,9 +372,11 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
 const ReplyContextLine = memo(function ReplyContextLine({
   event,
   hideParentPreview = false,
+  onOpenLightbox,
 }: {
   event: Event
   hideParentPreview?: boolean
+  onOpenLightbox?: (media: MediaAttachment) => void
 }) {
   const refs = useMemo(() => extractReplyRefs(event), [event])
   const replyTargetId = refs.replyId || refs.rootId
@@ -415,10 +430,10 @@ const ReplyContextLine = memo(function ReplyContextLine({
     .replace(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif|mp4|webm|mov|m4v)(\?\S*)?/gi, '')
     .replace(/\s+/g, ' ')
     .trim()
-  const parentImage = parsedParent?.media.find((m) => m.kind === 'image')?.url
+  const parentImage = parsedParent?.media.find((m) => m.kind === 'image')
   const parentVideo = parsedParent?.media.find((m) => m.kind === 'video')
   const parentYoutube = parsedParent?.youtube[0]
-  const parentThumb = parentImage || parentYoutube?.thumbnailUrl || parentVideo?.poster
+  const hasParentMedia = Boolean(parentImage || parentVideo || parentYoutube)
 
   return (
     <Link
@@ -441,35 +456,55 @@ const ReplyContextLine = memo(function ReplyContextLine({
           · {formatRelativeTime(parentEvent.created_at)}
         </span>
       </div>
-      <div className="flex items-start gap-2.5">
-        <p className="flex-1 min-w-0 text-xs text-[#b8b5ad] line-clamp-3 leading-relaxed break-words">
-          {parentSnippet ||
-            (parentYoutube
-              ? '[YouTube video]'
-              : parentVideo
-                ? '[Video]'
-                : parentThumb
-                  ? '[Image]'
-                  : 'View original note')}
+
+      {(parentSnippet || !hasParentMedia) && (
+        <p className="text-xs text-[#c7c4bc] line-clamp-3 leading-relaxed break-words">
+          {parentSnippet || 'View original note'}
         </p>
-        {parentThumb ? (
-          <img
-            src={parentThumb}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            className="w-12 h-12 rounded-lg object-cover shrink-0 border border-[#2a2d3d] bg-[#0b0b0e]"
-          />
-        ) : parentVideo ? (
-          <video
-            src={`${parentVideo.url}#t=0.001`}
-            muted
-            playsInline
-            preload="metadata"
-            className="w-12 h-12 rounded-lg object-cover shrink-0 border border-[#2a2d3d] bg-[#0b0b0e]"
-          />
-        ) : null}
-      </div>
+      )}
+
+      {parentImage && (
+        <img
+          src={parentImage.url}
+          alt={parentImage.alt || 'Original note image'}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onClick={(e) => {
+            if (!onOpenLightbox) return
+            e.preventDefault()
+            e.stopPropagation()
+            onOpenLightbox(parentImage)
+          }}
+          className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734] hover:border-[#e8590c]/60 transition cursor-zoom-in"
+        />
+      )}
+
+      {!parentImage && parentVideo && (
+        <video
+          src={parentVideo.poster ? parentVideo.url : `${parentVideo.url}#t=0.001`}
+          poster={parentVideo.poster}
+          controls
+          playsInline
+          preload="metadata"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          className="mt-2 rounded-lg max-h-64 w-full bg-black border border-[#242734]"
+        />
+      )}
+
+      {!parentImage && !parentVideo && parentYoutube && (
+        <div
+          className="mt-2"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+        >
+          <YouTubeCard video={parentYoutube} compact />
+        </div>
+      )}
     </Link>
   )
 })
@@ -739,7 +774,11 @@ export const NoteCard = memo(function NoteCard({
             </div>
           </div>
 
-          <ReplyContextLine event={event} hideParentPreview={hideParentPreview} />
+          <ReplyContextLine
+            event={event}
+            hideParentPreview={hideParentPreview}
+            onOpenLightbox={setLightboxMedia}
+          />
 
           {/* Body segments (collapses long walls of text cleanly like Jumble) */}
           {hasVisibleBody && (

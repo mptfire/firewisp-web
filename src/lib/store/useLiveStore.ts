@@ -35,6 +35,16 @@ export interface LiveStreamEntry {
   lastChatAt: number
 }
 
+export interface MiniPlayerStream {
+  aTag: string
+  naddr: string
+  streamUrl: string
+  posterUrl?: string
+  title: string
+  hostName: string
+  isLive: boolean
+}
+
 interface LiveState {
   liveStreams: Record<string, LiveStreamEntry>
   streamerFollowerCounts: Record<string, number>
@@ -44,10 +54,13 @@ interface LiveState {
   currentChatMessages: LiveChatMessage[]
   streamZapTotal: number
   loadingStream: boolean
+  miniPlayer: MiniPlayerStream | null
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
   markStreamOffline: (aTag: string) => void
+  openMiniPlayer: (stream: MiniPlayerStream) => void
+  closeMiniPlayer: () => void
   subscribeActiveStream: (
     hostPubkey: string,
     dTag: string,
@@ -141,6 +154,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   currentChatMessages: [],
   streamZapTotal: 0,
   loadingStream: false,
+  miniPlayer: null,
+
+  openMiniPlayer: (stream) => set({ miniPlayer: stream }),
+  closeMiniPlayer: () => set({ miniPlayer: null }),
 
   fetchStreamerFollowerCounts: async (pubkeys) => {
     const pending = [

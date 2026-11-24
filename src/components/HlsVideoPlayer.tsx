@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Loader2, Play, Radio, Shield } from 'lucide-react'
+import { AlertTriangle, Loader2, PictureInPicture2, Play, Radio, Shield } from 'lucide-react'
 
 interface HlsVideoPlayerProps {
   streamUrl: string
@@ -7,6 +7,9 @@ interface HlsVideoPlayerProps {
   title?: string
   isLive?: boolean
   autoStart?: boolean
+  compact?: boolean
+  onPopOut?: () => void
+  onVideoElement?: (el: HTMLVideoElement | null) => void
   onStreamOffline?: () => void
 }
 
@@ -16,6 +19,9 @@ export function HlsVideoPlayer({
   title,
   isLive = true,
   autoStart = false,
+  compact = false,
+  onPopOut,
+  onVideoElement,
   onStreamOffline,
 }: HlsVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -125,8 +131,17 @@ export function HlsVideoPlayer({
     }
   }, [started, streamUrl])
 
+  useEffect(() => {
+    onVideoElement?.(started ? videoRef.current : null)
+    return () => onVideoElement?.(null)
+  }, [started, onVideoElement])
+
   return (
-    <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-[#232530]">
+    <div
+      className={`relative w-full aspect-video bg-black overflow-hidden group/player ${
+        compact ? '' : 'rounded-xl border border-[#232530]'
+      }`}
+    >
       {!started ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
           {posterUrl && (
@@ -171,6 +186,17 @@ export function HlsVideoPlayer({
             poster={posterUrl}
             className="w-full h-full object-contain bg-black"
           />
+          {onPopOut && !error && (
+            <button
+              type="button"
+              onClick={onPopOut}
+              title="Pop out mini-player so you can keep watching while browsing"
+              className="absolute top-2.5 right-2.5 z-10 px-2.5 py-1.5 rounded-lg bg-black/75 hover:bg-[#e8590c] border border-white/15 text-[11px] font-semibold text-white flex items-center gap-1.5 opacity-90 sm:opacity-0 sm:group-hover/player:opacity-100 focus:opacity-100 transition shadow-lg cursor-pointer"
+            >
+              <PictureInPicture2 className="w-3.5 h-3.5" />
+              <span>Mini-player</span>
+            </button>
+          )}
           {buffering && !error && (
             <div className="absolute inset-0 bg-black/50 flex items-center justify-center pointer-events-none">
               <Loader2 className="w-8 h-8 animate-spin text-[#e8590c]" />

@@ -9,6 +9,7 @@ import {
   ImagePlus,
   Loader2,
   MessageCircle,
+  PictureInPicture2,
   Radio,
   Send,
   UserCheck,
@@ -395,6 +396,9 @@ export function LiveStreamPage() {
   const subscribeActiveStream = useLiveStore((s) => s.subscribeActiveStream)
   const sendChatMessage = useLiveStore((s) => s.sendChatMessage)
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
+  const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
+  const [resumedFromMini, setResumedFromMini] = useState(false)
 
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
@@ -430,6 +434,20 @@ export function LiveStreamPage() {
     if (!decoded) return
     return subscribeActiveStream(decoded.hostPubkey, decoded.dTag, decoded.relays)
   }, [decoded, subscribeActiveStream])
+
+  // On entering /live/:naddr, if this exact stream is already running in the floating mini-player,
+  // dock it cleanly back into the main player with zero duplicate audio.
+  useEffect(() => {
+    if (!decoded) return
+    const currentATag = buildLiveATag(decoded.hostPubkey, decoded.dTag)
+    const activeMini = useLiveStore.getState().miniPlayer
+    if (activeMini && activeMini.aTag === currentATag) {
+      setResumedFromMini(true)
+      closeMiniPlayer()
+    } else {
+      setResumedFromMini(false)
+    }
+  }, [decoded, closeMiniPlayer])
 
   const messages = useMemo(() => {
     return rawMessages.filter((m) => {
@@ -475,6 +493,25 @@ export function LiveStreamPage() {
   const isLive = activeActivity?.status === 'live'
   const playableUrl = activeActivity?.streamingUrl || activeActivity?.recordingUrl
   const aTag = buildLiveATag(decoded.hostPubkey, decoded.dTag)
+
+  const handlePopOutMiniPlayer = () => {
+    if (!playableUrl) return
+    const addr = encodeLiveNaddr(
+      decoded.hostPubkey,
+      decoded.dTag,
+      activeActivity?.relayHints || decoded.relays,
+    )
+    openMiniPlayer({
+      aTag,
+      naddr: addr,
+      streamUrl: playableUrl,
+      posterUrl: activeActivity?.image,
+      title: activeActivity?.title || `${hostName}'s stream`,
+      hostName,
+      isLive,
+    })
+    navigate('/')
+  }
 
   const handleUploadFiles = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return
@@ -565,31 +602,44 @@ export function LiveStreamPage() {
           </div>
         </div>
 
-        <button
-          onClick={async () => {
-            const addr = encodeLiveNaddr(
-              decoded.hostPubkey,
-              decoded.dTag,
-              activeActivity?.relayHints || decoded.relays,
-            )
-            await navigator.clipboard.writeText(`https://firewisp.rtard.de/live/${addr}`)
-            setCopiedLink(true)
-            setTimeout(() => setCopiedLink(false), 1800)
-          }}
-          className="px-2.5 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2a2d3a] text-xs text-[#d4d2cb] flex items-center gap-1.5 shrink-0 cursor-pointer"
-        >
-          {copiedLink ? (
-            <>
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Share</span>
-            </>
+        <div className="flex items-center gap-2 shrink-0">
+          {playableUrl && (
+            <button
+              type="button"
+              onClick={handlePopOutMiniPlayer}
+              title="Pop out mini-player and keep watching while browsing Fire Wisp"
+              className="px-2.5 py-1.5 rounded-lg bg-[#e8590c]/15 hover:bg-[#e8590c] border border-[#e8590c]/40 text-xs font-medium text-[#ff922b] hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <PictureInPicture2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Mini-player</span>
+            </button>
           )}
-        </button>
+          <button
+            onClick={async () => {
+              const addr = encodeLiveNaddr(
+                decoded.hostPubkey,
+                decoded.dTag,
+                activeActivity?.relayHints || decoded.relays,
+              )
+              await navigator.clipboard.writeText(`https://firewisp.rtard.de/live/${addr}`)
+              setCopiedLink(true)
+              setTimeout(() => setCopiedLink(false), 1800)
+            }}
+            className="px-2.5 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2a2d3a] text-xs text-[#d4d2cb] flex items-center gap-1.5 shrink-0 cursor-pointer"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Share</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Main Stage: Video + Live Chat aligned to exact video height, with Stream Info below */}
@@ -607,6 +657,8 @@ export function LiveStreamPage() {
                 posterUrl={activeActivity?.image}
                 title={activeActivity?.title}
                 isLive={isLive}
+                autoStart={resumedFromMini}
+                onPopOut={handlePopOutMiniPlayer}
                 onStreamOffline={() => markStreamOffline(aTag)}
               />
             ) : (

@@ -191,6 +191,15 @@ export function TrendingSidebar() {
     }
   }, [trendingSidebarIds.length, loadingTrends, loadTrendingSidebar])
 
+  // Auto-refresh trending posts every 5 minutes while the tab is visible
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      void loadTrendingSidebar(true)
+    }, 5 * 60_000)
+    return () => clearInterval(id)
+  }, [loadTrendingSidebar])
+
   return (
     <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
       <div className="flex items-center justify-between mb-2.5">
