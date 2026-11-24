@@ -180,6 +180,7 @@ export function FloatingStreamPlayer() {
   const rawMiniMessages = useLiveStore((s) => s.miniChatMessages)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const markStreamOnline = useLiveStore((s) => s.markStreamOnline)
   const subscribeMiniChat = useLiveStore((s) => s.subscribeMiniChat)
   const sendChatMessage = useLiveStore((s) => s.sendChatMessage)
 
@@ -536,6 +537,7 @@ export function FloatingStreamPlayer() {
           autoStart
           compact
           onVideoElement={handleVideoElement}
+          onPlaybackReady={() => markStreamOnline(miniPlayer.aTag)}
           onStreamOffline={() => markStreamOffline(miniPlayer.aTag)}
         />
       </div>

@@ -62,6 +62,7 @@ interface LiveState {
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
   markStreamOffline: (aTag: string) => void
+  markStreamOnline: (aTag: string) => void
   openMiniPlayer: (stream: MiniPlayerStream) => void
   closeMiniPlayer: () => void
   setActiveInlineStream: (key: string | null) => void
@@ -87,8 +88,17 @@ interface LiveState {
 const pendingChatters = new Map<string, Set<string>>()
 const pendingChatAt = new Map<string, number>()
 const latestActivitySeen = new Map<string, { createdAt: number; status: string }>()
+const offlineStreamBackup = new Map<string, LiveStreamEntry>()
 const fetchedFollowerPubkeys = new Set<string>()
 const NIP45_COUNT_RELAYS = ['wss://relay.primal.net', 'wss://nos.lol']
+
+function isClientOnline(): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  const statuses = Object.values(useNostrStore.getState().relayStatuses)
+  // Once relays are initialized, require at least one connected relay so a local outage never wipes LIVE NOW
+  if (statuses.length > 0 && !statuses.some((st) => st === 'connected')) return false
+  return true
+}
 
 /**
  * Queries NIP-45 `COUNT` (`kind: 3`, `#p`) over a single multiplexed WebSocket
@@ -244,6 +254,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   },
 
   markStreamOffline: (aTag) => {
+    if (!isClientOnline()) return
     const nowSec = Math.floor(Date.now() / 1000)
     const prevSeen = latestActivitySeen.get(aTag)
     latestActivitySeen.set(aTag, {
@@ -251,18 +262,50 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       status: 'ended',
     })
     set((s) => {
+      const removed = s.liveStreams[aTag]
+      if (removed) {
+        offlineStreamBackup.set(aTag, removed)
+        if (offlineStreamBackup.size > 60) {
+          const oldestKey = offlineStreamBackup.keys().next().value
+          if (oldestKey) offlineStreamBackup.delete(oldestKey)
+        }
+      }
+      if (!removed) return s
       const next = { ...s.liveStreams }
       delete next[aTag]
+      // Keep activeActivity & miniPlayer intact so the stream page keeps its Retry Stream button
+      return { liveStreams: next }
+    })
+  },
+
+  markStreamOnline: (aTag) => {
+    set((s) => {
+      const backup = offlineStreamBackup.get(aTag)
+      offlineStreamBackup.delete(aTag)
+      const activity =
+        (s.activeATag === aTag ? s.activeActivity : null) || backup?.activity || null
+      if (!activity || activity.status !== 'live' || !isPlayableStreamUrl(activity.streamingUrl)) {
+        return s
+      }
+      const nowSec = Math.floor(Date.now() / 1000)
+      if (activity.ends && activity.ends > 0 && activity.ends <= nowSec) return s
+      latestActivitySeen.set(aTag, {
+        createdAt: activity.createdAt,
+        status: 'live',
+      })
+      if (s.liveStreams[aTag]) return s
       return {
-        liveStreams: next,
-        activeActivity:
-          s.activeATag === aTag && s.activeActivity
-            ? { ...s.activeActivity, status: 'ended' }
-            : s.activeActivity,
-        miniPlayer:
-          s.miniPlayer && s.miniPlayer.aTag === aTag
-            ? { ...s.miniPlayer, isLive: false }
-            : s.miniPlayer,
+        liveStreams: {
+          ...s.liveStreams,
+          [aTag]: backup
+            ? { ...backup, activity }
+            : {
+                activity,
+                aTagValue: aTag,
+                chatters: [],
+                lastChatAt: 0,
+              },
+        },
       }
     })
   },

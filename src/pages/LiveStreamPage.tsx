@@ -3,10 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Ban,
-  Check,
   ChevronDown,
   ChevronUp,
-  Copy,
   CornerDownRight,
   ImagePlus,
   Loader2,
@@ -14,6 +12,7 @@ import {
   PictureInPicture2,
   Radio,
   Send,
+  Share2,
   UserCheck,
   UserPlus,
   X,
@@ -37,6 +36,7 @@ import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
 import { LiveNowRow } from '../components/LiveNowRow'
 import { MediaLightbox } from '../components/MediaLightbox'
+import { ShareStreamModal } from '../components/ShareStreamModal'
 import { YouTubeCard } from '../components/YouTubeCard'
 import { ZapModal } from '../components/ZapModal'
 
@@ -399,6 +399,7 @@ export function LiveStreamPage() {
   const subscribeActiveStream = useLiveStore((s) => s.subscribeActiveStream)
   const sendChatMessage = useLiveStore((s) => s.sendChatMessage)
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const markStreamOnline = useLiveStore((s) => s.markStreamOnline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
   const [resumedFromMini, setResumedFromMini] = useState(() => {
@@ -432,22 +433,15 @@ export function LiveStreamPage() {
   const [sending, setSending] = useState(false)
   const [replyTarget, setReplyTarget] = useState<LiveChatMessage | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
-  const [copiedLink, setCopiedLink] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [showOtherStreams, setShowOtherStreams] = useState(false)
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentATagStr = decoded ? buildLiveATag(decoded.hostPubkey, decoded.dTag) : ''
   const prevATagRef = useRef(currentATagStr)
-
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-    }
-  }, [])
 
   useEffect(() => {
     if (!decoded) return
@@ -463,6 +457,7 @@ export function LiveStreamPage() {
       setAttachments([])
       setReplyTarget(null)
       setZapOpen(false)
+      setShareOpen(false)
       setLightboxMedia(null)
       stickToBottomRef.current = true
     }
@@ -656,37 +651,13 @@ export function LiveStreamPage() {
             </button>
           )}
           <button
-            onClick={async () => {
-              const addr = encodeLiveNaddr(
-                decoded.hostPubkey,
-                decoded.dTag,
-                activeActivity?.relayHints || decoded.relays,
-              )
-              try {
-                await navigator.clipboard.writeText(`https://firewisp.rtard.de/live/${addr}`)
-                setCopiedLink(true)
-                if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
-                copyTimerRef.current = setTimeout(() => {
-                  copyTimerRef.current = null
-                  setCopiedLink(false)
-                }, 1800)
-              } catch {
-                useNostrStore.getState().setToast('Clipboard permission unavailable')
-              }
-            }}
-            className="px-2.5 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2a2d3a] text-xs text-[#d4d2cb] flex items-center gap-1.5 shrink-0 cursor-pointer"
+            type="button"
+            onClick={() => setShareOpen(true)}
+            title="Share stream on Nostr or copy link"
+            className="px-2.5 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2a2d3a] text-xs font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 shrink-0 transition cursor-pointer"
           >
-            {copiedLink ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Share</span>
-              </>
-            )}
+            <Share2 className="w-3.5 h-3.5 text-[#ff922b]" />
+            <span className="hidden sm:inline">Share</span>
           </button>
         </div>
       </div>
@@ -714,6 +685,7 @@ export function LiveStreamPage() {
                   useLiveStore.getState().setActiveInlineStream(null)
                 }}
                 onPopOut={handlePopOutMiniPlayer}
+                onPlaybackReady={() => markStreamOnline(aTag)}
                 onStreamOffline={() => markStreamOffline(aTag)}
               />
             ) : (
@@ -988,7 +960,15 @@ export function LiveStreamPage() {
               </div>
             </Link>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-[#1c1e2a] hover:bg-[#252838] border border-[#2d3042] hover:border-[#e8590c]/50 text-[#ece9e1] text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5 text-[#ff922b]" />
+                Share Stream
+              </button>
               {hostProfile?.lud16 && (
                 <button
                   onClick={() => setZapOpen(true)}
@@ -1053,6 +1033,28 @@ export function LiveStreamPage() {
           )}
         </div>
       </div>
+
+      {shareOpen && (
+        <ShareStreamModal
+          naddr={encodeLiveNaddr(
+            decoded.hostPubkey,
+            decoded.dTag,
+            activeActivity?.relayHints || decoded.relays,
+          )}
+          hostPubkey={decoded.hostPubkey}
+          displayPubkey={hostPubkey}
+          dTag={decoded.dTag}
+          hostName={hostName}
+          hostPicture={hostProfile?.picture}
+          title={activeActivity?.title || `${hostName}'s stream`}
+          summary={activeActivity?.summary}
+          image={activeActivity?.image}
+          isLive={isLive}
+          viewers={activeActivity?.currentParticipants}
+          relayHint={(activeActivity?.relayHints || decoded.relays)[0]}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       {zapOpen && hostProfile?.lud16 && (
         <ZapModal

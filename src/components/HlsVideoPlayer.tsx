@@ -12,6 +12,7 @@ interface HlsVideoPlayerProps {
   compact?: boolean
   onPopOut?: () => void
   onPlaybackStart?: () => void
+  onPlaybackReady?: () => void
   onVideoElement?: (el: HTMLVideoElement | null) => void
   onStreamOffline?: () => void
 }
@@ -25,6 +26,7 @@ export function HlsVideoPlayer({
   compact = false,
   onPopOut,
   onPlaybackStart,
+  onPlaybackReady,
   onVideoElement,
   onStreamOffline,
 }: HlsVideoPlayerProps) {
@@ -32,9 +34,11 @@ export function HlsVideoPlayer({
   const isLiveRef = useRef(isLive)
   const onStreamOfflineRef = useRef(onStreamOffline)
   const onPlaybackStartRef = useRef(onPlaybackStart)
+  const onPlaybackReadyRef = useRef(onPlaybackReady)
   isLiveRef.current = isLive
   onStreamOfflineRef.current = onStreamOffline
   onPlaybackStartRef.current = onPlaybackStart
+  onPlaybackReadyRef.current = onPlaybackReady
 
   const safeStreamUrl = useMemo(() => sanitizePublicHttpsUrl(streamUrl), [streamUrl])
   const safePosterUrl = useMemo(() => sanitizePublicHttpsUrl(posterUrl) || undefined, [posterUrl])
@@ -114,10 +118,18 @@ export function HlsVideoPlayer({
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (destroyed) return
             setBuffering(false)
+            onPlaybackReadyRef.current?.()
             void video.play().catch(() => {})
           })
           hls.on(Hls.Events.ERROR, (_evt, data) => {
             if (destroyed || !data.fatal) return
+
+            const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+            const notifyOffline = () => {
+              if (isLiveRef.current && isOnline) {
+                onStreamOfflineRef.current?.()
+              }
+            }
 
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryAttempts < 2) {
               mediaRecoveryAttempts++
@@ -136,18 +148,24 @@ export function HlsVideoPlayer({
                 return
               }
               destroyHls()
-              setError('Stream appears offline or unreachable. Click Retry to reconnect.')
+              setError(
+                isLiveRef.current && onStreamOfflineRef.current
+                  ? 'Stream could not be loaded — it may be offline. Hidden from Live Now; click Retry to reconnect.'
+                  : 'Stream appears offline or unreachable. Click Retry to reconnect.',
+              )
               setBuffering(false)
-              const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
-              if (isLiveRef.current && definitiveOffline && isOnline) {
-                onStreamOfflineRef.current?.()
-              }
+              notifyOffline()
               return
             }
 
             destroyHls()
-            setError('Unable to play this live stream.')
+            setError(
+              isLiveRef.current && onStreamOfflineRef.current
+                ? 'Stream could not be played — it may be offline. Hidden from Live Now; click Retry to try again.'
+                : 'Unable to play this live stream.',
+            )
             setBuffering(false)
+            notifyOffline()
           })
         } catch (err) {
           if (!destroyed) {
@@ -162,13 +180,22 @@ export function HlsVideoPlayer({
         nativeCanPlay = () => {
           if (!destroyed) {
             setBuffering(false)
+            onPlaybackReadyRef.current?.()
             void video.play().catch(() => {})
           }
         }
         nativeErr = () => {
           if (!destroyed) {
-            setError('Stream could not be loaded. It may be offline.')
+            const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+            setError(
+              isLiveRef.current && onStreamOfflineRef.current
+                ? 'Stream could not be loaded — it may be offline. Hidden from Live Now; click Retry to reconnect.'
+                : 'Stream could not be loaded. It may be offline.',
+            )
             setBuffering(false)
+            if (isLiveRef.current && isOnline) {
+              onStreamOfflineRef.current?.()
+            }
           }
         }
         video.addEventListener('canplay', nativeCanPlay, { once: true })

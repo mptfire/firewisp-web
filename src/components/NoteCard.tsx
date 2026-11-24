@@ -118,6 +118,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const aTag = buildLiveATag(hostPubkey, dTag)
   const entry = useLiveStore((s) => s.liveStreams[aTag])
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const markStreamOnline = useLiveStore((s) => s.markStreamOnline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const isInMiniPlayer = useLiveStore((s) => s.miniPlayer?.aTag === aTag)
   const playingInline = useLiveStore((s) => s.activeInlineStreamKey === aTag)
@@ -211,6 +212,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               isLive,
             })
           }}
+          onPlaybackReady={() => markStreamOnline(aTag)}
           onStreamOffline={() => markStreamOffline(aTag)}
         />
       ) : liveStreamUrl ? (

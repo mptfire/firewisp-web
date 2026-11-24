@@ -298,3 +298,45 @@ export function sortLiveStreams<T extends RankableLiveStream>(
     return b.activity.createdAt - a.activity.createdAt
   })
 }
+
+/**
+ * Builds the `kind: 1` note content and NIP-18/NIP-53 reference tags for sharing a live stream on Nostr.
+ */
+export function buildShareStreamNotePayload(params: {
+  comment: string
+  naddr: string
+  hostPubkey: string
+  streamerPubkey?: string
+  dTag: string
+  relayHint?: string
+}): { content: string; extraTags: string[][] } {
+  const cleanNaddr = params.naddr.trim().replace(/^nostr:/i, '')
+  const nostrRef = `nostr:${cleanNaddr}`
+  const cleanComment = params.comment.trim()
+  const alreadyHasRef =
+    cleanComment.toLowerCase().includes(cleanNaddr.toLowerCase())
+  const content = !cleanComment
+    ? nostrRef
+    : alreadyHasRef
+      ? cleanComment
+      : `${cleanComment}\n\n${nostrRef}`
+
+  const aTag = buildLiveATag(params.hostPubkey, params.dTag)
+  const safeRelay = sanitizePublicRelayUrl(params.relayHint) || ''
+  const extraTags: string[][] = [
+    safeRelay ? ['q', aTag, safeRelay] : ['q', aTag],
+    safeRelay ? ['a', aTag, safeRelay] : ['a', aTag],
+  ]
+
+  const pSeen = new Set<string>()
+  for (const rawPk of [params.streamerPubkey, params.hostPubkey]) {
+    if (!rawPk) continue
+    const pk = rawPk.toLowerCase()
+    if (isValidHex64(pk) && !pSeen.has(pk)) {
+      pSeen.add(pk)
+      extraTags.push(['p', pk])
+    }
+  }
+
+  return { content, extraTags }
+}

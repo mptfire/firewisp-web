@@ -30,6 +30,7 @@ import { parseBolt11AmountSats, parseNwcUri, requestZapInvoice, resolveLud16ToUr
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import {
   buildLiveATag,
+  buildShareStreamNotePayload,
   decodeLiveNaddr,
   encodeLiveNaddr,
   getChatActivityRef,
@@ -41,6 +42,7 @@ import {
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
 import { parseSharedQueryParams } from '../shareTarget'
+import { useLiveStore } from '../store/useLiveStore'
 import { useNostrStore } from '../store/useNostrStore'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
@@ -841,5 +843,87 @@ describe('Full code-audit regression & security hardening', () => {
     )
     store.ingestEvent(realDel)
     expect(store.isEventDeleted(victimNote)).toBe(true)
+  })
+
+  it('auto-hides unloadable live streams while online, keeps activeActivity for Retry, and restores on recovery', () => {
+    const hostPk = 'd'.repeat(64)
+    const dTag = 'retry-stream'
+    const aTag = buildLiveATag(hostPk, dTag)
+    const nowSec = Math.floor(Date.now() / 1000)
+    const activity = {
+      eventId: 'e'.repeat(64),
+      dTag,
+      hostPubkey: hostPk,
+      title: 'Test Live Stream',
+      status: 'live' as const,
+      streamingUrl: 'https://stream.example.com/live/index.m3u8',
+      participants: [],
+      relayHints: ['wss://relay.snort.social'],
+      createdAt: nowSec - 60,
+    }
+
+    useNostrStore.setState({ relayStatuses: { 'wss://relay.snort.social': 'connected' } })
+    useLiveStore.setState({
+      liveStreams: {
+        [aTag]: { activity, aTagValue: aTag, chatters: [], lastChatAt: 0 },
+      },
+      activeATag: aTag,
+      activeActivity: activity,
+    })
+
+    // While client is offline (all relays disconnected), markStreamOffline must NOT wipe LIVE NOW
+    useNostrStore.setState({ relayStatuses: { 'wss://relay.snort.social': 'disconnected' } })
+    useLiveStore.getState().markStreamOffline(aTag)
+    expect(useLiveStore.getState().liveStreams[aTag]).toBeDefined()
+
+    // While online with a connected relay, markStreamOffline hides it from LIVE NOW but keeps activeActivity intact for Retry
+    useNostrStore.setState({ relayStatuses: { 'wss://relay.snort.social': 'connected' } })
+    useLiveStore.getState().markStreamOffline(aTag)
+    expect(useLiveStore.getState().liveStreams[aTag]).toBeUndefined()
+    expect(useLiveStore.getState().activeActivity?.status).toBe('live')
+
+    // If Retry succeeds, markStreamOnline restores it cleanly back into LIVE NOW
+    useLiveStore.getState().markStreamOnline(aTag)
+    expect(useLiveStore.getState().liveStreams[aTag]?.activity.title).toBe('Test Live Stream')
+  })
+
+  it('builds valid NIP-21/NIP-18/NIP-53 share-stream note payloads without duplicating naddr', () => {
+    const hostPk = 'a'.repeat(64)
+    const streamerPk = 'b'.repeat(64)
+    const naddr = encodeLiveNaddr(hostPk, 'fire-live-42', ['wss://relay.snort.social'])
+
+    const withComment = buildShareStreamNotePayload({
+      comment: 'Tune in now! #nostr',
+      naddr,
+      hostPubkey: hostPk,
+      streamerPubkey: streamerPk,
+      dTag: 'fire-live-42',
+      relayHint: 'wss://relay.snort.social',
+    })
+    expect(withComment.content).toBe(`Tune in now! #nostr\n\nnostr:${naddr}`)
+    expect(withComment.extraTags).toContainEqual(['q', `30311:${hostPk}:fire-live-42`, 'wss://relay.snort.social'])
+    expect(withComment.extraTags).toContainEqual(['a', `30311:${hostPk}:fire-live-42`, 'wss://relay.snort.social'])
+    expect(withComment.extraTags).toContainEqual(['p', streamerPk])
+    expect(withComment.extraTags).toContainEqual(['p', hostPk])
+
+    // Empty comment still produces a valid embedded live stream note
+    const emptyComment = buildShareStreamNotePayload({
+      comment: '   ',
+      naddr,
+      hostPubkey: hostPk,
+      streamerPubkey: hostPk,
+      dTag: 'fire-live-42',
+    })
+    expect(emptyComment.content).toBe(`nostr:${naddr}`)
+    expect(emptyComment.extraTags.filter((t) => t[0] === 'p')).toEqual([['p', hostPk]])
+
+    // Does not duplicate naddr if the user already included it in their note text
+    const alreadyEmbedded = buildShareStreamNotePayload({
+      comment: `Check out nostr:${naddr} right now!`,
+      naddr,
+      hostPubkey: hostPk,
+      dTag: 'fire-live-42',
+    })
+    expect(alreadyEmbedded.content).toBe(`Check out nostr:${naddr} right now!`)
   })
 })
