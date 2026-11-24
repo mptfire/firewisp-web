@@ -27,8 +27,10 @@ export interface DecryptedDm {
 
 function randomPastTimestamp(): number {
   const now = Math.floor(Date.now() / 1000)
-  // Random jitter up to 2 days in the past per NIP-59 metadata protection
-  const jitter = Math.floor(Math.random() * 172800)
+  // Cryptographically random jitter up to 2 days in the past per NIP-59 metadata protection
+  const buf = new Uint32Array(1)
+  crypto.getRandomValues(buf)
+  const jitter = buf[0] % 172800
   return now - jitter
 }
 

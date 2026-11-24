@@ -1,6 +1,6 @@
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
-import { sanitizeHttpUrl } from '../sanitize'
+import { sanitizeHttpUrl, sanitizePublicHttpsUrl } from '../sanitize'
 
 export interface MediaAttachment {
   url: string
@@ -47,11 +47,11 @@ export function extractImetaMap(
       else if (key === 'alt') alt = val
       else if (key === 'm') mime = val
       else if (key === 'image' || key === 'thumb') {
-        const safePoster = sanitizeHttpUrl(val)
-        if (safePoster && safePoster.startsWith('https://')) poster = safePoster
+        const safePoster = sanitizePublicHttpsUrl(val)
+        if (safePoster) poster = safePoster
       }
     }
-    const safe = sanitizeHttpUrl(url)
+    const safe = sanitizePublicHttpsUrl(url)
     if (safe) map.set(safe, { alt, mime, poster })
   }
   return map
@@ -98,15 +98,16 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
       const trailing = token.slice(trimmed.length)
       const safe = sanitizeHttpUrl(trimmed)
       if (safe) {
-        const meta = imeta.get(safe)
-        const mediaKind = safe.startsWith('https://')
-          ? classifyMediaUrl(safe, meta?.mime)
+        const safePublicMedia = sanitizePublicHttpsUrl(trimmed)
+        const meta = safePublicMedia ? imeta.get(safePublicMedia) : undefined
+        const mediaKind = safePublicMedia
+          ? classifyMediaUrl(safePublicMedia, meta?.mime)
           : null
-        if (mediaKind) {
-          if (!mediaSeen.has(safe)) {
-            mediaSeen.add(safe)
+        if (mediaKind && safePublicMedia) {
+          if (!mediaSeen.has(safePublicMedia)) {
+            mediaSeen.add(safePublicMedia)
             media.push({
-              url: safe,
+              url: safePublicMedia,
               kind: mediaKind,
               alt: meta?.alt,
               mime: meta?.mime,
@@ -166,8 +167,8 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
   // Support legacy NIP-71 `url` tag if no imeta/inline video matched
   for (const tag of event.tags) {
     if (tag[0] !== 'url' || !tag[1]) continue
-    const safe = sanitizeHttpUrl(tag[1])
-    if (!safe || !safe.startsWith('https://') || mediaSeen.has(safe)) continue
+    const safe = sanitizePublicHttpsUrl(tag[1])
+    if (!safe || mediaSeen.has(safe)) continue
     const kind = classifyMediaUrl(safe)
     if (kind) {
       mediaSeen.add(safe)

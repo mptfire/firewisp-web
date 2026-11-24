@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { sanitizeHttpUrl } from '../lib/sanitize'
+import { useEffect, useState } from 'react'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 
 interface AvatarProps {
   src?: string
@@ -25,7 +25,10 @@ function hueFromPubkey(pubkey: string): number {
 
 export function Avatar({ src, pubkey, name, size = 'md' }: AvatarProps) {
   const [failed, setFailed] = useState(false)
-  const safeSrc = sanitizeHttpUrl(src)
+  const safeSrc = sanitizePublicHttpsUrl(src)
+  useEffect(() => {
+    setFailed(false)
+  }, [safeSrc])
   const label = (name || pubkey.slice(0, 2)).trim().slice(0, 2).toUpperCase()
   const hue = hueFromPubkey(pubkey)
 

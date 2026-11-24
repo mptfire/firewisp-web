@@ -5,7 +5,7 @@ import {
   DEFAULT_BLOSSOM_PRIMARY,
   MAX_BLOSSOM_UPLOAD_BYTES,
 } from '../constants'
-import { sanitizeBlossomUrl, sanitizeHttpUrl } from '../sanitize'
+import { sanitizeBlossomUrl, sanitizePublicHttpsUrl } from '../sanitize'
 
 export const KIND_BLOSSOM_AUTH = 24242
 export const KIND_BLOSSOM_SERVER_LIST = 10063
@@ -67,6 +67,53 @@ export function buildCandidateServers(userServers: string[]): string[] {
   return out
 }
 
+/**
+ * Strips EXIF/GPS metadata client-side for JPEG/PNG/WebP images via offscreen canvas before upload,
+ * so camera/location metadata never leaves the browser even if a Blossom server falls back to raw /upload.
+ * Animated GIFs, videos, audio, and non-browser runtimes pass through cleanly untouched.
+ */
+export async function stripImageExifClientSide(
+  file: File | Blob,
+  mimeType: string,
+): Promise<{ blob: Blob; mimeType: string }> {
+  const cleanMime = mimeType.toLowerCase().split(';')[0].trim()
+  if (
+    cleanMime !== 'image/jpeg' &&
+    cleanMime !== 'image/jpg' &&
+    cleanMime !== 'image/png' &&
+    cleanMime !== 'image/webp'
+  ) {
+    return { blob: file, mimeType }
+  }
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
+    return { blob: file, mimeType }
+  }
+  try {
+    const bitmap = await createImageBitmap(file)
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return { blob: file, mimeType }
+      ctx.drawImage(bitmap, 0, 0)
+      const outMime = cleanMime === 'image/jpg' ? 'image/jpeg' : cleanMime
+      const quality = outMime === 'image/jpeg' || outMime === 'image/webp' ? 0.92 : undefined
+      const stripped = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), outMime, quality),
+      )
+      if (stripped && stripped.size > 0 && stripped.size <= MAX_BLOSSOM_UPLOAD_BYTES) {
+        return { blob: stripped, mimeType: outMime }
+      }
+    } finally {
+      bitmap.close()
+    }
+  } catch {
+    // Fallback to original blob if canvas decode fails
+  }
+  return { blob: file, mimeType }
+}
+
 export async function uploadToBlossom(
   file: File | Blob,
   mimeType: string,
@@ -79,16 +126,19 @@ export async function uploadToBlossom(
     throw new Error('File exceeds the 10 MB upload limit')
   }
 
-  const buffer = await file.arrayBuffer()
+  const sanitized = await stripImageExifClientSide(file, mimeType)
+  const effectiveBlob = sanitized.blob
+  const effectiveMime = sanitized.mimeType
+
+  const buffer = await effectiveBlob.arrayBuffer()
   const hash = await sha256Hex(buffer)
   const candidates = buildCandidateServers(userServers)
-  const isMediaEndpointEligible = mimeType.startsWith('image/') || mimeType.startsWith('video/')
+  const isMediaEndpointEligible = effectiveMime.startsWith('image/') || effectiveMime.startsWith('video/')
 
   let lastError: Error = new Error('No Blossom servers available')
 
   for (const server of candidates) {
-    // Try BUD-05 /media first for images/videos (strips EXIF on firewisp.blossom.rtard.de),
-    // then fall back to BUD-02 /upload.
+    // Try BUD-05 /media first for images/videos, then fall back to BUD-02 /upload.
     const endpoints: Array<{ path: '/media' | '/upload'; action: 'media' | 'upload' }> =
       isMediaEndpointEligible
         ? [
@@ -104,7 +154,7 @@ export async function uploadToBlossom(
           method: 'PUT',
           headers: {
             Authorization: auth,
-            'Content-Type': mimeType || 'application/octet-stream',
+            'Content-Type': effectiveMime || 'application/octet-stream',
           },
           body: buffer,
         })
@@ -120,9 +170,9 @@ export async function uploadToBlossom(
           size?: number
           type?: string
         }
-        const safeUrl = sanitizeHttpUrl(data.url)
+        const safeUrl = sanitizePublicHttpsUrl(data.url)
         if (!safeUrl) {
-          lastError = new Error(`${server} returned an unsafe or missing URL`)
+          lastError = new Error(`${server} returned an unsafe, cleartext, or private URL`)
           continue
         }
 
@@ -137,8 +187,8 @@ export async function uploadToBlossom(
         return {
           url: safeUrl,
           sha256: returnedHash || hash,
-          size: typeof data.size === 'number' ? data.size : file.size,
-          type: data.type || mimeType || 'application/octet-stream',
+          size: typeof data.size === 'number' ? data.size : effectiveBlob.size,
+          type: data.type || effectiveMime || 'application/octet-stream',
           server,
         }
       } catch (err) {

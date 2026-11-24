@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Radio,
   UploadCloud,
@@ -30,6 +30,10 @@ export function SettingsPage() {
   const [newMuteTag, setNewMuteTag] = useState('')
   const [nwcInput, setNwcInput] = useState(settings.nwcUri)
   const [nwcStatus, setNwcStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    setNwcInput(settings.nwcUri)
+  }, [settings.nwcUri])
 
   const [exportPass, setExportPass] = useState('')
   const [exported, setExported] = useState<string | null>(null)
@@ -248,6 +252,8 @@ export function SettingsPage() {
               setNwcInput(e.target.value)
               setNwcStatus(null)
             }}
+            autoComplete="off"
+            spellCheck={false}
             placeholder="nostr+walletconnect://…"
             className="flex-1 px-3 py-2 rounded-xl bg-[#15161c] border border-[#2a2d3a] text-xs font-mono focus:outline-none focus:border-[#e8590c]"
           />
@@ -401,6 +407,21 @@ export function SettingsPage() {
           />
         </label>
 
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Include Fire Wisp client tag on posts</div>
+            <div className="text-[#8c8a82]">
+              Turn OFF to omit the NIP-89 client tag from your published notes.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.clientTagEnabled}
+            onChange={(e) => settings.setClientTagEnabled(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
         {signer?.exportSecretKey && (
           <div className="p-3.5 rounded-xl bg-[#15161c] border border-[#232530] space-y-2.5">
             <div className="text-xs font-semibold">Export NIP-49 Encrypted Key (ncryptsec1)</div>
@@ -409,7 +430,9 @@ export function SettingsPage() {
                 type="password"
                 value={exportPass}
                 onChange={(e) => setExportPass(e.target.value)}
-                placeholder="Passphrase (min 4 chars)"
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder="Passphrase (min 8 chars)"
                 className="flex-1 px-3 py-2 rounded-lg bg-[#0e0e11] border border-[#2a2d3a] text-xs"
               />
               <button

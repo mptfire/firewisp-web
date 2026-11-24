@@ -305,13 +305,33 @@ describe('Sanitization, SSRF guards, NIP-92 imeta, and NWC/LNURL parsing', () =>
     expect(() => signer.exportSecretKey()).toThrow(/wiped/)
   })
 
-  it('refuses cleartext http:// inline media embedding', () => {
+  it('refuses cleartext http:// and private/LAN IP inline media embedding', () => {
     const parsed = parseNoteContent({
-      content: 'Cleartext image http://insecure.example/photo.png',
-      tags: [],
+      content:
+        'Cleartext http://insecure.example/photo.png LAN https://192.168.1.1/cam.png Loopback https://127.0.0.1/a.png IPv6 https://[fd00::1]/b.png',
+      tags: [['imeta', 'url https://10.0.0.5/secret.jpg', 'm image/jpeg']],
     })
     expect(parsed.media).toHaveLength(0)
     expect(parsed.segments.some((s) => s.type === 'link')).toBe(true)
+  })
+
+  it('blocks IPv6 ULA/link-local/mapped-IPv4, CGNAT, and private Blossom URLs', () => {
+    expect(isPublicHostname('[fd00::1]')).toBe(false)
+    expect(isPublicHostname('[fe80::1]')).toBe(false)
+    expect(isPublicHostname('[::ffff:127.0.0.1]')).toBe(false)
+    expect(isPublicHostname('100.64.0.1')).toBe(false)
+    expect(isPublicHostname('100.127.255.254')).toBe(false)
+    expect(isPublicHostname('100.128.0.1')).toBe(true)
+    expect(sanitizeBlossomUrl('https://localhost:3000')).toBeNull()
+    expect(sanitizeBlossomUrl('https://192.168.1.50')).toBeNull()
+    expect(sanitizeBlossomUrl('https://blossom.primal.net/')).toBe('https://blossom.primal.net')
+  })
+
+  it('rejects weak (< 8 char) passphrases for NIP-49 encryption and non-mainnet BOLT-11 invoices', () => {
+    const sk = hexToBytes('22'.repeat(32))
+    expect(() => encryptNcryptsec(sk, '1234', 12)).toThrow(/at least 8 characters/)
+    expect(parseBolt11AmountSats('lntb210n1p0testnetinvoice')).toBeNull()
+    expect(parseBolt11AmountSats('lnbcrt210n1p0regtestinvoice')).toBeNull()
   })
 
   it('verifies BOLT-11 invoice amount pre-pay and rejects tampered LNURL invoices', async () => {

@@ -16,7 +16,7 @@ import {
 import { nostrPool } from '../lib/nostr/pool'
 import { parseNoteContent } from '../lib/nostr/content'
 import { isTopLevelNote } from '../lib/nostr/spamFilter'
-import { sanitizeHttpUrl, sanitizeRelayUrl } from '../lib/sanitize'
+import { sanitizePublicHttpsUrl, sanitizeRelayUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -79,7 +79,7 @@ export function ProfilePage() {
   const isMe = Boolean(myPubkey && hexPubkey && myPubkey.toLowerCase() === hexPubkey)
   const isFollowing = Boolean(hexPubkey && follows.includes(hexPubkey))
   const isMuted = Boolean(hexPubkey && mutedPubkeys.includes(hexPubkey))
-  const bannerUrl = sanitizeHttpUrl(profile?.banner)
+  const bannerUrl = sanitizePublicHttpsUrl(profile?.banner)
   const displayName = profile?.display_name || profile?.name || `${npub.slice(0, 14)}…`
 
   useEffect(() => {

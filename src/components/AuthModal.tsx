@@ -61,13 +61,18 @@ export function AuthModal() {
   }, [])
 
   useEffect(() => {
-    if (!open) {
+    if (!open && !pendingMnemonic) {
       qrAbortRef.current?.abort()
       setQrUri(null)
       setQrImg(null)
+      setKeyInput('')
+      setPassphrase('')
+      setVaultPass('')
+      setBackupPassword('')
+      setExportedNcryptsec(null)
       setError(null)
     }
-  }, [open])
+  }, [open, pendingMnemonic])
 
   if (!open && !pendingMnemonic) return null
 
@@ -156,7 +161,9 @@ export function AuthModal() {
                 type="password"
                 value={backupPassword}
                 onChange={(e) => setBackupPassword(e.target.value)}
-                placeholder="Choose a strong passphrase…"
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder="Choose a strong passphrase (min 8 chars)…"
                 className="flex-1 px-3 py-2 rounded-lg bg-[#15161c] border border-[#2a2d3a] text-xs focus:outline-none focus:border-[#e8590c]"
               />
               <button
@@ -175,6 +182,15 @@ export function AuthModal() {
                 Encrypt
               </button>
             </div>
+            <label className="mt-2 flex items-center gap-2 text-[11px] text-[#a6a49c] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={saveToVault}
+                onChange={(e) => setSaveToVault(e.target.checked)}
+                className="accent-[#e8590c]"
+              />
+              Also save encrypted vault in this browser
+            </label>
             {exportedNcryptsec && (
               <div className="mt-2.5 flex items-center gap-2">
                 <code className="flex-1 text-[11px] text-emerald-300 truncate bg-[#15161c] px-2 py-1 rounded">
@@ -420,6 +436,10 @@ export function AuthModal() {
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
               rows={3}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               placeholder="ncryptsec1… / 12-word phrase / nsec1… / npub1…"
               className="w-full px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-xs font-mono focus:outline-none focus:border-[#e8590c]"
             />
@@ -429,6 +449,8 @@ export function AuthModal() {
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
                 placeholder={
                   needsPassphrase
                     ? 'Enter ncryptsec passphrase (required)'
@@ -452,7 +474,9 @@ export function AuthModal() {
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
-                placeholder="Choose a vault passphrase (min 4 chars)"
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder="Choose a vault passphrase (min 8 chars)"
                 className="w-full px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-xs focus:outline-none focus:border-[#e8590c]"
               />
             )}
@@ -464,7 +488,7 @@ export function AuthModal() {
                 setError(null)
                 try {
                   await loginWithKeyInput(keyInput, passphrase)
-                  if (saveToVault && passphrase.length >= 4 && useAuthStore.getState().signer?.exportSecretKey) {
+                  if (saveToVault && passphrase.length >= 8 && useAuthStore.getState().signer?.exportSecretKey) {
                     saveEncryptedVault(passphrase)
                   }
                   setKeyInput('')

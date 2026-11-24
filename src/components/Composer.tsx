@@ -158,6 +158,7 @@ export function Composer({
                     <img
                       src={att.upload.url}
                       alt={att.alt || 'Upload preview'}
+                      referrerPolicy="no-referrer"
                       className="w-24 h-24 object-cover"
                     />
                   ) : (
@@ -233,7 +234,7 @@ export function Composer({
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
                 className="p-2 rounded-lg text-[#9a9890] hover:text-[#ff922b] hover:bg-white/5 transition flex items-center gap-1.5 text-xs cursor-pointer"
-                title="Upload to Fire Wisp Blossom (EXIF stripped)"
+                title="Upload media via Blossom (EXIF stripped client-side)"
               >
                 {uploading ? (
                   <Loader2 className="w-4 h-4 animate-spin text-[#e8590c]" />

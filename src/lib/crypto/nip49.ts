@@ -49,8 +49,8 @@ export function encryptNcryptsec(
   logN = 16,
   keySecurityByte: 0x00 | 0x01 | 0x02 = 0x02,
 ): string {
-  if (!password || password.length < 4) {
-    throw new Error('Passphrase must be at least 4 characters')
+  if (!password || password.length < 8) {
+    throw new Error('Passphrase must be at least 8 characters')
   }
   if (logN < NIP49_MIN_LOG_N || logN > NIP49_MAX_LOG_N) {
     throw new Error(`log_n must be between ${NIP49_MIN_LOG_N} and ${NIP49_MAX_LOG_N}`)

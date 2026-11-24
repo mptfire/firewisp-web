@@ -5,7 +5,7 @@ import { ArrowLeft, Lock, Mail, Send, ShieldCheck, Eye, Plus } from 'lucide-reac
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
-import { sanitizeHttpUrl } from '../lib/sanitize'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import { Avatar } from '../components/Avatar'
 
 const URL_RE = /(https?:\/\/[^\s]+)/g
@@ -232,7 +232,7 @@ export function MessagesPage() {
                 {activeMessages.map((m) => {
                   const mine = m.senderPubkey === pubkey?.toLowerCase()
                   const urls = (m.content.match(URL_RE) || [])
-                    .map((u) => sanitizeHttpUrl(u))
+                    .map((u) => sanitizePublicHttpsUrl(u))
                     .filter((u): u is string => Boolean(u && IMG_RE.test(u)))
                   return (
                     <div

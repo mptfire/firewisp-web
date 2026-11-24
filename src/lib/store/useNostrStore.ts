@@ -7,7 +7,7 @@ import { sanitizeRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
-import { createGiftWrappedDm, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
+import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
 import { useSettingsStore } from './useSettingsStore'
 
@@ -159,19 +159,23 @@ const repostSeen = new Set<string>()
 const zapSeen = new Set<string>()
 const seenDmWraps = new Set<string>()
 
+function clipStr(val: unknown, maxLen: number): string | undefined {
+  return typeof val === 'string' && val.length > 0 ? val.slice(0, maxLen) : undefined
+}
+
 function parseProfileEvent(event: Event): NostrProfile | null {
   try {
     const raw = JSON.parse(event.content) as Record<string, unknown>
     return {
       pubkey: event.pubkey,
-      name: typeof raw.name === 'string' ? raw.name : undefined,
-      display_name: typeof raw.display_name === 'string' ? raw.display_name : undefined,
-      about: typeof raw.about === 'string' ? raw.about : undefined,
-      picture: typeof raw.picture === 'string' ? raw.picture : undefined,
-      banner: typeof raw.banner === 'string' ? raw.banner : undefined,
-      nip05: typeof raw.nip05 === 'string' ? raw.nip05 : undefined,
-      lud16: typeof raw.lud16 === 'string' ? raw.lud16 : undefined,
-      website: typeof raw.website === 'string' ? raw.website : undefined,
+      name: clipStr(raw.name, 120),
+      display_name: clipStr(raw.display_name, 120),
+      about: clipStr(raw.about, 1000),
+      picture: clipStr(raw.picture, 500),
+      banner: clipStr(raw.banner, 500),
+      nip05: clipStr(raw.nip05, 200),
+      lud16: clipStr(raw.lud16, 200),
+      website: clipStr(raw.website, 500),
       updatedAt: event.created_at,
     }
   } catch {
@@ -333,6 +337,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   resetUserState: () => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(PROFILES_CACHE_KEY)
+      } catch {
+        // ignore
+      }
+    }
     set((s) => ({
       follows: [],
       followedHashtags: [],
@@ -1548,8 +1559,27 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       plaintext.trim(),
     )
     const writeRelays = [...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays])]
+    // Resolve recipient's NIP-17 kind-10050 DM inbox relays so encrypted wraps route privately & reliably
+    let recipientRelays = writeRelays
+    try {
+      const readRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays])].slice(0, 6)
+      const dmRelayEvents = await nostrPool.query(
+        readRelays,
+        { kinds: [KIND_DM_RELAYS], authors: [recipientPubkey.toLowerCase()], limit: 2 },
+        2500,
+      )
+      if (dmRelayEvents.length > 0) {
+        const inbox = dmRelayEvents[0].tags
+          .filter((t) => t[0] === 'relay' && t[1])
+          .map((t) => sanitizeRelayUrl(t[1]))
+          .filter((u): u is string => Boolean(u))
+        if (inbox.length > 0) recipientRelays = [...new Set(inbox)].slice(0, 6)
+      }
+    } catch {
+      // Fallback cleanly to writeRelays
+    }
     await Promise.all([
-      nostrPool.publish(writeRelays, recipientWrap),
+      nostrPool.publish(recipientRelays, recipientWrap),
       nostrPool.publish(writeRelays, selfWrap),
     ])
     set((s) => ({

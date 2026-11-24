@@ -8,6 +8,7 @@ import {
 import * as nip44 from 'nostr-tools/nip44'
 import { BunkerSigner, createNostrConnectURI, parseBunkerInput } from 'nostr-tools/nip46'
 import { SimplePool } from 'nostr-tools/pool'
+import { bytesToHex } from 'nostr-tools/utils'
 import { FIREWISP_RELAY } from '../constants'
 
 export type AuthMethod = 'nip07' | 'bunker' | 'local' | 'readonly'
@@ -210,7 +211,7 @@ export class Nip46BunkerSigner implements FireWispSigner {
   } {
     const clientSk = generateSecretKey()
     const clientPubkey = getPublicKey(clientSk)
-    const secret = crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+    const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(16)))
     const relays = [FIREWISP_RELAY, 'wss://relay.nsec.app', 'wss://relay.damus.io']
     const uri = createNostrConnectURI({
       clientPubkey,

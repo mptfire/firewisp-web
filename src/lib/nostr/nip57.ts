@@ -1,4 +1,4 @@
-import { finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import { finalizeEvent, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { SimplePool } from 'nostr-tools/pool'
 import * as nip04 from 'nostr-tools/nip04'
 import { hexToBytes } from 'nostr-tools/utils'
@@ -72,7 +72,7 @@ export async function fetchLnurlPayMetadata(
 }
 
 export function parseBolt11AmountSats(invoice: string): number | null {
-  const m = invoice.trim().toLowerCase().match(/^ln(?:bc|tb|bcrt)(\d+)([munp])1/)
+  const m = invoice.trim().toLowerCase().match(/^lnbc(\d+)([munp])1/)
   if (!m) return null
   const num = Number(m[1])
   if (!Number.isFinite(num) || num <= 0) return null
@@ -137,8 +137,8 @@ export async function requestZapInvoice(params: {
     throw new Error(data.reason || 'Lightning provider did not return an invoice')
   }
   const invoice = data.pr.trim()
-  if (!/^ln(bc|tb|bcrt)[0-9a-z]+$/i.test(invoice)) {
-    throw new Error('Provider returned an invalid BOLT-11 invoice')
+  if (!/^lnbc[0-9a-z]+$/i.test(invoice)) {
+    throw new Error('Provider returned an invalid or non-mainnet BOLT-11 invoice')
   }
   // CRITICAL: Pre-pay BOLT-11 amount verification (fail-closed against malicious LNURL servers)
   const invoicedSats = parseBolt11AmountSats(invoice)
@@ -198,6 +198,9 @@ export async function payInvoiceWithNwc(nwcUri: string, invoice: string): Promis
         },
         {
           onevent: async (ev) => {
+            if (!verifyEvent(ev) || ev.pubkey.toLowerCase() !== parsed.walletPubkey) {
+              return
+            }
             clearTimeout(timeout)
             sub.close()
             try {

@@ -111,6 +111,10 @@ export function SearchPage() {
             Go
           </button>
         </form>
+        <p className="mt-2 text-[11px] text-[#7c7a72]">
+          #hashtags, npub1, and note1 stay on your configured relays. Free-text NIP-50 search also
+          queries <span className="font-mono">relay.nostr.band</span>.
+        </p>
       </div>
 
       {searching ? (
