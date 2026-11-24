@@ -352,10 +352,10 @@ export function ProfilePage() {
               <>
                 <button
                   onClick={() => (isMuted ? unmutePubkey(hexPubkey) : mutePubkey(hexPubkey))}
-                  className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  className={`fw-edge-btn px-3 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isMuted
-                      ? 'bg-red-600/25 border-red-500/60 text-red-200 hover:bg-red-600/35'
-                      : 'bg-red-500/10 border-red-500/35 text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                      ? 'fw-edge-blocked text-red-100'
+                      : 'fw-edge-block text-red-300 hover:text-red-200'
                   }`}
                   title={isMuted ? 'Unblock / Unmute user' : 'Block / Mute user'}
                 >
@@ -364,10 +364,8 @@ export function ProfilePage() {
                 </button>
                 <button
                   onClick={() => void toggleFollow(hexPubkey)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                    isFollowing
-                      ? 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white'
-                      : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
+                  className={`fw-edge-btn px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer text-white ${
+                    isFollowing ? 'fw-edge-following' : 'fw-edge-follow'
                   }`}
                 >
                   {isFollowing ? (

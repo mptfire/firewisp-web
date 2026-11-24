@@ -258,7 +258,7 @@ function ChatBubble({
                   type="button"
                   onClick={() => onBlock(msg.senderPubkey, name)}
                   title={`Block ${name}`}
-                  className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer"
+                  className="fw-edge-btn fw-edge-sm fw-edge-block p-1 text-red-300 hover:text-red-200 cursor-pointer"
                 >
                   <Ban className="w-3 h-3" />
                 </button>
@@ -1331,10 +1331,8 @@ export function LiveStreamPage() {
               {!isMe && hostPubkey && (
                 <button
                   onClick={() => void toggleFollow(hostPubkey)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                    isFollowing
-                      ? 'bg-emerald-600 hover:bg-emerald-500 border border-emerald-400/50 text-white'
-                      : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
+                  className={`fw-edge-btn px-3.5 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer text-white ${
+                    isFollowing ? 'fw-edge-following' : 'fw-edge-follow'
                   }`}
                 >
                   {isFollowing ? (

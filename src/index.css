@@ -51,3 +51,118 @@
 .live-scroll::-webkit-scrollbar-thumb:hover {
   background: #e8590c;
 }
+
+/* Orbiting animated green/red edge glow for Follow/Following & Block/Blocked buttons */
+@keyframes fw-edge-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.fw-edge-btn {
+  --fw-edge-radius: 0.75rem;
+  --fw-edge-thickness: 2px;
+  --fw-edge-speed: 2.8s;
+  --fw-edge-base: rgba(255, 255, 255, 0.12);
+  --fw-edge-mid: rgba(255, 255, 255, 0.55);
+  --fw-edge-hot: #ffffff;
+  --fw-edge-bg: #181a22;
+  --fw-edge-bg-hover: #222533;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--fw-edge-radius);
+}
+
+.fw-edge-btn::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(220%, 180px);
+  aspect-ratio: 1 / 1;
+  z-index: -2;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    var(--fw-edge-base) 0deg 200deg,
+    var(--fw-edge-mid) 272deg,
+    var(--fw-edge-hot) 336deg,
+    var(--fw-edge-base) 360deg
+  );
+  transform: translate(-50%, -50%) rotate(0deg);
+  animation: fw-edge-spin var(--fw-edge-speed) linear infinite;
+}
+
+.fw-edge-btn::after {
+  content: "";
+  position: absolute;
+  inset: var(--fw-edge-thickness);
+  z-index: -1;
+  pointer-events: none;
+  border-radius: calc(var(--fw-edge-radius) - var(--fw-edge-thickness));
+  background: var(--fw-edge-bg);
+  transition: background-color 150ms ease;
+}
+
+.fw-edge-btn:hover::after {
+  background: var(--fw-edge-bg-hover);
+}
+
+.fw-edge-sm {
+  --fw-edge-radius: 0.5rem;
+  --fw-edge-thickness: 1.5px;
+}
+
+.fw-edge-following {
+  --fw-edge-base: rgba(16, 185, 129, 0.35);
+  --fw-edge-mid: #34d399;
+  --fw-edge-hot: #bbf7d0;
+  --fw-edge-bg: #065f46;
+  --fw-edge-bg-hover: #047857;
+  box-shadow: 0 0 12px -4px rgba(16, 185, 129, 0.5);
+}
+
+.fw-edge-follow {
+  --fw-edge-base: rgba(239, 68, 68, 0.38);
+  --fw-edge-mid: #f87171;
+  --fw-edge-hot: #fecaca;
+  --fw-edge-bg: #b9380c;
+  --fw-edge-bg-hover: #cf420f;
+  box-shadow: 0 0 12px -4px rgba(239, 68, 68, 0.45);
+}
+
+.fw-edge-block {
+  --fw-edge-base: rgba(239, 68, 68, 0.28);
+  --fw-edge-mid: #f87171;
+  --fw-edge-hot: #fecaca;
+  --fw-edge-bg: #1d1216;
+  --fw-edge-bg-hover: #2d161c;
+  --fw-edge-speed: 3.1s;
+}
+
+.fw-edge-blocked {
+  --fw-edge-base: rgba(239, 68, 68, 0.45);
+  --fw-edge-mid: #ef4444;
+  --fw-edge-hot: #fee2e2;
+  --fw-edge-bg: #7f1d1d;
+  --fw-edge-bg-hover: #991b1b;
+  --fw-edge-speed: 2.3s;
+  box-shadow: 0 0 12px -4px rgba(239, 68, 68, 0.55);
+}
+
+.fw-edge-unblock {
+  --fw-edge-base: rgba(16, 185, 129, 0.3);
+  --fw-edge-mid: #34d399;
+  --fw-edge-hot: #bbf7d0;
+  --fw-edge-bg: #11201a;
+  --fw-edge-bg-hover: #163026;
+  --fw-edge-speed: 3.1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fw-edge-btn::before {
+    animation: none;
+  }
+}
