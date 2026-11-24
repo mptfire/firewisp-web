@@ -3,6 +3,7 @@ import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
 import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, FIREWISP_RELAY, TRENDING_RELAY } from '../constants'
+import { sanitizeRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags } from '../nostr/content'
 import { createGiftWrappedDm, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
@@ -39,6 +40,7 @@ export interface NostrState {
   events: Record<string, Event>
   profiles: Record<string, NostrProfile>
   follows: string[]
+  userReadRelays: string[]
   bookmarks: string[]
 
   // Social aggregates
@@ -139,7 +141,7 @@ function insertSortedUnique(ids: string[], ev: Event, eventsMap: Record<string, 
   if (ids.includes(ev.id)) return ids
   const next = [ev.id, ...ids]
   next.sort((a, b) => (eventsMap[b]?.created_at || 0) - (eventsMap[a]?.created_at || 0))
-  return next.slice(0, 300)
+  return next.slice(0, 500)
 }
 
 export const useNostrStore = create<NostrState>((set, get) => ({
@@ -147,6 +149,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   events: {},
   profiles: {},
   follows: [],
+  userReadRelays: [],
   bookmarks: loadBookmarks(),
 
   reactionCounts: {},
@@ -346,10 +349,24 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   loadUserGraph: async (pubkey) => {
     const relays = useSettingsStore.getState().getReadRelays()
-    const [contactEvents, bookmarkEvents] = await Promise.all([
+    const [contactEvents, bookmarkEvents, relayListEvents] = await Promise.all([
       nostrPool.query(relays, { kinds: [3], authors: [pubkey], limit: 3 }, 4000),
       nostrPool.query(relays, { kinds: [10003], authors: [pubkey], limit: 2 }, 3500),
+      nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 2 }, 3500),
     ])
+
+    if (relayListEvents.length > 0) {
+      const nip65Read: string[] = []
+      for (const t of relayListEvents[0].tags) {
+        if (t[0] !== 'r' || !t[1]) continue
+        if (t[2] && t[2] === 'write') continue
+        const clean = sanitizeRelayUrl(t[1])
+        if (clean) nip65Read.push(clean)
+      }
+      if (nip65Read.length > 0) {
+        set({ userReadRelays: [...new Set(nip65Read)].slice(0, 10) })
+      }
+    }
 
     if (contactEvents.length > 0) {
       const latest = contactEvents[0]
@@ -361,7 +378,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         ),
       ]
       set({ follows })
-      void get().fetchProfiles([pubkey, ...follows.slice(0, 40)])
+      void get().fetchProfiles([pubkey, ...follows.slice(0, 60)])
     } else {
       void get().fetchProfiles([pubkey])
     }
@@ -429,6 +446,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   subscribeFeed: (tab) => {
     set({ loadingFeed: true })
     const readRelays = useSettingsStore.getState().getReadRelays()
+    const userReadRelays = get().userReadRelays
+    const mergedFollowingRelays = [...new Set([...readRelays, ...userReadRelays])].slice(0, 10)
     const targetRelays =
       tab === 'firewisp'
         ? [FIREWISP_RELAY]
@@ -436,7 +455,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           ? [TRENDING_RELAY]
           : tab === 'global'
             ? CURATED_EXPLORE_RELAYS
-            : readRelays
+            : mergedFollowingRelays
     const follows = get().follows
     const extendedAuthors = get().extendedAuthors
     const myPubkey = useAuthStore.getState().pubkey
@@ -450,24 +469,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
-    const filter =
-      tab === 'following' && (follows.length > 0 || myPubkey)
-        ? {
-            kinds: [1, 6, 20],
-            authors: [...new Set([...(myPubkey ? [myPubkey] : []), ...follows.slice(0, 200)])],
-            limit: 60,
-          }
-        : tab === 'extended'
-          ? {
-              kinds: [1, 20],
-              authors: extendedAuthors.slice(0, 200),
-              limit: 60,
-            }
-          : {
-              kinds: [1, 6, 20],
-              limit: 60,
-            }
-
     const authorBatch = new Set<string>()
     let batchTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -478,78 +479,108 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       void get().fetchProfiles(list)
     }
 
-    const sub: SubCloser = nostrPool.subscribe(targetRelays, filter, {
-      onevent: (ev) => {
-        get().ingestEvent(ev)
-        authorBatch.add(ev.pubkey)
-        if (!batchTimer) {
-          batchTimer = setTimeout(() => {
-            batchTimer = null
-            flushAuthors()
-          }, 400)
-        }
+    const handleEvent = (ev: Event) => {
+      get().ingestEvent(ev)
+      authorBatch.add(ev.pubkey)
+      if (!batchTimer) {
+        batchTimer = setTimeout(() => {
+          batchTimer = null
+          flushAuthors()
+        }, 400)
+      }
 
-        if (ev.kind === 1 || ev.kind === 20 || ev.kind === 6) {
-          set((s) => {
-            const eventsMap = { ...s.events, [ev.id]: ev }
-            if (tab === 'firewisp') {
-              return {
-                events: eventsMap,
-                firewispFeedIds: insertSortedUnique(s.firewispFeedIds, ev, eventsMap),
-              }
-            }
-            if (tab === 'following') {
-              return {
-                events: eventsMap,
-                followingFeedIds: insertSortedUnique(s.followingFeedIds, ev, eventsMap),
-              }
-            }
-            if (tab === 'extended') {
-              return {
-                events: eventsMap,
-                extendedFeedIds: insertSortedUnique(s.extendedFeedIds, ev, eventsMap),
-              }
-            }
-            if (tab === 'trending') {
-              return {
-                events: eventsMap,
-                trendingFeedIds: insertSortedUnique(s.trendingFeedIds, ev, eventsMap),
-              }
-            }
+      if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22 || ev.kind === 6) {
+        set((s) => {
+          const eventsMap = { ...s.events, [ev.id]: ev }
+          if (tab === 'firewisp') {
             return {
               events: eventsMap,
-              globalFeedIds: insertSortedUnique(s.globalFeedIds, ev, eventsMap),
+              firewispFeedIds: insertSortedUnique(s.firewispFeedIds, ev, eventsMap),
             }
+          }
+          if (tab === 'following') {
+            return {
+              events: eventsMap,
+              followingFeedIds: insertSortedUnique(s.followingFeedIds, ev, eventsMap),
+            }
+          }
+          if (tab === 'extended') {
+            return {
+              events: eventsMap,
+              extendedFeedIds: insertSortedUnique(s.extendedFeedIds, ev, eventsMap),
+            }
+          }
+          if (tab === 'trending') {
+            return {
+              events: eventsMap,
+              trendingFeedIds: insertSortedUnique(s.trendingFeedIds, ev, eventsMap),
+            }
+          }
+          return {
+            events: eventsMap,
+            globalFeedIds: insertSortedUnique(s.globalFeedIds, ev, eventsMap),
+          }
+        })
+      }
+    }
+
+    // Build filters — chunk large follow lists (e.g. 890+ follows) into batches of 250 authors
+    // so EVERY followed account's posts are fetched without hitting per-REQ filter limits.
+    const filters = (() => {
+      if (tab === 'following' && (follows.length > 0 || myPubkey)) {
+        const allAuthors = [...new Set([...(myPubkey ? [myPubkey] : []), ...follows])]
+        const since = Math.floor(Date.now() / 1000) - 3 * 86400
+        const chunks: Array<{ kinds: number[]; authors: string[]; since: number; limit: number }> = []
+        for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
+          chunks.push({
+            kinds: [1, 6, 20, 21, 22],
+            authors: allAuthors.slice(i, i + 250),
+            since,
+            limit: 100,
           })
         }
-      },
-      oneose: () => {
-        flushAuthors()
-        set({ loadingFeed: false })
-        const s = get()
-        const ids =
-          tab === 'firewisp'
-            ? s.firewispFeedIds.slice(0, 40)
-            : tab === 'following'
-              ? s.followingFeedIds.slice(0, 40)
-              : tab === 'extended'
-                ? s.extendedFeedIds.slice(0, 40)
-                : tab === 'trending'
-                  ? s.trendingFeedIds.slice(0, 40)
-                  : s.globalFeedIds.slice(0, 40)
-        if (ids.length > 0) {
-          void nostrPool
-            .query(readRelays, { kinds: [5, 6, 7, 9735], '#e': ids, limit: 250 }, 3500)
-            .then((metaEvents) => {
-              for (const m of metaEvents) get().ingestEvent(m)
-            })
-        }
-      },
-    })
+        return chunks
+      }
+      if (tab === 'extended') {
+        return [{ kinds: [1, 20, 21, 22], authors: extendedAuthors.slice(0, 200), limit: 80 }]
+      }
+      return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
+    })()
+
+    let eoseRemaining = filters.length
+    const subs: SubCloser[] = filters.map((filter) =>
+      nostrPool.subscribe(targetRelays, filter, {
+        onevent: handleEvent,
+        oneose: () => {
+          eoseRemaining--
+          if (eoseRemaining > 0) return
+          flushAuthors()
+          set({ loadingFeed: false })
+          const s = get()
+          const ids =
+            tab === 'firewisp'
+              ? s.firewispFeedIds.slice(0, 40)
+              : tab === 'following'
+                ? s.followingFeedIds.slice(0, 50)
+                : tab === 'extended'
+                  ? s.extendedFeedIds.slice(0, 40)
+                  : tab === 'trending'
+                    ? s.trendingFeedIds.slice(0, 40)
+                    : s.globalFeedIds.slice(0, 40)
+          if (ids.length > 0) {
+            void nostrPool
+              .query(targetRelays, { kinds: [5, 6, 7, 9735], '#e': ids, limit: 250 }, 3500)
+              .then((metaEvents) => {
+                for (const m of metaEvents) get().ingestEvent(m)
+              })
+          }
+        },
+      }),
+    )
 
     return () => {
       if (batchTimer) clearTimeout(batchTimer)
-      sub.close()
+      for (const s of subs) s.close()
     }
   },
 

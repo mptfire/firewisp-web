@@ -13,6 +13,7 @@ type FeedTab = 'global' | 'trending' | 'firewisp' | 'following' | 'extended'
 export function FeedPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
   const follows = useNostrStore((s) => s.follows)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
   const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
   const events = useNostrStore((s) => s.events)
@@ -34,7 +35,7 @@ export function FeedPage() {
 
   useEffect(() => {
     return subscribeFeed(tab)
-  }, [tab, pubkey, follows.length, extendedAuthors.length, subscribeFeed])
+  }, [tab, pubkey, follows.length, userReadRelays.length, extendedAuthors.length, subscribeFeed])
 
   const ids =
     tab === 'firewisp'
