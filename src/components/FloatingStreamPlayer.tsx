@@ -1,15 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ExternalLink,
   GripVertical,
+  Loader2,
   Maximize2,
+  MessageCircle,
   Minimize2,
   PictureInPicture2,
   Radio,
+  Send,
   X,
+  Zap,
 } from 'lucide-react'
-import { useLiveStore } from '../lib/store/useLiveStore'
+import { parseNoteContent } from '../lib/nostr/content'
+import { decodeLiveNaddr } from '../lib/nostr/nip53'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
+import { useAuthStore } from '../lib/store/useAuthStore'
+import { useLiveStore, type LiveChatMessage } from '../lib/store/useLiveStore'
+import { useNostrStore } from '../lib/store/useNostrStore'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
 
 interface DragPosition {
@@ -29,23 +39,164 @@ function clampPosition(x: number, y: number, width: number, height: number): Dra
   }
 }
 
+function formatMiniTime(unixSec: number): string {
+  return new Date(unixSec * 1000).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function renderTextWithCustomEmojis(text: string, tags: string[][]) {
+  if (!text.includes(':')) return text
+  const map = new Map<string, string>()
+  for (const t of tags) {
+    if (t[0] !== 'emoji' || !t[1] || !t[2]) continue
+    const safe = sanitizePublicHttpsUrl(t[2])
+    if (safe) map.set(t[1], safe)
+  }
+  if (map.size === 0) return text
+  const parts = text.split(/(:[a-zA-Z0-9_+-]+:)/g)
+  return parts.map((part, idx) => {
+    if (part.startsWith(':') && part.endsWith(':') && part.length > 2) {
+      const url = map.get(part.slice(1, -1))
+      if (url) {
+        return (
+          <img
+            key={idx}
+            src={url}
+            alt={part}
+            title={part}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="inline-block w-3.5 h-3.5 align-text-bottom mx-0.5 object-contain"
+          />
+        )
+      }
+    }
+    return <span key={idx}>{part}</span>
+  })
+}
+
+function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
+  const profile = useNostrStore((s) => s.profiles[msg.senderPubkey])
+  const profiles = useNostrStore((s) => s.profiles)
+  const senderName =
+    profile?.display_name || profile?.name || `${msg.senderPubkey.slice(0, 8)}…`
+  const parsed = useMemo(
+    () => parseNoteContent({ content: msg.content, tags: msg.tags }),
+    [msg.content, msg.tags],
+  )
+  const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
+
+  if (msg.isZapAnnouncement) {
+    return (
+      <div className="px-2 py-1 rounded-lg bg-[#f59f00]/12 border border-[#f59f00]/30 text-[11px] leading-snug">
+        <div className="flex items-center justify-between gap-1.5">
+          <span className="font-semibold text-[#f59f00] flex items-center gap-1 truncate">
+            <Zap className="w-3 h-3 fill-[#f59f00] shrink-0" />
+            {senderName} · {(msg.zapAmountSats || 0).toLocaleString()} sats
+          </span>
+          <span className="text-[9px] text-[#8c8a82] shrink-0">{formatMiniTime(msg.createdAt)}</span>
+        </div>
+        {msg.content && <p className="text-[#ece9e1] mt-0.5 break-words">{msg.content}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-[11px] leading-snug break-words">
+      <span className="text-[9px] text-[#6f6d66] mr-1.5">{formatMiniTime(msg.createdAt)}</span>
+      <Link
+        to={`/p/${msg.senderPubkey}`}
+        className="font-semibold text-[#ff922b] hover:underline mr-1.5"
+      >
+        {senderName}
+      </Link>
+      <span className="text-[#e4e1d8]">
+        {parsed.segments.map((seg, i) => {
+          if (seg.type === 'text') {
+            return <span key={i}>{renderTextWithCustomEmojis(seg.text, msg.tags)}</span>
+          }
+          if (seg.type === 'link') {
+            return (
+              <a
+                key={i}
+                href={seg.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#ff8a3d] hover:underline break-all"
+              >
+                {seg.display}
+              </a>
+            )
+          }
+          if (seg.type === 'hashtag') {
+            return (
+              <span key={i} className="text-[#f59f00]">
+                #{seg.tag}
+              </span>
+            )
+          }
+          if (seg.type === 'mention') {
+            const mp = profiles[seg.pubkey]
+            return (
+              <Link
+                key={i}
+                to={`/p/${seg.pubkey}`}
+                className="text-[#ff922b] hover:underline font-medium"
+              >
+                @{mp?.display_name || mp?.name || `${seg.bech32.slice(0, 8)}…`}
+              </Link>
+            )
+          }
+          return null
+        })}
+      </span>
+      {firstImg && (
+        <img
+          src={firstImg}
+          alt="Chat attachment"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="mt-1 rounded-md max-h-24 max-w-full object-contain border border-[#2a2d3d] bg-[#0b0b0e]"
+        />
+      )}
+    </div>
+  )
+}
+
 /**
- * Persistent draggable floating Picture-in-Picture mini-player mounted in Layout.tsx
- * so live streams keep playing seamlessly while browsing anywhere in Fire Wisp.
+ * Persistent draggable floating Picture-in-Picture mini-player with compact Live Chat,
+ * mounted in Layout.tsx so streams & chat stay live while browsing anywhere in Fire Wisp.
  * Also supports OS-level browser Picture-in-Picture across tabs/apps.
  */
 export function FloatingStreamPlayer() {
   const miniPlayer = useLiveStore((s) => s.miniPlayer)
+  const rawMiniMessages = useLiveStore((s) => s.miniChatMessages)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const subscribeMiniChat = useLiveStore((s) => s.subscribeMiniChat)
+  const sendChatMessage = useLiveStore((s) => s.sendChatMessage)
+
+  const signer = useAuthStore((s) => s.signer)
+  const openAuthModal = useAuthStore((s) => s.openAuthModal)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
 
   const [expanded, setExpanded] = useState(false)
+  const [chatOpen, setChatOpen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth >= 640 : true,
+  )
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
   const [nativePipSupported, setNativePipSupported] = useState(false)
   const [pos, setPos] = useState<DragPosition | null>(null)
   const [dragging, setDragging] = useState(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoElRef = useRef<HTMLVideoElement | null>(null)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
   const dragStateRef = useRef<{
     startPointerX: number
     startPointerY: number
@@ -57,6 +208,11 @@ export function FloatingStreamPlayer() {
   } | null>(null)
   const suppressNextLinkClickRef = useRef(false)
 
+  const decoded = useMemo(
+    () => (miniPlayer?.naddr ? decodeLiveNaddr(miniPlayer.naddr) : null),
+    [miniPlayer?.naddr],
+  )
+
   useEffect(() => {
     setNativePipSupported(
       typeof document !== 'undefined' &&
@@ -65,7 +221,31 @@ export function FloatingStreamPlayer() {
     )
   }, [])
 
-  // Keep dragged mini-player clamped inside the viewport on resize or expand/shrink
+  // Subscribe to live chat & zaps whenever a mini-player stream is active
+  useEffect(() => {
+    if (!miniPlayer || !decoded) return
+    return subscribeMiniChat(decoded.hostPubkey, decoded.dTag, decoded.relays)
+  }, [miniPlayer?.aTag, decoded, subscribeMiniChat])
+
+  const messages = useMemo(() => {
+    return rawMiniMessages.filter((m) => {
+      if (mutedPubkeys.includes(m.senderPubkey)) return false
+      if (mutedWords.length > 0 && m.content) {
+        const lower = m.content.toLowerCase()
+        if (mutedWords.some((w) => w.length >= 2 && lower.includes(w))) return false
+      }
+      return true
+    })
+  }, [rawMiniMessages, mutedPubkeys, mutedWords])
+
+  // Auto-scroll mini chat when pinned to bottom
+  useEffect(() => {
+    if (!chatOpen || !stickToBottomRef.current) return
+    const el = chatScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages.length, chatOpen])
+
+  // Keep dragged mini-player clamped inside the viewport on resize, expand, or chat toggle
   useEffect(() => {
     if (!pos) return
     const reclamp = () => {
@@ -80,7 +260,7 @@ export function FloatingStreamPlayer() {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', reclamp)
     }
-  }, [pos !== null, expanded])
+  }, [pos !== null, expanded, chatOpen])
 
   // Pointer drag listeners
   useEffect(() => {
@@ -125,7 +305,6 @@ export function FloatingStreamPlayer() {
 
   const handleHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
-    // Don't start dragging when clicking header control buttons
     const target = e.target as HTMLElement | null
     if (target?.closest('button') || target?.closest('[data-no-drag]')) return
     const el = containerRef.current
@@ -157,6 +336,23 @@ export function FloatingStreamPlayer() {
     }
   }
 
+  const handleSendMiniChat = async () => {
+    const clean = draft.trim()
+    if (!clean || !decoded || sending) return
+    setSending(true)
+    try {
+      await sendChatMessage(decoded.hostPubkey, decoded.dTag, clean)
+      setDraft('')
+      stickToBottomRef.current = true
+    } catch (err) {
+      useNostrStore
+        .getState()
+        .setToast(err instanceof Error ? err.message : 'Failed to send chat message')
+    } finally {
+      setSending(false)
+    }
+  }
+
   return (
     <div
       ref={containerRef}
@@ -164,10 +360,10 @@ export function FloatingStreamPlayer() {
       className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 ${
         pos ? '' : 'bottom-16 md:bottom-4 right-3 sm:right-4'
       } ${dragging ? 'border-[#ff922b] select-none' : 'border-[#e8590c]/50 transition-[width]'} ${
-        expanded ? 'w-[calc(100vw-24px)] sm:w-[440px]' : 'w-[290px] sm:w-[340px]'
+        expanded ? 'w-[calc(100vw-24px)] sm:w-[440px]' : 'w-[300px] sm:w-[350px]'
       }`}
     >
-      {/* Draggable compact control header (double-click to reset to bottom-right) */}
+      {/* Draggable compact control header (double-click to snap back to corner) */}
       <div
         onPointerDown={handleHeaderPointerDown}
         onDoubleClick={() => setPos(null)}
@@ -208,6 +404,22 @@ export function FloatingStreamPlayer() {
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
+          {decoded && (
+            <button
+              type="button"
+              onClick={() => setChatOpen((v) => !v)}
+              title={chatOpen ? 'Hide mini chat' : 'Show mini chat'}
+              aria-label={chatOpen ? 'Hide mini chat' : 'Show mini chat'}
+              className={`px-1.5 py-1 rounded-lg flex items-center gap-1 text-[10px] font-semibold transition cursor-pointer ${
+                chatOpen
+                  ? 'bg-[#e8590c]/20 text-[#ff922b]'
+                  : 'text-[#9a9890] hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <MessageCircle className="w-3.5 h-3.5" />
+              {messages.length > 0 && <span>{messages.length}</span>}
+            </button>
+          )}
           {nativePipSupported && (
             <button
               type="button"
@@ -269,6 +481,71 @@ export function FloatingStreamPlayer() {
         onVideoElement={handleVideoElement}
         onStreamOffline={() => markStreamOffline(miniPlayer.aTag)}
       />
+
+      {/* Compact Collapsible Live Chat */}
+      {chatOpen && decoded && (
+        <div className="border-t border-[#222532] bg-[#101118] flex flex-col">
+          <div
+            ref={chatScrollRef}
+            onScroll={() => {
+              const el = chatScrollRef.current
+              if (!el) return
+              stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+            }}
+            className={`${
+              expanded ? 'h-56' : 'h-44'
+            } overflow-y-auto px-2.5 py-2 space-y-1.5`}
+          >
+            {messages.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-[11px] text-[#6f6d66]">
+                No live chat messages yet.
+              </div>
+            ) : (
+              messages.map((m) => <MiniChatRow key={m.id} msg={m} />)
+            )}
+          </div>
+
+          <div className="px-2 py-1.5 border-t border-[#20222c] bg-[#14151e]">
+            {signer?.canSign ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void handleSendMiniChat()
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="Chat in stream…"
+                  className="flex-1 min-w-0 px-2.5 py-1 rounded-lg bg-[#0e0e11] border border-[#262938] focus:border-[#e8590c] text-xs text-white placeholder-[#6f6d66] focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={sending || !draft.trim()}
+                  aria-label="Send chat message"
+                  className="p-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-40 text-white shrink-0 transition cursor-pointer disabled:cursor-default"
+                >
+                  {sending ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={openAuthModal}
+                className="w-full py-1 rounded-lg bg-[#1d1f29] hover:bg-[#262936] text-[11px] font-medium text-[#ff922b] cursor-pointer"
+              >
+                Sign in to chat
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

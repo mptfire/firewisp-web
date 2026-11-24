@@ -55,12 +55,19 @@ interface LiveState {
   streamZapTotal: number
   loadingStream: boolean
   miniPlayer: MiniPlayerStream | null
+  miniChatMessages: LiveChatMessage[]
+  miniChatRelays: string[]
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
   markStreamOffline: (aTag: string) => void
   openMiniPlayer: (stream: MiniPlayerStream) => void
   closeMiniPlayer: () => void
+  subscribeMiniChat: (
+    hostPubkey: string,
+    dTag: string,
+    naddrRelays?: string[],
+  ) => () => void
   subscribeActiveStream: (
     hostPubkey: string,
     dTag: string,
@@ -155,9 +162,26 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   streamZapTotal: 0,
   loadingStream: false,
   miniPlayer: null,
+  miniChatMessages: [],
+  miniChatRelays: [],
 
-  openMiniPlayer: (stream) => set({ miniPlayer: stream }),
-  closeMiniPlayer: () => set({ miniPlayer: null }),
+  openMiniPlayer: (stream) =>
+    set((s) => ({
+      miniPlayer: stream,
+      miniChatMessages:
+        s.activeATag === stream.aTag
+          ? s.currentChatMessages.slice(-120)
+          : s.miniPlayer?.aTag === stream.aTag
+            ? s.miniChatMessages
+            : [],
+      miniChatRelays:
+        s.activeATag === stream.aTag && s.activeChatRelays.length > 0
+          ? s.activeChatRelays
+          : s.miniPlayer?.aTag === stream.aTag
+            ? s.miniChatRelays
+            : [],
+    })),
+  closeMiniPlayer: () => set({ miniPlayer: null, miniChatMessages: [], miniChatRelays: [] }),
 
   fetchStreamerFollowerCounts: async (pubkeys) => {
     const pending = [
@@ -533,6 +557,115 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     }
   },
 
+  subscribeMiniChat: (hostPubkey, dTag, naddrRelays = []) => {
+    const cleanHost = hostPubkey.toLowerCase()
+    const aTag = buildLiveATag(cleanHost, dTag)
+    const cached = get().liveStreams[aTag]?.activity || null
+
+    let active = true
+    const seenIds = new Set<string>(get().miniChatMessages.map((m) => m.id))
+    const closers: Array<{ close: () => void }> = []
+
+    const profileQueue = new Set<string>()
+    let profileTimer: ReturnType<typeof setTimeout> | null = null
+    const queueProfile = (pk: string) => {
+      profileQueue.add(pk.toLowerCase())
+      if (!profileTimer) {
+        profileTimer = setTimeout(() => {
+          profileTimer = null
+          const list = [...profileQueue]
+          profileQueue.clear()
+          if (list.length > 0) void useNostrStore.getState().fetchProfiles(list)
+        }, 350)
+      }
+    }
+
+    const chatRelays = [
+      ...new Set([
+        ...naddrRelays,
+        ...(cached?.relayHints || []),
+        ...get().miniChatRelays,
+        ...LIVE_DISCOVERY_RELAYS,
+        ...useSettingsStore.getState().getReadRelays(),
+      ]),
+    ].slice(0, 8)
+
+    set({ miniChatRelays: chatRelays })
+
+    const chatSub = nostrPool.subscribe(
+      chatRelays,
+      { kinds: [KIND_LIVE_CHAT_MESSAGE], '#a': [aTag], limit: 100 },
+      {
+        onevent: (ev: Event) => {
+          if (!active || seenIds.has(ev.id)) return
+          seenIds.add(ev.id)
+          const replyToId = ev.tags.find(
+            (t) => t[0] === 'e' && t[1] && (!t[3] || t[3] === 'reply'),
+          )?.[1]
+          const msg: LiveChatMessage = {
+            id: ev.id,
+            senderPubkey: ev.pubkey.toLowerCase(),
+            content: ev.content || '',
+            tags: ev.tags || [],
+            createdAt: ev.created_at,
+            replyToId,
+          }
+          queueProfile(msg.senderPubkey)
+          set((s) => {
+            if (s.miniPlayer?.aTag !== aTag) return s
+            if (s.miniChatMessages.some((m) => m.id === msg.id)) return s
+            return {
+              miniChatMessages: [...s.miniChatMessages, msg]
+                .sort((a, b) => a.createdAt - b.createdAt)
+                .slice(-150),
+            }
+          })
+        },
+      },
+    )
+
+    const zapSub = nostrPool.subscribe(
+      chatRelays,
+      { kinds: [9735], '#a': [aTag], limit: 60 },
+      {
+        onevent: (ev: Event) => {
+          const zapKey = `zap-${ev.id}`
+          if (!active || seenIds.has(zapKey)) return
+          seenIds.add(zapKey)
+          const info = parseZapReceiptInfo(ev)
+          if (info.sats <= 0) return
+          queueProfile(info.senderPubkey)
+          const msg: LiveChatMessage = {
+            id: zapKey,
+            senderPubkey: info.senderPubkey,
+            content: info.comment || '',
+            tags: [],
+            createdAt: ev.created_at,
+            isZapAnnouncement: true,
+            zapAmountSats: info.sats,
+          }
+          set((s) => {
+            if (s.miniPlayer?.aTag !== aTag) return s
+            if (s.miniChatMessages.some((m) => m.id === msg.id)) return s
+            return {
+              miniChatMessages: [...s.miniChatMessages, msg]
+                .sort((a, b) => a.createdAt - b.createdAt)
+                .slice(-150),
+            }
+          })
+        },
+      },
+    )
+
+    closers.push(chatSub, zapSub)
+
+    return () => {
+      active = false
+      if (profileTimer) clearTimeout(profileTimer)
+      for (const c of closers) c.close()
+    }
+  },
+
   sendChatMessage: async (hostPubkey, dTag, content, replyToId, extraTags = []) => {
     const signer = useAuthStore.getState().signer
     if (!signer?.canSign) {
@@ -544,10 +677,13 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
     const cleanHost = hostPubkey.toLowerCase()
     const aTag = buildLiveATag(cleanHost, dTag)
+    const state = get()
     const relays =
-      get().activeChatRelays.length > 0
-        ? get().activeChatRelays
-        : [...LIVE_DISCOVERY_RELAYS, ...useSettingsStore.getState().getWriteRelays()].slice(0, 6)
+      state.activeATag === aTag && state.activeChatRelays.length > 0
+        ? state.activeChatRelays
+        : state.miniPlayer?.aTag === aTag && state.miniChatRelays.length > 0
+          ? state.miniChatRelays
+          : [...LIVE_DISCOVERY_RELAYS, ...useSettingsStore.getState().getWriteRelays()].slice(0, 6)
 
     const tags: string[][] = [
       ['a', aTag, relays[0] || ''],
@@ -565,10 +701,8 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       content: cleanText,
     })
 
-    // Optimistic insert
+    // Optimistic insert (deduplicated for both full stream chat and mini-player chat)
     set((s) => {
-      if (s.activeATag !== aTag) return s
-      if (s.currentChatMessages.some((m) => m.id === signed.id)) return s
       const msg: LiveChatMessage = {
         id: signed.id,
         senderPubkey: signed.pubkey.toLowerCase(),
@@ -577,11 +711,18 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         createdAt: signed.created_at,
         replyToId,
       }
-      return {
-        currentChatMessages: [...s.currentChatMessages, msg]
+      const next: Partial<LiveState> = {}
+      if (s.activeATag === aTag && !s.currentChatMessages.some((m) => m.id === signed.id)) {
+        next.currentChatMessages = [...s.currentChatMessages, msg]
           .sort((a, b) => a.createdAt - b.createdAt)
-          .slice(-300),
+          .slice(-300)
       }
+      if (s.miniPlayer?.aTag === aTag && !s.miniChatMessages.some((m) => m.id === signed.id)) {
+        next.miniChatMessages = [...s.miniChatMessages, msg]
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .slice(-150)
+      }
+      return next
     })
 
     await nostrPool.publish(relays, signed)
