@@ -778,7 +778,19 @@ export function LiveStreamPage() {
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onPaste={(e) => {
-                        const files = Array.from(e.clipboardData.files || [])
+                        const dt = e.clipboardData
+                        if (!dt) return
+                        const files: File[] = []
+                        if (dt.files && dt.files.length > 0) {
+                          files.push(...Array.from(dt.files))
+                        } else if (dt.items) {
+                          for (const item of Array.from(dt.items)) {
+                            if (item.kind === 'file') {
+                              const f = item.getAsFile()
+                              if (f) files.push(f)
+                            }
+                          }
+                        }
                         if (files.length > 0) {
                           e.preventDefault()
                           void handleUploadFiles(files)

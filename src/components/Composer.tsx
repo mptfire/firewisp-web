@@ -60,7 +60,7 @@ export function Composer({
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [replyTo, pendingShareText, signer?.canSign, setPendingShareText])
 
-  const handleFiles = async (files: FileList | null) => {
+  const handleFiles = async (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return
     if (!signer?.canSign) {
       openAuthModal()
@@ -173,6 +173,25 @@ export function Composer({
             ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onPaste={(e) => {
+              const dt = e.clipboardData
+              if (!dt) return
+              const files: File[] = []
+              if (dt.files && dt.files.length > 0) {
+                files.push(...Array.from(dt.files))
+              } else if (dt.items) {
+                for (const item of Array.from(dt.items)) {
+                  if (item.kind === 'file') {
+                    const f = item.getAsFile()
+                    if (f) files.push(f)
+                  }
+                }
+              }
+              if (files.length > 0) {
+                e.preventDefault()
+                void handleFiles(files)
+              }
+            }}
             onKeyDown={(e) => {
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !publishing && !uploading) {
                 e.preventDefault()
