@@ -41,6 +41,7 @@ export interface NostrState {
   profiles: Record<string, NostrProfile>
   follows: string[]
   userReadRelays: string[]
+  userWriteRelays: string[]
   bookmarks: string[]
 
   // Social aggregates
@@ -150,6 +151,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   profiles: {},
   follows: [],
   userReadRelays: [],
+  userWriteRelays: [],
   bookmarks: loadBookmarks(),
 
   reactionCounts: {},
@@ -357,15 +359,19 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     if (relayListEvents.length > 0) {
       const nip65Read: string[] = []
+      const nip65Write: string[] = []
       for (const t of relayListEvents[0].tags) {
         if (t[0] !== 'r' || !t[1]) continue
-        if (t[2] && t[2] === 'write') continue
         const clean = sanitizeRelayUrl(t[1])
-        if (clean) nip65Read.push(clean)
+        if (!clean) continue
+        const marker = t[2]
+        if (!marker || marker === 'read') nip65Read.push(clean)
+        if (!marker || marker === 'write') nip65Write.push(clean)
       }
-      if (nip65Read.length > 0) {
-        set({ userReadRelays: [...new Set(nip65Read)].slice(0, 10) })
-      }
+      set({
+        userReadRelays: [...new Set(nip65Read)].slice(0, 10),
+        userWriteRelays: [...new Set(nip65Write)].slice(0, 10),
+      })
     }
 
     if (contactEvents.length > 0) {
@@ -701,7 +707,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       content: unsigned.content,
     })
 
-    const writeRelays = settings.getWriteRelays()
+    const writeRelays = [...new Set([...settings.getWriteRelays(), ...get().userWriteRelays])]
     const results = await nostrPool.publish(writeRelays, signed)
     const okCount = results.filter((r) => r.ok).length
 
@@ -759,7 +765,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       content: unsigned.content,
     })
     get().ingestEvent(signed)
-    await nostrPool.publish(settings.getWriteRelays(), signed)
+    const writeRelays = [...new Set([...settings.getWriteRelays(), ...get().userWriteRelays])]
+    await nostrPool.publish(writeRelays, signed)
   },
 
   toggleRepost: async (target) => {
@@ -769,6 +776,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return
     }
     const settings = useSettingsStore.getState()
+    const writeRelays = [...new Set([...settings.getWriteRelays(), ...get().userWriteRelays])]
     const existingRepostIds = get().userRepostIds[target.id] || []
 
     // Undo repost via NIP-09 deletion (matching Fire Wisp Android #106!)
@@ -780,7 +788,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         content: 'Undo repost',
       })
       get().ingestEvent(delEvent)
-      await nostrPool.publish(settings.getWriteRelays(), delEvent)
+      await nostrPool.publish(writeRelays, delEvent)
       set({ toastMessage: 'Repost removed' })
       return
     }
@@ -798,7 +806,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       content: JSON.stringify(target),
     })
     get().ingestEvent(repost)
-    await nostrPool.publish(settings.getWriteRelays(), repost)
+    await nostrPool.publish(writeRelays, repost)
     set({ toastMessage: 'Reposted' })
   },
 
