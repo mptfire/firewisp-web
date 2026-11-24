@@ -335,7 +335,7 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                   className="px-2 py-0.5 rounded-lg bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300 text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
                 >
                   <Ban className="w-3 h-3" />
-                  <span className="hidden sm:inline">Block</span>
+                  <span className="hidden sm:inline">Block User</span>
                 </button>
               )}
 
