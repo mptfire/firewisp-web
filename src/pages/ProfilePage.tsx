@@ -6,7 +6,7 @@ import {
   ArrowLeft,
   Zap,
   Mail,
-  VolumeX,
+  Ban,
   UserPlus,
   UserCheck,
   Copy,
@@ -282,14 +282,15 @@ export function ProfilePage() {
                 </Link>
                 <button
                   onClick={() => (isMuted ? unmutePubkey(hexPubkey) : mutePubkey(hexPubkey))}
-                  className={`p-2 rounded-xl border cursor-pointer ${
+                  className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isMuted
-                      ? 'bg-red-500/20 border-red-500/40 text-red-300'
-                      : 'bg-[#181a22] border-[#2a2d3a] text-[#9a9890] hover:text-red-300'
+                      ? 'bg-red-600/25 border-red-500/60 text-red-200 hover:bg-red-600/35'
+                      : 'bg-red-500/10 border-red-500/35 text-red-400 hover:bg-red-500/20 hover:text-red-300'
                   }`}
-                  title={isMuted ? 'Unmute user' : 'Mute user'}
+                  title={isMuted ? 'Unblock / Unmute user' : 'Block / Mute user'}
                 >
-                  <VolumeX className="w-4 h-4" />
+                  <Ban className="w-3.5 h-3.5" />
+                  <span>{isMuted ? 'Blocked' : 'Block / Mute'}</span>
                 </button>
                 <button
                   onClick={() => void toggleFollow(hexPubkey)}

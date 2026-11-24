@@ -1,6 +1,15 @@
 import { useEffect, useId } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Flame, RefreshCw, TrendingUp } from 'lucide-react'
+import {
+  Flame,
+  Heart,
+  MessageCircle,
+  Play,
+  RefreshCw,
+  Repeat2,
+  TrendingUp,
+  Zap,
+} from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { Avatar } from './Avatar'
@@ -11,6 +20,12 @@ function formatShortAge(unixSec: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`
   return `${Math.floor(diff / 86400)}d`
+}
+
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
+  return String(n)
 }
 
 function stripPreviewText(raw: string): string {
@@ -74,46 +89,102 @@ function TrendSparkline({ buckets }: { buckets: number[] }) {
   )
 }
 
-function HotPostRow({ eventId }: { eventId: string }) {
+function HotPostCard({ eventId }: { eventId: string }) {
   const ev = useNostrStore((s) => s.events[eventId])
   const profile = useNostrStore((s) => (ev ? s.profiles[ev.pubkey] : undefined))
+  const likes = useNostrStore((s) => s.reactionCounts[eventId] || 0)
+  const reposts = useNostrStore((s) => s.repostCounts[eventId] || 0)
+  const replies = useNostrStore((s) => s.replyCounts[eventId] || 0)
+  const zapSats = useNostrStore((s) => s.zapTotalsSats[eventId] || 0)
+
   if (!ev) return null
 
   const authorName = profile?.display_name || profile?.name || `${ev.pubkey.slice(0, 10)}…`
+  const handle = profile?.nip05 ? profile.nip05.replace(/^_@/, '') : null
   const parsed = parseNoteContent(ev)
   const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
+  const hasVideo = parsed.media.some((m) => m.kind === 'video')
   const snippet = stripPreviewText(ev.content)
+  const hasStats = likes > 0 || reposts > 0 || replies > 0 || zapSats > 0
 
   return (
     <Link
       to={`/e/${ev.id}`}
-      className="block p-2.5 rounded-xl hover:bg-white/[0.04] transition group"
+      className="block p-3 rounded-xl bg-[#1a1c24]/75 hover:bg-[#202330] border border-[#252836] hover:border-[#e8590c]/40 transition group"
     >
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <div className="flex items-center gap-1.5 min-w-0">
+      {/* Author header */}
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-2 min-w-0">
           <Avatar src={profile?.picture} pubkey={ev.pubkey} name={authorName} size="sm" />
-          <span className="text-xs font-semibold text-white truncate group-hover:text-[#ff922b] transition">
-            {authorName}
-          </span>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-white truncate group-hover:text-[#ff922b] transition leading-tight">
+              {authorName}
+            </div>
+            {handle && (
+              <div className="text-[10px] text-[#7c7a72] truncate leading-tight">{handle}</div>
+            )}
+          </div>
         </div>
-        <span className="text-[10px] text-[#6f6d66] shrink-0">
+        <span className="text-[10px] text-[#7c7a72] shrink-0 self-start pt-0.5">
           {formatShortAge(ev.created_at)}
         </span>
       </div>
-      <div className="flex items-start gap-2">
-        <p className="text-xs text-[#c2bfb7] line-clamp-2 leading-snug flex-1 min-w-0">
-          {snippet || (firstImg ? 'Shared a photo' : 'View post')}
+
+      {/* Text snippet */}
+      {snippet && (
+        <p className="text-xs text-[#d6d3cb] line-clamp-3 leading-relaxed break-words">
+          {snippet}
         </p>
-        {firstImg && (
+      )}
+
+      {/* Rich Ditto-style media preview */}
+      {firstImg && (
+        <div className="mt-2 rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#111218]">
           <img
             src={firstImg}
             alt=""
             loading="lazy"
             referrerPolicy="no-referrer"
-            className="w-11 h-11 rounded-lg object-cover border border-[#252734] shrink-0"
+            className="w-full max-h-32 object-cover group-hover:scale-[1.02] transition duration-300"
           />
-        )}
-      </div>
+        </div>
+      )}
+      {!firstImg && hasVideo && (
+        <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-[#13141b] border border-[#2a2d3d] text-[11px] text-[#c2bfb7] flex items-center gap-1.5">
+          <Play className="w-3 h-3 text-[#f59f00] fill-[#f59f00]" />
+          <span>Video attachment</span>
+        </div>
+      )}
+
+      {/* Engagement footer */}
+      {hasStats && (
+        <div className="mt-2 pt-1.5 border-t border-[#242736]/80 flex items-center gap-3 text-[11px] text-[#8c8a82]">
+          {replies > 0 && (
+            <span className="flex items-center gap-1">
+              <MessageCircle className="w-3 h-3" />
+              {formatCompact(replies)}
+            </span>
+          )}
+          {reposts > 0 && (
+            <span className="flex items-center gap-1 text-emerald-400/90">
+              <Repeat2 className="w-3 h-3" />
+              {formatCompact(reposts)}
+            </span>
+          )}
+          {likes > 0 && (
+            <span className="flex items-center gap-1 text-rose-400/90">
+              <Heart className="w-3 h-3" />
+              {formatCompact(likes)}
+            </span>
+          )}
+          {zapSats > 0 && (
+            <span className="flex items-center gap-1 text-[#f59f00] ml-auto font-medium">
+              <Zap className="w-3 h-3 fill-[#f59f00]/30" />
+              {formatCompact(zapSats)}
+            </span>
+          )}
+        </div>
+      )}
     </Link>
   )
 }
@@ -189,9 +260,9 @@ export function TrendingSidebar() {
         )}
       </div>
 
-      {/* Hot Posts (Ditto-style) */}
+      {/* Hot Posts (Ditto-style rich cards) */}
       <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
             <Flame className="w-3.5 h-3.5 text-[#e8590c]" />
             Hot Posts
@@ -208,21 +279,24 @@ export function TrendingSidebar() {
         </div>
 
         {loadingTrends && trendingSidebarIds.length === 0 ? (
-          <div className="space-y-3 animate-pulse pt-1">
+          <div className="space-y-2.5 animate-pulse">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="space-y-1.5">
-                <div className="h-3 w-24 rounded bg-[#1f212b]" />
-                <div className="h-3 w-full rounded bg-[#1b1d26]" />
-                <div className="h-3 w-3/4 rounded bg-[#1b1d26]" />
+              <div key={i} className="p-3 rounded-xl bg-[#1a1c24]/70 space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-[#252836]" />
+                  <div className="h-3 w-24 rounded bg-[#252836]" />
+                </div>
+                <div className="h-3 w-full rounded bg-[#222533]" />
+                <div className="h-3 w-4/5 rounded bg-[#222533]" />
               </div>
             ))}
           </div>
         ) : trendingSidebarIds.length === 0 ? (
           <p className="text-xs text-[#6f6d66]">No hot posts loaded yet.</p>
         ) : (
-          <div className="divide-y divide-[#1f212b] -mx-1">
+          <div className="space-y-2.5">
             {trendingSidebarIds.map((id) => (
-              <HotPostRow key={id} eventId={id} />
+              <HotPostCard key={id} eventId={id} />
             ))}
           </div>
         )}

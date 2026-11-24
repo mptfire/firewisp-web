@@ -777,6 +777,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       for (const ev of hotPosts) get().ingestEvent(ev)
       if (hotPosts.length > 0) {
         void get().fetchProfiles(hotPosts.map((e) => e.pubkey))
+        const hotIds = hotPosts.map((e) => e.id)
+        const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), TRENDING_RELAY])].slice(0, 6)
+        void nostrPool
+          .query(metaRelays, { kinds: [1, 6, 7, 9735], '#e': hotIds, limit: 200 }, 3500)
+          .then((meta) => {
+            for (const m of meta) get().ingestEvent(m)
+          })
       }
 
       set((s) => {

@@ -45,7 +45,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const navItems = [
     { to: '/', label: 'Feed', icon: Flame, end: true },
     { to: '/search', label: 'Search', icon: Search },
-    { to: '/notifications', label: 'Alerts', icon: Bell },
+    { to: '/notifications', label: 'Notifications', icon: Bell },
     { to: '/messages', label: 'Messages', icon: Mail },
     { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
@@ -244,7 +244,7 @@ export function Layout({ children }: { children: ReactNode }) {
         {[
           { to: '/', icon: Flame, label: 'Feed', end: true },
           { to: '/search', icon: Search, label: 'Search' },
-          { to: '/notifications', icon: Bell, label: 'Alerts' },
+          { to: '/notifications', icon: Bell, label: 'Notifications' },
           { to: '/messages', icon: Mail, label: 'DMs' },
           { to: '/settings', icon: Settings, label: 'Settings' },
         ].map(({ to, icon: Icon, label, end }) => (
@@ -253,13 +253,13 @@ export function Layout({ children }: { children: ReactNode }) {
             to={to}
             end={end}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 text-[10px] px-2 py-0.5 ${
+              `flex flex-col items-center gap-0.5 text-[10px] px-1.5 py-0.5 min-w-0 ${
                 isActive ? 'text-[#ff8a3d]' : 'text-[#8c8a82]'
               }`
             }
           >
             <Icon className="w-5 h-5" />
-            <span>{label}</span>
+            <span className="truncate max-w-[68px]">{label}</span>
           </NavLink>
         ))}
       </nav>

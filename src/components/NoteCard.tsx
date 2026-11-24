@@ -9,6 +9,7 @@ import {
   Zap,
   Bookmark,
   MoreHorizontal,
+  Ban,
   VolumeX,
   ExternalLink,
   Cpu,
@@ -331,12 +332,13 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                   <button
                     onClick={() => {
                       mutePubkey(event.pubkey)
+                      useNostrStore.getState().setToast('Blocked & muted user')
                       setMenuOpen(false)
                     }}
-                    className="w-full px-3 py-2 text-left text-red-300 hover:bg-white/5 flex items-center gap-2 cursor-pointer"
+                    className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 font-medium flex items-center gap-2 cursor-pointer"
                   >
-                    <VolumeX className="w-3.5 h-3.5" />
-                    Mute author
+                    <Ban className="w-3.5 h-3.5" />
+                    Block / Mute user
                   </button>
                   <button
                     onClick={() => {
