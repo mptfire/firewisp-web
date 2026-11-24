@@ -54,7 +54,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
       <div className="w-full max-w-6xl flex min-h-screen">
         {/* Left Sidebar (desktop) */}
-        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen justify-between overflow-y-auto gap-4">
+        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen overflow-y-auto gap-3.5">
           <div>
             <Link to="/" className="flex items-center gap-2.5 px-3 py-2 mb-4">
               <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl" />
@@ -114,42 +114,42 @@ export function Layout({ children }: { children: ReactNode }) {
                 </a>
               </div>
             </div>
-          </div>
 
-          <div className="pt-3 border-t border-[#20222c]">
-            {pubkey ? (
-              <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-xl bg-[#15161c]">
-                <Link to={`/p/${pubkey}`} className="flex items-center gap-2 min-w-0">
-                  <Avatar
-                    src={profile?.picture}
-                    pubkey={pubkey}
-                    name={profile?.display_name || profile?.name}
-                    size="sm"
-                  />
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold truncate">
-                      {profile?.display_name || profile?.name || `${pubkey.slice(0, 10)}…`}
+            <div className="mt-3.5 pt-3.5 border-t border-[#20222c]">
+              {pubkey ? (
+                <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-xl bg-[#15161c] border border-[#232530]">
+                  <Link to={`/p/${pubkey}`} className="flex items-center gap-2 min-w-0">
+                    <Avatar
+                      src={profile?.picture}
+                      pubkey={pubkey}
+                      name={profile?.display_name || profile?.name}
+                      size="sm"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">
+                        {profile?.display_name || profile?.name || `${pubkey.slice(0, 10)}…`}
+                      </div>
+                      <div className="text-[10px] text-[#9a9890] uppercase">{method}</div>
                     </div>
-                    <div className="text-[10px] text-[#9a9890] uppercase">{method}</div>
-                  </div>
-                </Link>
+                  </Link>
+                  <button
+                    onClick={logout}
+                    title="Sign out (wipes local key from memory)"
+                    className="p-1.5 rounded-lg text-[#9a9890] hover:text-red-400 hover:bg-white/5 cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
                 <button
-                  onClick={logout}
-                  title="Sign out (wipes local key from memory)"
-                  className="p-1.5 rounded-lg text-[#9a9890] hover:text-red-400 hover:bg-white/5 cursor-pointer"
+                  onClick={openAuthModal}
+                  className="w-full py-2.5 rounded-xl ember-gradient hover:opacity-95 text-white font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogIn className="w-4 h-4" />
+                  Sign In
                 </button>
-              </div>
-            ) : (
-              <button
-                onClick={openAuthModal}
-                className="w-full py-2.5 rounded-xl ember-gradient hover:opacity-95 text-white font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <LogIn className="w-4 h-4" />
-                Sign In
-              </button>
-            )}
+              )}
+            </div>
           </div>
         </aside>
 
