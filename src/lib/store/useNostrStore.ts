@@ -78,8 +78,11 @@ export interface TrendingKeyword {
   tag: string
   accounts: number
   uses: number
-  /** 7 chronological activity buckets over the last 24h for Ditto-style sparklines */
-  buckets: number[]
+}
+
+export interface TrendingUser {
+  pubkey: string
+  posts: number
 }
 
 export interface NostrState {
@@ -120,6 +123,7 @@ export interface NostrState {
   loadingMore: boolean
   trendingSidebarIds: string[]
   trendingHashtags: TrendingKeyword[]
+  trendingUsers: TrendingUser[]
   loadingTrends: boolean
   notificationIds: string[]
   dms: DecryptedDm[]
@@ -286,6 +290,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadingMore: false,
   trendingSidebarIds: [],
   trendingHashtags: [],
+  trendingUsers: [],
   loadingTrends: false,
   notificationIds: [],
   dms: [],
@@ -747,37 +752,22 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         if (!verdict.isSpam) cleanAll.push(ev)
       }
 
-      // Compute Ditto-style Trending #keywords: unique people, total posts, and 7-bucket 24h sparkline
-      const BUCKETS = 7
-      const bucketSpan = Math.ceil(86400 / BUCKETS)
-      const tagStats = new Map<
-        string,
-        { authors: Set<string>; uses: number; buckets: number[] }
-      >()
+      // Compute Trending #keywords: unique people + post counts
+      const tagStats = new Map<string, { authors: Set<string>; uses: number }>()
 
       for (const ev of cleanAll) {
         const tags = extractEventHashtags(ev)
         if (tags.length === 0 || tags.length > 6) continue // ignore hashtag stuffers
         const pk = ev.pubkey.toLowerCase()
-        const ageSec = Math.max(0, nowSec - ev.created_at)
-        const bucketIdx = Math.max(
-          0,
-          Math.min(BUCKETS - 1, BUCKETS - 1 - Math.floor(ageSec / bucketSpan)),
-        )
         for (const t of tags) {
           if (t.length < 2 || t.length > 24 || /^\d+$/.test(t)) continue
           let stat = tagStats.get(t)
           if (!stat) {
-            stat = { authors: new Set<string>(), uses: 0, buckets: new Array(BUCKETS).fill(0) }
+            stat = { authors: new Set<string>(), uses: 0 }
             tagStats.set(t, stat)
           }
           stat.authors.add(pk)
           stat.uses += 1
-          if (ev.created_at >= since24h) {
-            stat.buckets[bucketIdx] += 1
-          } else {
-            stat.buckets[0] += 1
-          }
         }
       }
 
@@ -786,12 +776,29 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           tag,
           accounts: st.authors.size,
           uses: st.uses,
-          buckets: st.buckets,
         }))
         .sort((a, b) => b.accounts * 3 + b.uses - (a.accounts * 3 + a.uses))
 
       const popularTags = rankedTags.filter((x) => x.accounts >= 2).slice(0, 6)
       const trendingHashtags = popularTags.length >= 4 ? popularTags : rankedTags.slice(0, 6)
+
+      // Compute Trending Users from curated trending relay (distinct top authors, excluding self)
+      const myPk = useAuthStore.getState().pubkey?.toLowerCase()
+      const userPostCounts = new Map<string, number>()
+      const userFirstOrder: string[] = []
+      for (const ev of trendingRaw) {
+        if (!isTopLevelNote(ev) || get().isEventMuted(ev)) continue
+        const pk = ev.pubkey.toLowerCase()
+        if (pk === myPk) continue
+        const verdict = evaluateNoteSpam(ev, { maxPerAuthor: 5 })
+        if (verdict.isSpam) continue
+        if (!userPostCounts.has(pk)) userFirstOrder.push(pk)
+        userPostCounts.set(pk, (userPostCounts.get(pk) || 0) + 1)
+      }
+      const trendingUsers: TrendingUser[] = userFirstOrder
+        .map((pubkey) => ({ pubkey, posts: userPostCounts.get(pubkey) || 1 }))
+        .sort((a, b) => b.posts - a.posts)
+        .slice(0, 5)
 
       // Pick top 5 Hot Posts from trending relay (distinct authors, readable text or media)
       const hotSeenContent = new Map<string, Set<string>>()
@@ -815,8 +822,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }
 
       for (const ev of hotPosts) get().ingestEvent(ev)
+      const profilesToFetch = [
+        ...new Set([...hotPosts.map((e) => e.pubkey), ...trendingUsers.map((u) => u.pubkey)]),
+      ]
+      if (profilesToFetch.length > 0) {
+        void get().fetchProfiles(profilesToFetch)
+      }
       if (hotPosts.length > 0) {
-        void get().fetchProfiles(hotPosts.map((e) => e.pubkey))
         const hotIds = hotPosts.map((e) => e.id)
         const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), TRENDING_RELAY])].slice(0, 6)
         void nostrPool
@@ -833,6 +845,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           events: eventsMap,
           trendingSidebarIds: hotPosts.map((e) => e.id),
           trendingHashtags,
+          trendingUsers,
         }
       })
     } finally {
