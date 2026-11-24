@@ -61,7 +61,7 @@ export function FeedPage() {
   const extendedFeedIds = useNostrStore((s) => s.extendedFeedIds)
   const trendingFeedIds = useNostrStore((s) => s.trendingFeedIds)
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
-  const pendingCount = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab]?.length || 0)
+  const pendingIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab])
   const loadingFeed = useNostrStore((s) => s.loadingFeed)
   const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
   const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
@@ -155,7 +155,7 @@ export function FeedPage() {
               ? trendingFeedIds
               : globalFeedIds
 
-  const { items, spamBlockedCount } = useMemo(() => {
+  const { items, spamBlockedCount, pendingCount } = useMemo(() => {
     const out: Array<{ event: Event; repostedBy?: string }> = []
     const seen = new Set<string>()
     const seenContentAuthors = new Map<string, Set<string>>()
@@ -167,15 +167,18 @@ export function FeedPage() {
 
     const shouldSpamFilter = (tab === 'foryou' || tab === 'global' || tab === 'trending') && spamFilterEnabled
 
-    for (const id of ids) {
-      if (deletedEventIds[id]) continue
+    const resolveVisibleItem = (
+      id: string,
+      trackSpamBlock: boolean,
+    ): { event: Event; repostedBy?: string } | null => {
+      if (deletedEventIds[id]) return null
       const ev = events[id]
-      if (!ev || isEventMuted(ev)) continue
+      if (!ev || isEventMuted(ev)) return null
 
       // STRICT FOLLOWS GATE: never render unfollowed accounts inside Follows
       if (tab === 'following') {
         const evAuthor = ev.pubkey.toLowerCase()
-        if (evAuthor !== myPk && !followSet.has(evAuthor)) continue
+        if (evAuthor !== myPk && !followSet.has(evAuthor)) return null
       }
 
       // STRICT FOR YOU GATE (when signed in): only Follows, loaded Extended WoT, or vetted Trending/Topic picks
@@ -187,7 +190,7 @@ export function FeedPage() {
           !extendedSet.has(evAuthor) &&
           !forYouSuppIds[ev.id]
         ) {
-          continue
+          return null
         }
       }
 
@@ -196,12 +199,12 @@ export function FeedPage() {
       if (ev.kind === 6) {
         const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
         const inner = targetId ? events[targetId] : undefined
-        if (!inner || deletedEventIds[inner.id] || isEventMuted(inner)) continue
+        if (!inner || deletedEventIds[inner.id] || isEventMuted(inner)) return null
         targetEv = inner
         repostedBy = ev.pubkey
       }
 
-      if (seen.has(targetEv.id)) continue
+      if (seen.has(targetEv.id)) return null
 
       // Hide replies in Follows & For You when "Hide replies" is active (clean top-level feed)
       if (
@@ -211,7 +214,7 @@ export function FeedPage() {
         targetEv.kind === 1 &&
         !isTopLevelNote(targetEv)
       ) {
-        continue
+        return null
       }
 
       if (
@@ -220,7 +223,7 @@ export function FeedPage() {
         targetEv.kind === 1 &&
         !isTopLevelNote(targetEv)
       ) {
-        continue
+        return null
       }
 
       if (shouldSpamFilter) {
@@ -233,17 +236,37 @@ export function FeedPage() {
           requirePowBits: tab === 'global' && requirePowInExplore ? 12 : 0,
         })
         if (verdict.isSpam) {
-          blocked++
-          continue
+          if (trackSpamBlock) blocked++
+          return null
         }
       }
 
-      seen.add(targetEv.id)
-      out.push({ event: targetEv, repostedBy })
+      return { event: targetEv, repostedBy }
     }
-    return { items: out, spamBlockedCount: blocked }
+
+    for (const id of ids) {
+      const resolved = resolveVisibleItem(id, true)
+      if (!resolved) continue
+      seen.add(resolved.event.id)
+      out.push(resolved)
+    }
+
+    // Count only pending notes that will ACTUALLY render when clicked (excludes hidden replies, muted, duplicates)
+    let visiblePending = 0
+    if (pendingIds && pendingIds.length > 0) {
+      const pendingSeen = new Set<string>()
+      for (const pid of pendingIds) {
+        const resolved = resolveVisibleItem(pid, false)
+        if (!resolved || pendingSeen.has(resolved.event.id)) continue
+        pendingSeen.add(resolved.event.id)
+        visiblePending++
+      }
+    }
+
+    return { items: out, spamBlockedCount: blocked, pendingCount: visiblePending }
   }, [
     ids,
+    pendingIds,
     events,
     deletedEventIds,
     isEventMuted,
