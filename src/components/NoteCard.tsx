@@ -119,19 +119,28 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const entry = useLiveStore((s) => s.liveStreams[aTag])
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
+  const isInMiniPlayer = useLiveStore((s) => s.miniPlayer?.aTag === aTag)
+  const playingInline = useLiveStore((s) => s.activeInlineStreamKey === aTag)
+  const setActiveInlineStream = useLiveStore((s) => s.setActiveInlineStream)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
   const profile = useNostrStore((s) => s.profiles[displayPk])
   const [thumbFailed, setThumbFailed] = useState(false)
-  const [playingInline, setPlayingInline] = useState(false)
+  const [lockedStreamUrl, setLockedStreamUrl] = useState<string | null>(null)
   const [hoverActive, setHoverActive] = useState(false)
   const [previewStatus, setPreviewStatus] = useState<HoverPreviewStatus | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (!inlineMediaPlayback) setPlayingInline(false)
-  }, [inlineMediaPlayback])
+    if (!inlineMediaPlayback && playingInline) {
+      setActiveInlineStream(null)
+    }
+  }, [inlineMediaPlayback, playingInline, setActiveInlineStream])
+
+  useEffect(() => {
+    if (!playingInline) setLockedStreamUrl(null)
+  }, [playingInline])
 
   useEffect(() => {
     return () => {
@@ -142,12 +151,13 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const hostName = profile?.display_name || profile?.name || `${displayPk.slice(0, 10)}…`
   const title = entry?.activity.title || `Live Stream (${dTag.slice(0, 24)})`
   const thumb = entry?.activity.image
-  const streamUrl = entry?.activity.streamingUrl || entry?.activity.recordingUrl
+  const liveStreamUrl = entry?.activity.streamingUrl || entry?.activity.recordingUrl
+  const effectivePlayUrl = playingInline ? lockedStreamUrl || liveStreamUrl : liveStreamUrl
   const isLive = entry?.activity.status === 'live'
   const viewers = entry?.activity.currentParticipants
 
   const startHoverPreview = () => {
-    if (!hoverStreamPreview || !streamUrl || playingInline) return
+    if (!hoverStreamPreview || !liveStreamUrl || playingInline || isInMiniPlayer) return
     if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
       return
     }
@@ -167,24 +177,34 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
     setPreviewStatus(null)
   }
 
+  const handleActivateStream = () => {
+    stopHoverPreview()
+    if (inlineMediaPlayback && liveStreamUrl) {
+      setLockedStreamUrl(liveStreamUrl)
+      setActiveInlineStream(aTag)
+    } else {
+      navigate(`/live/${bech32}`)
+    }
+  }
+
   return (
     <div
       onClick={(e) => e.stopPropagation()}
       className="group mt-2.5 rounded-xl overflow-hidden border border-[#e8590c]/40 hover:border-[#e8590c] bg-[#14151e] transition"
     >
-      {playingInline && inlineMediaPlayback && streamUrl ? (
+      {playingInline && inlineMediaPlayback && effectivePlayUrl ? (
         <HlsVideoPlayer
-          streamUrl={streamUrl}
+          key={aTag}
+          streamUrl={effectivePlayUrl}
           posterUrl={thumb}
           title={title}
           isLive={isLive}
           autoStart
           onPopOut={() => {
-            setPlayingInline(false)
             openMiniPlayer({
               aTag,
               naddr: bech32,
-              streamUrl,
+              streamUrl: effectivePlayUrl,
               posterUrl: thumb,
               title,
               hostName,
@@ -193,48 +213,36 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           }}
           onStreamOffline={() => markStreamOffline(aTag)}
         />
-      ) : streamUrl ? (
+      ) : liveStreamUrl ? (
         <div
-          role="button"
-          tabIndex={0}
           onMouseEnter={startHoverPreview}
           onMouseLeave={stopHoverPreview}
-          onClick={() => {
-            stopHoverPreview()
-            if (inlineMediaPlayback) {
-              setPlayingInline(true)
-            } else {
-              navigate(`/live/${bech32}`)
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              stopHoverPreview()
-              if (inlineMediaPlayback) setPlayingInline(true)
-              else navigate(`/live/${bech32}`)
-            }
-          }}
-          className="relative block aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden cursor-pointer text-left"
-          aria-label={inlineMediaPlayback ? `Play ${title} inline` : `Open ${title} in player`}
+          className="relative aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden"
         >
-          {thumb && !thumbFailed ? (
-            <img
-              src={thumb}
-              alt={title}
-              loading="lazy"
-              referrerPolicy="no-referrer"
-              onError={() => setThumbFailed(true)}
-              className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
-            />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] flex items-center justify-center">
-              <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="lg" />
-            </div>
-          )}
-          {hoverActive && (
+          <button
+            type="button"
+            onClick={handleActivateStream}
+            className="block w-full h-full cursor-pointer text-left"
+            aria-label={inlineMediaPlayback ? `Play ${title} inline` : `Open ${title} in player`}
+          >
+            {thumb && !thumbFailed ? (
+              <img
+                src={thumb}
+                alt={title}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onError={() => setThumbFailed(true)}
+                className="w-full h-full object-cover group-hover:scale-[1.02] transition duration-300"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] flex items-center justify-center">
+                <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="lg" />
+              </div>
+            )}
+          </button>
+          {hoverActive && !isInMiniPlayer && (
             <LiveHoverPreview
-              streamUrl={streamUrl}
+              streamUrl={liveStreamUrl}
               rightOffset
               onStatusChange={setPreviewStatus}
             />
@@ -253,13 +261,12 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           <button
             type="button"
             onClick={(e) => {
-              e.preventDefault()
               e.stopPropagation()
               stopHoverPreview()
               openMiniPlayer({
                 aTag,
                 naddr: bech32,
-                streamUrl,
+                streamUrl: liveStreamUrl,
                 posterUrl: thumb,
                 title,
                 hostName,
@@ -268,7 +275,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             }}
             title="Pop out mini-player and keep browsing"
             aria-label={`Pop out ${title} in mini-player`}
-            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
           >
             <PictureInPicture2 className="w-3.5 h-3.5" />
           </button>
@@ -288,7 +295,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="sm" />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              {!streamUrl && (
+              {!liveStreamUrl && (
                 <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
                   <Radio className="w-2.5 h-2.5 animate-pulse" />
                   LIVE
@@ -300,7 +307,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             </div>
             <div className="text-[11px] text-[#8c8a82] truncate">
               {hostName}
-              {streamUrl && !playingInline
+              {liveStreamUrl && !playingInline
                 ? inlineMediaPlayback
                   ? ' · Click video to play inline'
                   : ' · Click to open player'
@@ -314,7 +321,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   )
 })
 
-/** Isolated quoted-note preview card with inline image & video preview support. */
+/** Isolated quoted-note preview card with inline image, video & YouTube preview support (no nested interactive links). */
 const QuotedNoteCard = memo(function QuotedNoteCard({
   eventId,
   bech32,
@@ -322,7 +329,12 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   eventId: string
   bech32: string
 }) {
+  const navigate = useNavigate()
   const quoted = useNostrStore((s) => s.events[eventId])
+  const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const authorProfile = useNostrStore((s) =>
     quoted ? s.profiles[quoted.pubkey] : undefined,
   )
@@ -331,10 +343,28 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   const firstVideo = parsedQuote?.media.find((m) => m.kind === 'video')
   const firstYoutube = parsedQuote?.youtube[0]
 
+  const hiddenQuoted = useMemo(() => {
+    if (!quoted) return false
+    return isEventDeleted(quoted) || isEventMuted(quoted)
+  }, [quoted, isEventDeleted, isEventMuted, mutedPubkeys, privateMutedPubkeys])
+
+  if (hiddenQuoted) {
+    return (
+      <div className="my-2 px-3 py-2 rounded-xl bg-[#14161e] border border-[#242734] text-xs text-[#6f6d66] italic">
+        Quoted note hidden (muted or deleted)
+      </div>
+    )
+  }
+
   return (
-    <Link
-      to={`/e/${eventId}`}
-      className="block my-2 p-3 rounded-xl bg-[#161820] border border-[#272a36] hover:border-[#3b3f52] transition text-sm"
+    <div
+      onClick={(e) => {
+        e.stopPropagation()
+        const target = e.target as HTMLElement | null
+        if (target?.closest('a, button, video, audio, iframe, input')) return
+        navigate(`/e/${eventId}`)
+      }}
+      className="block my-2 p-3 rounded-xl bg-[#161820] border border-[#272a36] hover:border-[#3b3f52] transition text-sm cursor-pointer"
     >
       {quoted ? (
         <>
@@ -392,7 +422,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
           Quoted note ({bech32.slice(0, 18)}…)
         </span>
       )}
-    </Link>
+    </div>
   )
 })
 
@@ -405,11 +435,16 @@ const ReplyContextLine = memo(function ReplyContextLine({
   hideParentPreview?: boolean
   onOpenLightbox?: (media: MediaAttachment) => void
 }) {
+  const navigate = useNavigate()
   const refs = useMemo(() => extractReplyRefs(event), [event])
   const replyTargetId = refs.replyId || refs.rootId
   const parentEvent = useNostrStore((s) =>
     replyTargetId ? s.events[replyTargetId] : undefined,
   )
+  const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const fallbackPubkey = useMemo(() => {
     const pTag = event.tags.find((t) => t[0] === 'p' && t[1] && t[1] !== event.pubkey)?.[1]
     return pTag?.toLowerCase()
@@ -425,9 +460,14 @@ const ReplyContextLine = memo(function ReplyContextLine({
     }
   }, [hideParentPreview, replyTargetId, parentEvent])
 
+  const hiddenParent = useMemo(() => {
+    if (!parentEvent) return false
+    return isEventDeleted(parentEvent) || isEventMuted(parentEvent)
+  }, [parentEvent, isEventDeleted, isEventMuted, mutedPubkeys, privateMutedPubkeys])
+
   const parsedParent = useMemo(
-    () => (!hideParentPreview && parentEvent ? parseNoteContent(parentEvent) : null),
-    [hideParentPreview, parentEvent],
+    () => (!hideParentPreview && parentEvent && !hiddenParent ? parseNoteContent(parentEvent) : null),
+    [hideParentPreview, parentEvent, hiddenParent],
   )
 
   if (!replyTargetId) return null
@@ -437,7 +477,7 @@ const ReplyContextLine = memo(function ReplyContextLine({
     parentProfile?.name ||
     (parentPubkey ? `${parentPubkey.slice(0, 10)}…` : 'a note')
 
-  if (hideParentPreview || !parentEvent) {
+  if (hideParentPreview || !parentEvent || hiddenParent) {
     return (
       <div className="flex items-center gap-1 text-xs text-[#8a8880] mb-1">
         <CornerDownRight className="w-3 h-3 shrink-0" />
@@ -463,10 +503,14 @@ const ReplyContextLine = memo(function ReplyContextLine({
   const hasParentMedia = Boolean(parentImage || parentVideo || parentYoutube)
 
   return (
-    <Link
-      to={`/e/${replyTargetId}`}
-      onClick={(e) => e.stopPropagation()}
-      className="block mt-1.5 mb-2 p-2.5 rounded-xl bg-[#14161e] border border-[#252836] border-l-2 border-l-[#ff8a3d]/70 hover:border-[#3b4057] hover:border-l-[#ff8a3d] transition group"
+    <div
+      onClick={(e) => {
+        e.stopPropagation()
+        const target = e.target as HTMLElement | null
+        if (target?.closest('a, button, img, video, audio, iframe, input')) return
+        navigate(`/e/${replyTargetId}`)
+      }}
+      className="block mt-1.5 mb-2 p-2.5 rounded-xl bg-[#14161e] border border-[#252836] border-l-2 border-l-[#ff8a3d]/70 hover:border-[#3b4057] hover:border-l-[#ff8a3d] transition group cursor-pointer"
     >
       <div className="flex items-center gap-1.5 text-[11px] text-[#8a8880] mb-1">
         <CornerDownRight className="w-3 h-3 text-[#ff8a3d] shrink-0" />
@@ -497,10 +541,12 @@ const ReplyContextLine = memo(function ReplyContextLine({
           loading="lazy"
           referrerPolicy="no-referrer"
           onClick={(e) => {
-            if (!onOpenLightbox) return
-            e.preventDefault()
             e.stopPropagation()
-            onOpenLightbox(parentImage)
+            if (onOpenLightbox) {
+              onOpenLightbox(parentImage)
+            } else {
+              navigate(`/e/${replyTargetId}`)
+            }
           }}
           className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734] hover:border-[#e8590c]/60 transition cursor-zoom-in"
         />
@@ -513,26 +559,17 @@ const ReplyContextLine = memo(function ReplyContextLine({
           controls
           playsInline
           preload="metadata"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
+          onClick={(e) => e.stopPropagation()}
           className="mt-2 rounded-lg max-h-64 w-full bg-black border border-[#242734]"
         />
       )}
 
       {!parentImage && !parentVideo && parentYoutube && (
-        <div
-          className="mt-2"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-        >
+        <div className="mt-2">
           <YouTubeCard video={parentYoutube} compact />
         </div>
       )}
-    </Link>
+    </div>
   )
 })
 
@@ -559,9 +596,10 @@ export const NoteCard = memo(function NoteCard({
   const myPubkey = useAuthStore((s) => s.pubkey)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
-  const isAuthorMuted = useSettingsStore((s) =>
-    s.mutedPubkeys.includes(event.pubkey.toLowerCase()),
-  )
+  const isAuthorMuted = useSettingsStore((s) => {
+    const pk = event.pubkey.toLowerCase()
+    return s.mutedPubkeys.includes(pk) || s.privateMutedPubkeys.includes(pk)
+  })
   const muteHashtag = useSettingsStore((s) => s.muteHashtag)
   const isMyNote = Boolean(myPubkey && myPubkey.toLowerCase() === event.pubkey.toLowerCase())
 
@@ -583,45 +621,53 @@ export const NoteCard = memo(function NoteCard({
     profile?.display_name || profile?.name || `${npub.slice(0, 12)}…`
   const powBits = useMemo(() => verifyEventPow(event.id, event.tags), [event.id, event.tags])
   const parsed = useMemo(() => parseNoteContent(event), [event])
-  const liveStreams = useLiveStore((s) => s.liveStreams)
 
-  // If this note announces a livestream (e.g. #livestream / #letsfo_live / /live link without an explicit naddr)
-  // and its author currently has an active LIVE stream in useLiveStore, show their rich stream preview card!
-  const matchedAuthorLive = useMemo(() => {
-    const hasExplicitLive = parsed.segments.some((seg) => seg.type === 'live')
-    if (hasExplicitLive) return null
+  // Pre-check locally whether this note is a live announcement so non-announcement notes NEVER
+  // re-render when global live chat/heartbeat updates arrive in useLiveStore!
+  const isLiveAnnouncement = useMemo(() => {
+    if (parsed.segments.some((seg) => seg.type === 'live')) return false
     const lowerContent = (event.content || '').toLowerCase()
-    const isLiveAnnouncement =
+    return (
       event.tags.some(
         (t) =>
           (t[0] === 't' && /^(livestream|letsfo_live|live)$/i.test(t[1] || '')) ||
           (t[0] === 'software' && /live/i.test(t[1] || '')),
       ) || /https?:\/\/[^\s]*\/live\b/i.test(lowerContent)
-    if (!isLiveAnnouncement) return null
+    )
+  }, [event, parsed.segments])
 
+  // Select only a primitive matching aTag string (null for 99.9% of notes -> zero spurious re-renders)
+  const matchedAuthorLiveATag = useLiveStore((s) => {
+    if (!isLiveAnnouncement) return null
     const authorPk = event.pubkey.toLowerCase()
     const nowSec = Math.floor(Date.now() / 1000)
-    for (const entry of Object.values(liveStreams)) {
+    for (const entry of Object.values(s.liveStreams)) {
       if (!isLiveStreamFresh(entry, nowSec)) continue
       const matchAuthor =
         entry.activity.hostPubkey.toLowerCase() === authorPk ||
         entry.activity.streamerPubkey?.toLowerCase() === authorPk
       if (!matchAuthor) continue
-      // Only attach to recent announcement notes (within 4 hours of the stream event)
       if (Math.abs(event.created_at - entry.activity.createdAt) <= 4 * 3600) {
-        return {
-          hostPubkey: entry.activity.hostPubkey,
-          dTag: entry.activity.dTag,
-          bech32: encodeLiveNaddr(
-            entry.activity.hostPubkey,
-            entry.activity.dTag,
-            entry.activity.relayHints,
-          ),
-        }
+        return entry.aTagValue
       }
     }
     return null
-  }, [event, parsed.segments, liveStreams])
+  })
+
+  const matchedAuthorLive = useMemo(() => {
+    if (!matchedAuthorLiveATag) return null
+    const entry = useLiveStore.getState().liveStreams[matchedAuthorLiveATag]
+    if (!entry) return null
+    return {
+      hostPubkey: entry.activity.hostPubkey,
+      dTag: entry.activity.dTag,
+      bech32: encodeLiveNaddr(
+        entry.activity.hostPubkey,
+        entry.activity.dTag,
+        entry.activity.relayHints,
+      ),
+    }
+  }, [matchedAuthorLiveATag])
 
   const hasVisibleBody = useMemo(
     () => parsed.segments.some((seg) => seg.type !== 'text' || seg.text.trim().length > 0),
@@ -664,11 +710,15 @@ export const NoteCard = memo(function NoteCard({
       void store.fetchProfiles(mentionedPubkeys)
     }
 
-    const missing = parsed.quotes.filter((qid) => !store.events[qid] && !requestedQuotes.has(qid))
+    const missing = parsed.quotes
+      .filter((qid) => !store.events[qid] && !requestedQuotes.has(qid))
+      .slice(0, 4)
     if (missing.length === 0) return
     for (const qid of missing) requestedQuotes.add(qid)
-    const relays = useSettingsStore.getState().getReadRelays()
-    void nostrPool.query(relays, { ids: missing.slice(0, 4) }, 3500).then((evs) => {
+    const relays = [
+      ...new Set([...useSettingsStore.getState().getReadRelays(), ...store.userReadRelays]),
+    ].slice(0, 8)
+    void nostrPool.query(relays, { ids: missing }, 3500).then((evs) => {
       const st = useNostrStore.getState()
       for (const q of evs) st.ingestEvent(q)
       if (evs.length > 0) void st.fetchProfiles(evs.map((q) => q.pubkey))
@@ -805,9 +855,13 @@ export const NoteCard = memo(function NoteCard({
                       </button>
                     )}
                     <button
-                      onClick={() => {
-                        void navigator.clipboard.writeText(nip19.noteEncode(event.id))
-                        useNostrStore.getState().setToast('Copied note ID')
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(nip19.noteEncode(event.id))
+                          useNostrStore.getState().setToast('Copied note ID')
+                        } catch {
+                          useNostrStore.getState().setToast('Clipboard permission unavailable')
+                        }
                         setMenuOpen(false)
                       }}
                       className="w-full px-3 py-2 text-left text-[#d4d2cb] hover:bg-white/5 flex items-center gap-2 cursor-pointer"
@@ -948,7 +1002,7 @@ export const NoteCard = memo(function NoteCard({
                     />
                   )}
                   {m.kind === 'audio' && (
-                    <audio src={m.url} controls className="w-full p-2" />
+                    <audio src={m.url} controls preload="none" className="w-full p-2" />
                   )}
                   {m.alt && (
                     <button

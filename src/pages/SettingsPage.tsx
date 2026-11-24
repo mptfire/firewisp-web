@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
@@ -26,6 +26,7 @@ export function SettingsPage() {
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const userWriteRelays = useNostrStore((s) => s.userWriteRelays)
   const profiles = useNostrStore((s) => s.profiles)
+  const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const signer = useAuthStore((s) => s.signer)
   const hasVault = useAuthStore((s) => s.hasEncryptedVault)
   const exportNcryptsec = useAuthStore((s) => s.exportNcryptsec)
@@ -47,6 +48,19 @@ export function SettingsPage() {
   const [exported, setExported] = useState<string | null>(null)
   const [exportErr, setExportErr] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mutedUsersOpen && settings.mutedPubkeys.length > 0) {
+      void fetchProfiles(settings.mutedPubkeys)
+    }
+  }, [mutedUsersOpen, settings.mutedPubkeys, fetchProfiles])
 
   return (
     <div className="divide-y divide-[#20222c]">
@@ -93,6 +107,21 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.hoverStreamPreview}
             onChange={(e) => settings.setHoverStreamPreview(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Play streams &amp; YouTube inline</div>
+            <div className="text-[#8c8a82]">
+              Plays streams and YouTube embeds right inside notes when clicked (off opens full player / new tab).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.inlineMediaPlayback}
+            onChange={(e) => settings.setInlineMediaPlayback(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>
@@ -530,9 +559,26 @@ export function SettingsPage() {
             )}
           </div>
         )}
+        {settings.mutedWords.length > 0 && (
+          <div className="rounded-xl bg-[#15161c] border border-[#232530] p-3 space-y-2">
+            <div className="text-xs font-medium text-[#d4d2cb]">
+              Muted words ({settings.mutedWords.length})
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {settings.mutedWords.map((word) => (
+                <button
+                  key={word}
+                  type="button"
+                  onClick={() => settings.removeMutedWord(word)}
+                  className="px-2.5 py-1 rounded-full bg-[#1a1c24] border border-[#2d3040] text-xs text-[#d4d2cb] hover:border-red-400 cursor-pointer"
+                >
+                  {word} ×
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
-
-      {/* Privacy & Key Backup */}
       <section className="p-4 space-y-3">
         <h2 className="font-semibold text-sm flex items-center gap-2">
           <Shield className="w-4 h-4 text-[#f59f00]" />
@@ -634,9 +680,17 @@ export function SettingsPage() {
                 </code>
                 <button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(exported)
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 1800)
+                    try {
+                      await navigator.clipboard.writeText(exported)
+                      setCopied(true)
+                      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+                      copyTimerRef.current = setTimeout(() => {
+                        copyTimerRef.current = null
+                        setCopied(false)
+                      }, 1800)
+                    } catch {
+                      useNostrStore.getState().setToast('Clipboard permission unavailable')
+                    }
                   }}
                   className="px-2.5 py-1 rounded bg-[#1d1f29] text-xs flex items-center gap-1 cursor-pointer"
                 >

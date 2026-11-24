@@ -35,6 +35,7 @@ function LiveStreamPreviewCard({
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
+  const isInMiniPlayer = useLiveStore((s) => s.miniPlayer?.aTag === stream.aTagValue)
   const [imgFailed, setImgFailed] = useState(false)
   const [hoverActive, setHoverActive] = useState(false)
   const [previewStatus, setPreviewStatus] = useState<HoverPreviewStatus | null>(null)
@@ -65,7 +66,7 @@ function LiveStreamPreviewCard({
   }, [])
 
   const handleMouseEnter = () => {
-    if (!hoverStreamPreview || !previewUrl) return
+    if (!hoverStreamPreview || !previewUrl || isInMiniPlayer) return
     if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
       return
     }
@@ -95,11 +96,10 @@ function LiveStreamPreviewCard({
         : null
 
   return (
-    <Link
-      to={`/live/${naddr}`}
+    <div
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border overflow-hidden transition shrink-0 group flex flex-col ${
+      className={`relative w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border overflow-hidden transition shrink-0 group flex flex-col ${
         isFollowed
           ? 'border-emerald-500/45 hover:border-emerald-400'
           : 'border-[#262938] hover:border-[#e8590c]/60'
@@ -107,22 +107,28 @@ function LiveStreamPreviewCard({
     >
       {/* 16:9 Stream Thumbnail Preview */}
       <div className="relative aspect-video w-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] overflow-hidden">
-        {thumb && !imgFailed ? (
-          <img
-            src={thumb}
-            alt={title}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setImgFailed(true)}
-            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center opacity-80">
-            <Avatar src={profile?.picture} pubkey={displayPubkey} name={hostName} size="lg" />
-          </div>
-        )}
+        <Link
+          to={`/live/${naddr}`}
+          aria-label={`Watch ${title}`}
+          className="block w-full h-full"
+        >
+          {thumb && !imgFailed ? (
+            <img
+              src={thumb}
+              alt={title}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => setImgFailed(true)}
+              className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center opacity-80">
+              <Avatar src={profile?.picture} pubkey={displayPubkey} name={hostName} size="lg" />
+            </div>
+          )}
+        </Link>
 
-        {hoverActive && previewUrl && (
+        {hoverActive && !isInMiniPlayer && previewUrl && (
           <LiveHoverPreview
             streamUrl={previewUrl}
             rightOffset
@@ -145,12 +151,11 @@ function LiveStreamPreviewCard({
           )}
         </div>
 
-        {/* Top-right Pop-out mini-player button (stays on feed while stream plays) */}
+        {/* Top-right Pop-out mini-player button (sibling of Link, accessible on mouse, keyboard & touch) */}
         {previewUrl && (
           <button
             type="button"
             onClick={(e) => {
-              e.preventDefault()
               e.stopPropagation()
               handleMouseLeave()
               openMiniPlayer({
@@ -165,7 +170,7 @@ function LiveStreamPreviewCard({
             }}
             title="Pop out mini-player and keep browsing"
             aria-label={`Pop out ${title} in mini-player`}
-            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
           >
             <PictureInPicture2 className="w-3.5 h-3.5" />
           </button>
@@ -189,7 +194,7 @@ function LiveStreamPreviewCard({
       </div>
 
       {/* Host & Title Footer */}
-      <div className="p-2 flex items-center gap-2 min-w-0">
+      <Link to={`/live/${naddr}`} className="p-2 flex items-center gap-2 min-w-0">
         <Avatar src={profile?.picture} pubkey={displayPubkey} name={hostName} size="sm" />
         <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold text-[#f4f1ea] group-hover:text-[#ff922b] truncate leading-tight transition">
@@ -204,8 +209,8 @@ function LiveStreamPreviewCard({
             )}
           </div>
         </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   )
 }
 
@@ -254,7 +259,25 @@ export function LiveNowRow() {
     updateScrollArrows()
     window.addEventListener('resize', updateScrollArrows)
     return () => window.removeEventListener('resize', updateScrollArrows)
-  }, [activeStreams.length])
+  }, [activeStreams.length, showLiveNowBar])
+
+  // Attach native non-passive wheel listener so horizontal wheel scroll cleanly prevents vertical scroll
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+      if (el.scrollWidth <= el.clientWidth) return
+      const atStart = el.scrollLeft <= 0 && e.deltaY < 0
+      const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 && e.deltaY > 0
+      if (!atStart && !atEnd) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [activeStreams.length, showLiveNowBar])
 
   if (!showLiveNowBar || activeStreams.length === 0) return null
 
@@ -304,15 +327,6 @@ export function LiveNowRow() {
       <div
         ref={scrollRef}
         onScroll={updateScrollArrows}
-        onWheel={(e) => {
-          if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && scrollRef.current) {
-            const el = scrollRef.current
-            if (el.scrollWidth > el.clientWidth) {
-              e.preventDefault()
-              el.scrollLeft += e.deltaY
-            }
-          }
-        }}
         className="live-scroll flex items-stretch gap-2.5 overflow-x-auto pb-2"
       >
         {activeStreams.map((stream) => {

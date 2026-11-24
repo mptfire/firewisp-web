@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Bookmark } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -8,22 +8,44 @@ import { NoteCard } from '../components/NoteCard'
 export function BookmarksPage() {
   const bookmarks = useNostrStore((s) => s.bookmarks)
   const events = useNostrStore((s) => s.events)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const relays = useSettingsStore((s) => s.relays)
   const readRelays = useMemo(
-    () => relays.filter((r) => r.read).map((r) => r.url),
-    [relays],
+    () =>
+      [...new Set([...relays.filter((r) => r.read).map((r) => r.url), ...userReadRelays])].slice(
+        0,
+        10,
+      ),
+    [relays, userReadRelays],
   )
+  const queriedIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    const missing = bookmarks.filter((id) => !events[id])
+    let active = true
+    const missing = bookmarks
+      .filter((id) => !events[id] && !queriedIdsRef.current.has(id))
+      .slice(0, 60)
     if (missing.length === 0) return
-    void nostrPool.query(readRelays, { ids: missing.slice(0, 60) }, 4000).then((evs) => {
+    for (const id of missing) queriedIdsRef.current.add(id)
+    void nostrPool.query(readRelays, { ids: missing }, 4000).then((evs) => {
+      if (!active) return
       for (const e of evs) ingestEvent(e)
-      void fetchProfiles(evs.map((e) => e.pubkey))
+      if (evs.length > 0) void fetchProfiles(evs.map((e) => e.pubkey))
     })
-  }, [bookmarks])
+    return () => {
+      active = false
+    }
+  }, [bookmarks, readRelays, events, ingestEvent, fetchProfiles])
+
+  const visibleBookmarkEvents = useMemo(() => {
+    return bookmarks
+      .map((id) => events[id])
+      .filter((ev): ev is NonNullable<typeof ev> => Boolean(ev && !isEventDeleted(ev)))
+  }, [bookmarks, events, deletedByAuthor, isEventDeleted])
 
   return (
     <div>
@@ -37,10 +59,7 @@ export function BookmarksPage() {
           Tap the bookmark icon on any note to save it here.
         </div>
       ) : (
-        bookmarks.map((id) => {
-          const ev = events[id]
-          return ev ? <NoteCard key={id} event={ev} /> : null
-        })
+        visibleBookmarkEvents.map((ev) => <NoteCard key={ev.id} event={ev} />)
       )}
     </div>
   )

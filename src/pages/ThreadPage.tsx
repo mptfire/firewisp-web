@@ -25,7 +25,14 @@ export function ThreadPage() {
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const relays = useSettingsStore((s) => s.relays)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const readRelays = useMemo(
@@ -80,7 +87,7 @@ export function ThreadPage() {
         void fetchProfiles([...authors])
         setReplies(
           replyList
-            .filter((r) => r.id !== eventId && !isEventMuted(r))
+            .filter((r) => r.id !== eventId)
             .sort((a, b) => a.created_at - b.created_at),
         )
 
@@ -103,11 +110,22 @@ export function ThreadPage() {
     return () => {
       active = false
     }
-  }, [eventId])
+  }, [eventId, readRelays])
 
   const visibleReplies = useMemo(
-    () => replies.filter((r) => !mutedPubkeys.includes(r.pubkey.toLowerCase())),
-    [replies, mutedPubkeys],
+    () => replies.filter((r) => !isEventDeleted(r) && !isEventMuted(r)),
+    [
+      replies,
+      isEventDeleted,
+      isEventMuted,
+      deletedByAuthor,
+      mutedPubkeys,
+      mutedHashtags,
+      mutedWords,
+      privateMutedPubkeys,
+      privateMutedHashtags,
+      privateMutedWords,
+    ],
   )
 
   return (

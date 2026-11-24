@@ -32,6 +32,7 @@ export const YouTubeCard = memo(function YouTubeCard({
   const [playing, setPlaying] = useState(false)
 
   useEffect(() => {
+    setMeta(null)
     setThumbSrc(video.thumbnailUrl)
     setThumbFailed(false)
     setPlaying(false)

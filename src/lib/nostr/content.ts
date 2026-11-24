@@ -137,9 +137,17 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
             dTag: embeddedLive.dTag,
           })
         } else if (ytRef) {
-          if (!ytSeen.has(ytRef.videoId) && youtube.length < 4) {
-            ytSeen.add(ytRef.videoId)
-            youtube.push(ytRef)
+          if (!ytSeen.has(ytRef.videoId)) {
+            if (youtube.length < 4) {
+              ytSeen.add(ytRef.videoId)
+              youtube.push(ytRef)
+            } else {
+              segments.push({
+                type: 'link',
+                url: safe,
+                display: trimmed.replace(/^https?:\/\//, '').slice(0, 60),
+              })
+            }
           }
         } else if (mediaKind && safePublicMedia) {
           if (!mediaSeen.has(safePublicMedia)) {
@@ -257,7 +265,9 @@ export function extractEventHashtags(event: Pick<Event, 'content' | 'tags'>): st
       set.add(tag[1].trim().toLowerCase().replace(/^#/, ''))
     }
   }
-  const inline = (event.content || '').match(/#[a-zA-Z0-9_]{1,64}/g) || []
+  // Strip URLs before scanning for inline #hashtags so URL #fragments aren't treated as tags
+  const textWithoutUrls = (event.content || '').replace(/https?:\/\/\S+/gi, ' ')
+  const inline = textWithoutUrls.match(/#[a-zA-Z0-9_]{1,64}/g) || []
   for (const h of inline) {
     set.add(h.slice(1).toLowerCase())
   }

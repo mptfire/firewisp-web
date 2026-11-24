@@ -12,7 +12,7 @@ import {
   shouldAcceptLiveActivityUpdate,
   type LiveActivity,
 } from '../nostr/nip53'
-import { sanitizeRelayUrl } from '../sanitize'
+import { sanitizePublicRelayUrl } from '../sanitize'
 import { useAuthStore } from './useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from './useNostrStore'
 import { useSettingsStore } from './useSettingsStore'
@@ -57,12 +57,14 @@ interface LiveState {
   miniPlayer: MiniPlayerStream | null
   miniChatMessages: LiveChatMessage[]
   miniChatRelays: string[]
+  activeInlineStreamKey: string | null
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
   markStreamOffline: (aTag: string) => void
   openMiniPlayer: (stream: MiniPlayerStream) => void
   closeMiniPlayer: () => void
+  setActiveInlineStream: (key: string | null) => void
   subscribeMiniChat: (
     hostPubkey: string,
     dTag: string,
@@ -101,6 +103,7 @@ async function queryNip45FollowerBatch(
   return new Promise((resolve) => {
     const counts: Record<string, number> = {}
     const subToPk = new Map<string, string>()
+    const resolvedSubs = new Set<string>()
     let settled = false
     let ws: WebSocket | null = null
 
@@ -108,10 +111,16 @@ async function queryNip45FollowerBatch(
       if (settled) return
       settled = true
       clearTimeout(timer)
-      try {
-        ws?.close()
-      } catch {
-        // ignore close errors
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        try {
+          ws.close()
+        } catch {
+          // ignore close errors
+        }
       }
       resolve(counts)
     }
@@ -121,21 +130,32 @@ async function queryNip45FollowerBatch(
     try {
       ws = new WebSocket(relayUrl)
       ws.onopen = () => {
-        pubkeys.forEach((pk, idx) => {
-          const subId = `fc_${idx}`
-          subToPk.set(subId, pk)
-          ws?.send(JSON.stringify(['COUNT', subId, { kinds: [3], '#p': [pk] }]))
-        })
+        if (settled || !ws || ws.readyState !== WebSocket.OPEN) return
+        try {
+          pubkeys.forEach((pk, idx) => {
+            const subId = `fc_${idx}`
+            subToPk.set(subId, pk)
+            ws?.send(JSON.stringify(['COUNT', subId, { kinds: [3], '#p': [pk] }]))
+          })
+        } catch {
+          finish()
+        }
       }
       ws.onmessage = (ev) => {
+        if (settled) return
         try {
           const msg = JSON.parse(String(ev.data)) as unknown[]
-          if (msg[0] === 'COUNT' && typeof msg[1] === 'string') {
+          if ((msg[0] === 'COUNT' || msg[0] === 'CLOSED') && typeof msg[1] === 'string') {
             const pk = subToPk.get(msg[1])
-            const payload = msg[2] as { count?: unknown } | undefined
-            if (pk && typeof payload?.count === 'number' && Number.isFinite(payload.count)) {
-              counts[pk] = Math.max(0, Math.floor(payload.count))
-              if (Object.keys(counts).length >= pubkeys.length) {
+            if (pk) {
+              resolvedSubs.add(msg[1])
+              if (msg[0] === 'COUNT') {
+                const payload = msg[2] as { count?: unknown } | undefined
+                if (typeof payload?.count === 'number' && Number.isFinite(payload.count)) {
+                  counts[pk] = Math.max(0, Math.floor(payload.count))
+                }
+              }
+              if (resolvedSubs.size >= pubkeys.length) {
                 finish()
               }
             }
@@ -164,9 +184,11 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   miniPlayer: null,
   miniChatMessages: [],
   miniChatRelays: [],
+  activeInlineStreamKey: null,
 
   openMiniPlayer: (stream) =>
     set((s) => ({
+      activeInlineStreamKey: null,
       miniPlayer: stream,
       miniChatMessages:
         s.activeATag === stream.aTag
@@ -182,32 +204,42 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             : [],
     })),
   closeMiniPlayer: () => set({ miniPlayer: null, miniChatMessages: [], miniChatRelays: [] }),
+  setActiveInlineStream: (key) =>
+    set((s) => ({
+      activeInlineStreamKey: key,
+      // Starting inline playback closes floating mini-player so two streams never overlap audio
+      ...(key && s.miniPlayer ? { miniPlayer: null, miniChatMessages: [], miniChatRelays: [] } : {}),
+    })),
 
   fetchStreamerFollowerCounts: async (pubkeys) => {
-    const pending = [
+    const allPending = [
       ...new Set(
         pubkeys
           .map((p) => p.toLowerCase())
           .filter((p) => /^[0-9a-f]{64}$/.test(p) && !fetchedFollowerPubkeys.has(p)),
       ),
-    ].slice(0, 25)
-    if (pending.length === 0) return
+    ]
+    if (allPending.length === 0) return
 
-    for (const pk of pending) fetchedFollowerPubkeys.add(pk)
+    for (let i = 0; i < allPending.length; i += 25) {
+      const pending = allPending.slice(i, i + 25)
+      for (const pk of pending) fetchedFollowerPubkeys.add(pk)
 
-    let counts: Record<string, number> = {}
-    for (const relay of NIP45_COUNT_RELAYS) {
-      counts = await queryNip45FollowerBatch(relay, pending, 3500)
-      if (Object.keys(counts).length > 0) break
-    }
+      let counts: Record<string, number> = {}
+      for (const relay of NIP45_COUNT_RELAYS) {
+        counts = await queryNip45FollowerBatch(relay, pending, 3500)
+        if (Object.keys(counts).length > 0) break
+      }
 
-    if (Object.keys(counts).length > 0) {
-      set((s) => ({
-        streamerFollowerCounts: { ...s.streamerFollowerCounts, ...counts },
-      }))
-    } else {
-      // Allow retry later if both relays timed out
-      for (const pk of pending) fetchedFollowerPubkeys.delete(pk)
+      if (Object.keys(counts).length > 0) {
+        set((s) => ({
+          streamerFollowerCounts: { ...s.streamerFollowerCounts, ...counts },
+        }))
+      }
+      // Allow retry later for any pubkeys missing from the response
+      for (const pk of pending) {
+        if (counts[pk] === undefined) fetchedFollowerPubkeys.delete(pk)
+      }
     }
   },
 
@@ -227,6 +259,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           s.activeATag === aTag && s.activeActivity
             ? { ...s.activeActivity, status: 'ended' }
             : s.activeActivity,
+        miniPlayer:
+          s.miniPlayer && s.miniPlayer.aTag === aTag
+            ? { ...s.miniPlayer, isLive: false }
+            : s.miniPlayer,
       }
     })
   },
@@ -276,20 +312,27 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
           set((s) => {
             const existing = s.liveStreams[aTag]
-            if (activity.status !== 'live') {
+            const isExpired = Boolean(
+              activity.ends && activity.ends > 0 && activity.ends <= Math.floor(Date.now() / 1000),
+            )
+            if (activity.status !== 'live' || !isPlayableStreamUrl(activity.streamingUrl) || isExpired) {
+              const nextMini =
+                s.miniPlayer && s.miniPlayer.aTag === aTag
+                  ? { ...s.miniPlayer, isLive: false }
+                  : s.miniPlayer
               if (!existing) {
-                return s.activeATag === aTag ? { activeActivity: activity } : s
+                return {
+                  activeActivity: s.activeATag === aTag ? activity : s.activeActivity,
+                  miniPlayer: nextMini,
+                }
               }
               const next = { ...s.liveStreams }
               delete next[aTag]
               return {
                 liveStreams: next,
                 activeActivity: s.activeATag === aTag ? activity : s.activeActivity,
+                miniPlayer: nextMini,
               }
-            }
-            if (!isPlayableStreamUrl(activity.streamingUrl)) return s
-            if (activity.ends && activity.ends > 0 && activity.ends <= Math.floor(Date.now() / 1000)) {
-              return s
             }
 
             const pChatters = pendingChatters.get(aTag)
@@ -302,7 +345,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 ...(existing?.chatters || []),
                 ...(pChatters ? [...pChatters] : []),
               ]),
-            ]
+            ].slice(-200)
             queueProfile(activity.streamerPubkey || activity.hostPubkey)
 
             return {
@@ -401,9 +444,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
     void (async () => {
       try {
+        const safeNaddrRelays = naddrRelays
+          .map((r) => sanitizePublicRelayUrl(r))
+          .filter((r): r is string => Boolean(r))
         const baseRelays = [
           ...new Set([
-            ...naddrRelays,
+            ...safeNaddrRelays,
             ...(cached?.relayHints || []),
             ...LIVE_DISCOVERY_RELAYS,
             ...useSettingsStore.getState().getReadRelays(),
@@ -421,12 +467,20 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         ])
         if (!active) return
 
-        let latestActivity = cached
+        let latestActivity = get().activeActivity || cached
         if (activityEvs.length > 0) {
-          const parsed = parseLiveActivity(activityEvs[0])
-          if (parsed && (!latestActivity || parsed.createdAt >= latestActivity.createdAt)) {
-            latestActivity = parsed
-            set({ activeActivity: parsed })
+          const sorted = [...activityEvs].sort((a, b) => b.created_at - a.created_at)
+          for (const rawEv of sorted) {
+            const parsed = parseLiveActivity(rawEv)
+            if (!parsed) continue
+            const prevSeen = latestActivitySeen.get(aTag)
+            if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) continue
+            latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
+            if (shouldAcceptLiveActivityUpdate(latestActivity || undefined, parsed)) {
+              latestActivity = parsed
+              set((s) => (s.activeATag === aTag ? { activeActivity: parsed } : s))
+            }
+            break
           }
         }
         set({ loadingStream: false })
@@ -439,14 +493,14 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         if (relayListEvs.length > 0) {
           for (const t of relayListEvs[0].tags) {
             if (t[0] !== 'r' || !t[1]) continue
-            const clean = sanitizeRelayUrl(t[1])
+            const clean = sanitizePublicRelayUrl(t[1])
             if (clean) hostRelays.push(clean)
           }
         }
 
         const chatRelays = [
           ...new Set([
-            ...naddrRelays,
+            ...safeNaddrRelays,
             ...(latestActivity?.relayHints || []),
             ...hostRelays.slice(0, 4),
             ...LIVE_DISCOVERY_RELAYS,
@@ -485,6 +539,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             },
           },
         )
+        closers.push(chatSub)
 
         const zapSub = nostrPool.subscribe(
           chatRelays,
@@ -520,6 +575,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             },
           },
         )
+        closers.push(zapSub)
 
         const statusSub = nostrPool.subscribe(
           chatRelays,
@@ -529,16 +585,20 @@ export const useLiveStore = create<LiveState>((set, get) => ({
               if (!active) return
               const parsed = parseLiveActivity(ev)
               if (!parsed) return
+              const prevSeen = latestActivitySeen.get(aTag)
+              if (!shouldAcceptLiveActivityUpdate(prevSeen, parsed)) return
+              latestActivitySeen.set(aTag, { createdAt: parsed.createdAt, status: parsed.status || '' })
               set((s) => {
                 if (s.activeATag !== aTag) return s
-                if (s.activeActivity && s.activeActivity.createdAt > parsed.createdAt) return s
+                if (!shouldAcceptLiveActivityUpdate(s.activeActivity || undefined, parsed)) return s
                 return { activeActivity: parsed }
               })
             },
           },
         )
-
-        closers.push(chatSub, zapSub, statusSub)
+        closers.push(statusSub)
+      } catch {
+        // Relay errors are handled gracefully by keeping cached activity state
       } finally {
         if (active) set({ loadingStream: false })
       }
@@ -551,8 +611,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       set({
         activeATag: null,
         activeActivity: null,
+        activeChatRelays: [],
         currentChatMessages: [],
         streamZapTotal: 0,
+        loadingStream: false,
       })
     }
   },
@@ -580,9 +642,12 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       }
     }
 
+    const safeNaddrRelays = naddrRelays
+      .map((r) => sanitizePublicRelayUrl(r))
+      .filter((r): r is string => Boolean(r))
     const chatRelays = [
       ...new Set([
-        ...naddrRelays,
+        ...safeNaddrRelays,
         ...(cached?.relayHints || []),
         ...get().miniChatRelays,
         ...LIVE_DISCOVERY_RELAYS,
@@ -725,6 +790,14 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       return next
     })
 
-    await nostrPool.publish(relays, signed)
+    const results = await nostrPool.publish(relays, signed)
+    if (!results.some((r) => r.ok)) {
+      // Roll back optimistic message if every relay rejected or timed out
+      set((s) => ({
+        currentChatMessages: s.currentChatMessages.filter((m) => m.id !== signed.id),
+        miniChatMessages: s.miniChatMessages.filter((m) => m.id !== signed.id),
+      }))
+      throw new Error('Could not deliver chat message to any relay')
+    }
   },
 }))

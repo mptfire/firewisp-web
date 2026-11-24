@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ExternalLink,
@@ -77,9 +77,23 @@ function renderTextWithCustomEmojis(text: string, tags: string[][]) {
   })
 }
 
-function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
+const MiniChatMention = memo(function MiniChatMention({
+  pubkey,
+  bech32,
+}: {
+  pubkey: string
+  bech32: string
+}) {
+  const profile = useNostrStore((s) => s.profiles[pubkey])
+  return (
+    <Link to={`/p/${pubkey}`} className="text-[#ff922b] hover:underline font-medium">
+      @{profile?.display_name || profile?.name || `${bech32.slice(0, 8)}…`}
+    </Link>
+  )
+})
+
+const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
   const profile = useNostrStore((s) => s.profiles[msg.senderPubkey])
-  const profiles = useNostrStore((s) => s.profiles)
   const senderName =
     profile?.display_name || profile?.name || `${msg.senderPubkey.slice(0, 8)}…`
   const parsed = useMemo(
@@ -138,16 +152,7 @@ function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
             )
           }
           if (seg.type === 'mention') {
-            const mp = profiles[seg.pubkey]
-            return (
-              <Link
-                key={i}
-                to={`/p/${seg.pubkey}`}
-                className="text-[#ff922b] hover:underline font-medium"
-              >
-                @{mp?.display_name || mp?.name || `${seg.bech32.slice(0, 8)}…`}
-              </Link>
-            )
+            return <MiniChatMention key={i} pubkey={seg.pubkey} bech32={seg.bech32} />
           }
           return null
         })}
@@ -163,7 +168,7 @@ function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
       )}
     </div>
   )
-}
+})
 
 /**
  * Persistent draggable floating Picture-in-Picture mini-player with compact Live Chat,
@@ -182,6 +187,8 @@ export function FloatingStreamPlayer() {
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
 
   const [expanded, setExpanded] = useState(false)
   const [chatOpen, setChatOpen] = useState(() =>
@@ -197,7 +204,9 @@ export function FloatingStreamPlayer() {
   const videoElRef = useRef<HTMLVideoElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dragStateRef = useRef<{
+    pointerId: number
     startPointerX: number
     startPointerY: number
     startLeft: number
@@ -219,7 +228,27 @@ export function FloatingStreamPlayer() {
         'pictureInPictureEnabled' in document &&
         Boolean(document.pictureInPictureEnabled),
     )
+    return () => {
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current)
+    }
   }, [])
+
+  // Reset per-stream transient UI state & exit leaked native PiP on stream switch or close
+  useEffect(() => {
+    setDraft('')
+    setDragging(false)
+    dragStateRef.current = null
+    stickToBottomRef.current = true
+    if (!miniPlayer) {
+      if (
+        typeof document !== 'undefined' &&
+        document.pictureInPictureElement &&
+        document.pictureInPictureElement === videoElRef.current
+      ) {
+        void document.exitPictureInPicture().catch(() => {})
+      }
+    }
+  }, [miniPlayer?.aTag])
 
   // Subscribe to live chat & zaps whenever a mini-player stream is active
   useEffect(() => {
@@ -228,47 +257,63 @@ export function FloatingStreamPlayer() {
   }, [miniPlayer?.aTag, decoded, subscribeMiniChat])
 
   const messages = useMemo(() => {
+    const allMutedPks =
+      privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
+    const allMutedWords =
+      privateMutedWords.length > 0 ? [...mutedWords, ...privateMutedWords] : mutedWords
     return rawMiniMessages.filter((m) => {
-      if (mutedPubkeys.includes(m.senderPubkey)) return false
-      if (mutedWords.length > 0 && m.content) {
+      if (allMutedPks.includes(m.senderPubkey)) return false
+      if (allMutedWords.length > 0 && m.content) {
         const lower = m.content.toLowerCase()
-        if (mutedWords.some((w) => w.length >= 2 && lower.includes(w))) return false
+        if (allMutedWords.some((w) => w.length >= 2 && lower.includes(w))) return false
       }
       return true
     })
-  }, [rawMiniMessages, mutedPubkeys, mutedWords])
+  }, [rawMiniMessages, mutedPubkeys, mutedWords, privateMutedPubkeys, privateMutedWords])
 
-  // Auto-scroll mini chat when pinned to bottom
+  const lastMessageId = messages[messages.length - 1]?.id
+
+  // Auto-scroll mini chat when pinned to bottom (tracks lastMessageId so it keeps working past the 150-msg cap)
   useEffect(() => {
     if (!chatOpen || !stickToBottomRef.current) return
     const el = chatScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages.length, chatOpen])
+  }, [messages.length, lastMessageId, chatOpen])
 
-  // Keep dragged mini-player clamped inside the viewport on resize, expand, or chat toggle
+  // Continuously keep dragged mini-player clamped inside the viewport across resizes, reopen, expand, or chat toggle
   useEffect(() => {
-    if (!pos) return
+    if (!pos || !miniPlayer) return
+    const el = containerRef.current
+    if (!el) return
     const reclamp = () => {
-      const el = containerRef.current
-      if (!el) return
       const rect = el.getBoundingClientRect()
-      setPos((prev) => (prev ? clampPosition(prev.x, prev.y, rect.width, rect.height) : null))
+      if (rect.width === 0 || rect.height === 0) return
+      setPos((prev) => {
+        if (!prev) return null
+        const clamped = clampPosition(prev.x, prev.y, rect.width, rect.height)
+        return clamped.x === prev.x && clamped.y === prev.y ? prev : clamped
+      })
     }
-    const raf = requestAnimationFrame(reclamp)
+    reclamp()
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(reclamp)
+      ro.observe(el)
+    }
     window.addEventListener('resize', reclamp)
     return () => {
-      cancelAnimationFrame(raf)
+      ro?.disconnect()
       window.removeEventListener('resize', reclamp)
     }
-  }, [pos !== null, expanded, chatOpen])
+  }, [pos !== null, Boolean(miniPlayer), expanded, chatOpen])
 
-  // Pointer drag listeners
+  // Pointer drag listeners (filtered by pointerId so multi-touch or iframes never corrupt drag)
   useEffect(() => {
     if (!dragging) return
 
     const onPointerMove = (e: PointerEvent) => {
       const st = dragStateRef.current
-      if (!st) return
+      if (!st || e.pointerId !== st.pointerId) return
       const dx = e.clientX - st.startPointerX
       const dy = e.clientY - st.startPointerY
       if (!st.moved && Math.hypot(dx, dy) < 4) return
@@ -276,10 +321,14 @@ export function FloatingStreamPlayer() {
       setPos(clampPosition(st.startLeft + dx, st.startTop + dy, st.width, st.height))
     }
 
-    const onPointerUp = () => {
-      if (dragStateRef.current?.moved) {
+    const onPointerUp = (e: PointerEvent) => {
+      const st = dragStateRef.current
+      if (st && e.pointerId !== st.pointerId) return
+      if (st?.moved) {
         suppressNextLinkClickRef.current = true
-        setTimeout(() => {
+        if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current)
+        suppressTimerRef.current = setTimeout(() => {
+          suppressTimerRef.current = null
           suppressNextLinkClickRef.current = false
         }, 120)
       }
@@ -310,7 +359,13 @@ export function FloatingStreamPlayer() {
     const el = containerRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // ignore if capture unsupported
+    }
     dragStateRef.current = {
+      pointerId: e.pointerId,
       startPointerX: e.clientX,
       startPointerY: e.clientY,
       startLeft: rect.left,
@@ -357,7 +412,7 @@ export function FloatingStreamPlayer() {
     <div
       ref={containerRef}
       style={pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined}
-      className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 ${
+      className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 max-h-[calc(100dvh-16px)] flex flex-col ${
         pos ? '' : 'bottom-16 md:bottom-4 right-3 sm:right-4'
       } ${dragging ? 'border-[#ff922b] select-none' : 'border-[#e8590c]/50 transition-[width]'} ${
         expanded ? 'w-[calc(100vw-24px)] sm:w-[440px]' : 'w-[300px] sm:w-[350px]'
@@ -368,7 +423,7 @@ export function FloatingStreamPlayer() {
         onPointerDown={handleHeaderPointerDown}
         onDoubleClick={() => setPos(null)}
         title="Drag to move · Double-click to snap back to corner"
-        className={`px-2 py-1.5 bg-[#161822] border-b border-[#252836] flex items-center justify-between gap-1.5 touch-none select-none ${
+        className={`px-2 py-1.5 bg-[#161822] border-b border-[#252836] flex items-center justify-between gap-1.5 touch-none select-none shrink-0 ${
           dragging ? 'cursor-grabbing' : 'cursor-grab'
         }`}
       >
@@ -471,20 +526,23 @@ export function FloatingStreamPlayer() {
       </div>
 
       {/* Persistent HLS video player */}
-      <HlsVideoPlayer
-        streamUrl={miniPlayer.streamUrl}
-        posterUrl={miniPlayer.posterUrl}
-        title={miniPlayer.title}
-        isLive={miniPlayer.isLive}
-        autoStart
-        compact
-        onVideoElement={handleVideoElement}
-        onStreamOffline={() => markStreamOffline(miniPlayer.aTag)}
-      />
+      <div className="shrink-0">
+        <HlsVideoPlayer
+          key={miniPlayer.aTag}
+          streamUrl={miniPlayer.streamUrl}
+          posterUrl={miniPlayer.posterUrl}
+          title={miniPlayer.title}
+          isLive={miniPlayer.isLive}
+          autoStart
+          compact
+          onVideoElement={handleVideoElement}
+          onStreamOffline={() => markStreamOffline(miniPlayer.aTag)}
+        />
+      </div>
 
       {/* Compact Collapsible Live Chat */}
       {chatOpen && decoded && (
-        <div className="border-t border-[#222532] bg-[#101118] flex flex-col">
+        <div className="border-t border-[#222532] bg-[#101118] flex flex-col min-h-0 flex-1">
           <div
             ref={chatScrollRef}
             onScroll={() => {
@@ -494,7 +552,7 @@ export function FloatingStreamPlayer() {
             }}
             className={`${
               expanded ? 'h-56' : 'h-44'
-            } overflow-y-auto px-2.5 py-2 space-y-1.5`}
+            } min-h-[96px] overflow-y-auto px-2.5 py-2 space-y-1.5`}
           >
             {messages.length === 0 ? (
               <div className="h-full flex items-center justify-center text-[11px] text-[#6f6d66]">
@@ -505,7 +563,7 @@ export function FloatingStreamPlayer() {
             )}
           </div>
 
-          <div className="px-2 py-1.5 border-t border-[#20222c] bg-[#14151e]">
+          <div className="px-2 py-1.5 border-t border-[#20222c] bg-[#14151e] shrink-0">
             {signer?.canSign ? (
               <form
                 onSubmit={(e) => {

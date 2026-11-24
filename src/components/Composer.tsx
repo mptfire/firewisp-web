@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { Event } from 'nostr-tools/pure'
 import { ImagePlus, Send, Cpu, X, FileText, Loader2, Eye, Pencil, Radio } from 'lucide-react'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../lib/nostr/blossom'
 import { parseNoteContent } from '../lib/nostr/content'
 import { buildLiveATag } from '../lib/nostr/nip53'
+import { nostrPool } from '../lib/nostr/pool'
 import { extractYouTubeRefsFromText } from '../lib/nostr/youtube'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
@@ -29,6 +30,217 @@ interface ComposerProps {
   compact?: boolean
 }
 
+/**
+ * Mounted ONLY while Preview mode is active so typing in Composer never subscribes to
+ * global `profiles` / `events` / `liveStreams` maps.
+ */
+const ComposerPreview = memo(function ComposerPreview({
+  text,
+  attachments,
+  pubkey,
+  displayName,
+  nip05,
+}: {
+  text: string
+  attachments: UploadedDraft[]
+  pubkey: string | null
+  displayName: string
+  nip05?: string
+}) {
+  const profiles = useNostrStore((s) => s.profiles)
+  const events = useNostrStore((s) => s.events)
+  const liveStreams = useLiveStore((s) => s.liveStreams)
+
+  const parsedPreview = useMemo(() => {
+    const mediaUrls = attachments.map((a) => a.upload.url).join('\n')
+    const fullContent = [text.trim(), mediaUrls].filter(Boolean).join('\n\n')
+    const imetaTags = attachments.map((a) => buildImetaTag(a.upload, a.alt))
+    return parseNoteContent({ content: fullContent, tags: imetaTags })
+  }, [text, attachments])
+
+  // Lazily fetch uncached mentioned profiles & quoted notes when previewing
+  useEffect(() => {
+    const st = useNostrStore.getState()
+    const missingProfiles = parsedPreview.segments
+      .filter(
+        (seg): seg is { type: 'mention'; bech32: string; pubkey: string } =>
+          seg.type === 'mention' && !st.profiles[seg.pubkey],
+      )
+      .map((seg) => seg.pubkey)
+    if (missingProfiles.length > 0) {
+      void st.fetchProfiles(missingProfiles)
+    }
+
+    const missingQuotes = parsedPreview.quotes
+      .filter((qid) => !st.events[qid])
+      .slice(0, 4)
+    if (missingQuotes.length > 0) {
+      const relays = [
+        ...new Set([...useSettingsStore.getState().getReadRelays(), ...st.userReadRelays]),
+      ].slice(0, 8)
+      void nostrPool.query(relays, { ids: missingQuotes }, 3000).then((evs) => {
+        const store = useNostrStore.getState()
+        for (const ev of evs) store.ingestEvent(ev)
+        if (evs.length > 0) void store.fetchProfiles(evs.map((e) => e.pubkey))
+      })
+    }
+  }, [parsedPreview])
+
+  return (
+    <div className="rounded-xl bg-[#0e0f15] border border-[#2a2d3d] p-3 space-y-2.5">
+      <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#1f2230]">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-xs font-semibold text-white truncate">
+            {displayName || (pubkey ? `${pubkey.slice(0, 10)}…` : 'You')}
+          </span>
+          {nip05 && (
+            <span className="text-[11px] text-[#7c7a72] truncate">
+              {nip05.replace(/^_@/, '')}
+            </span>
+          )}
+          <span className="text-[11px] text-[#6f6d66] shrink-0">· now</span>
+        </div>
+        <span className="px-2 py-0.5 rounded-full bg-[#e8590c]/15 border border-[#e8590c]/30 text-[10px] font-semibold text-[#ff922b] shrink-0">
+          Preview
+        </span>
+      </div>
+
+      {parsedPreview.segments.some((s) => s.type !== 'text' || s.text.trim().length > 0) && (
+        <div className="text-[15px] leading-relaxed text-[#ece9e1] whitespace-pre-wrap break-words">
+          {parsedPreview.segments.map((seg, i) => {
+            if (seg.type === 'text') return <span key={i}>{seg.text}</span>
+            if (seg.type === 'link') {
+              return (
+                <a
+                  key={i}
+                  href={seg.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#ff8a3d] hover:underline break-all"
+                >
+                  {seg.display}
+                </a>
+              )
+            }
+            if (seg.type === 'hashtag') {
+              return (
+                <span key={i} className="text-[#f59f00]">
+                  #{seg.tag}
+                </span>
+              )
+            }
+            if (seg.type === 'mention') {
+              const mp = profiles[seg.pubkey]
+              const label = mp?.display_name || mp?.name || `${seg.bech32.slice(0, 12)}…`
+              return (
+                <span key={i} className="text-[#ff8a3d] font-medium">
+                  @{label}
+                </span>
+              )
+            }
+            if (seg.type === 'quote') {
+              const quotedEv = seg.eventId ? events[seg.eventId] : undefined
+              const qp = quotedEv ? profiles[quotedEv.pubkey] : undefined
+              return (
+                <div
+                  key={i}
+                  className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#272a36] text-xs"
+                >
+                  {quotedEv ? (
+                    <>
+                      <div className="font-semibold text-[#c9c6be] mb-1">
+                        {qp?.display_name || qp?.name || `${quotedEv.pubkey.slice(0, 12)}…`}
+                      </div>
+                      <p className="text-[#dcd9d0] line-clamp-3 whitespace-pre-wrap break-words">
+                        {quotedEv.content}
+                      </p>
+                    </>
+                  ) : (
+                    <span className="text-[#ff8a3d]">
+                      Quoted note ({seg.bech32.slice(0, 18)}…)
+                    </span>
+                  )}
+                </div>
+              )
+            }
+            if (seg.type === 'live') {
+              const entry = liveStreams[buildLiveATag(seg.hostPubkey, seg.dTag)]
+              return (
+                <div
+                  key={i}
+                  className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#e8590c]/40 flex items-center gap-2 text-xs"
+                >
+                  <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
+                    <Radio className="w-2.5 h-2.5" />
+                    LIVE
+                  </span>
+                  <span className="text-white font-medium truncate">
+                    {entry?.activity.title || `Live Stream (${seg.dTag.slice(0, 24)})`}
+                  </span>
+                </div>
+              )
+            }
+            return null
+          })}
+        </div>
+      )}
+
+      {parsedPreview.media.length > 0 && (
+        <div
+          className={`grid gap-2 ${
+            parsedPreview.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+          }`}
+        >
+          {parsedPreview.media.map((m) =>
+            m.kind === 'image' ? (
+              <div
+                key={m.url}
+                className="relative rounded-xl overflow-hidden border border-[#242734] bg-[#0b0b0e] flex items-center justify-center"
+              >
+                <img
+                  src={m.url}
+                  alt={m.alt || 'Note image preview'}
+                  referrerPolicy="no-referrer"
+                  className={
+                    parsedPreview.media.length === 1
+                      ? 'max-h-[480px] max-w-full w-auto h-auto object-contain'
+                      : 'max-h-64 max-w-full w-auto h-auto object-contain'
+                  }
+                />
+                {m.alt && (
+                  <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-semibold text-emerald-300">
+                    ALT
+                  </span>
+                )}
+              </div>
+            ) : m.kind === 'video' ? (
+              <video
+                key={m.url}
+                src={m.poster ? m.url : `${m.url}#t=0.001`}
+                poster={m.poster}
+                controls
+                playsInline
+                preload="metadata"
+                className="rounded-xl max-h-80 w-full bg-black border border-[#242734]"
+              />
+            ) : (
+              <audio key={m.url} src={m.url} controls preload="none" className="w-full" />
+            ),
+          )}
+        </div>
+      )}
+
+      {parsedPreview.youtube.length > 0 && (
+        <div className="space-y-2">
+          {parsedPreview.youtube.map((yt) => (
+            <YouTubeCard key={yt.videoId} video={yt} previewOnly />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})
+
 export function Composer({
   replyTo,
   placeholder = 'What is burning on your mind?',
@@ -48,7 +260,7 @@ export function Composer({
 
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<UploadedDraft[]>([])
-  const [editingAltIdx, setEditingAltIdx] = useState<number | null>(null)
+  const [editingAltUrl, setEditingAltUrl] = useState<string | null>(null)
   const [previewMode, setPreviewMode] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadingHost, setUploadingHost] = useState<string | null>(null)
@@ -56,23 +268,21 @@ export function Composer({
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const profiles = useNostrStore((s) => s.profiles)
-  const events = useNostrStore((s) => s.events)
-  const liveStreams = useLiveStore((s) => s.liveStreams)
   const youtubePreviews = useMemo(() => extractYouTubeRefsFromText(text, 2), [text])
   const hasDraft = Boolean(text.trim() || attachments.length > 0)
 
-  const parsedPreview = useMemo(() => {
-    if (!previewMode) return null
-    const mediaUrls = attachments.map((a) => a.upload.url).join('\n')
-    const fullContent = [text.trim(), mediaUrls].filter(Boolean).join('\n\n')
-    const imetaTags = attachments.map((a) => buildImetaTag(a.upload, a.alt))
-    return parseNoteContent({ content: fullContent, tags: imetaTags })
-  }, [previewMode, text, attachments])
+  const editingAttachment = useMemo(
+    () => (editingAltUrl ? attachments.find((a) => a.upload.url === editingAltUrl) ?? null : null),
+    [editingAltUrl, attachments],
+  )
 
   useEffect(() => {
     if (!hasDraft && previewMode) setPreviewMode(false)
   }, [hasDraft, previewMode])
+
+  useEffect(() => {
+    if (editingAltUrl && !editingAttachment) setEditingAltUrl(null)
+  }, [editingAltUrl, editingAttachment])
 
   // Consume incoming Android / OS Web Share Target content once signed in (only top-level composer)
   useEffect(() => {
@@ -104,7 +314,11 @@ export function Composer({
           fetch,
           ({ host }) => setUploadingHost(host),
         )
-        setAttachments((prev) => [...prev, { upload: res, alt: '' }])
+        setAttachments((prev) =>
+          prev.some((a) => a.upload.url === res.url || a.upload.sha256 === res.sha256)
+            ? prev
+            : [...prev, { upload: res, alt: '' }],
+        )
         useNostrStore.getState().setToast(`Uploaded to ${formatBlossomHost(res.server)}`)
       }
     } catch (err) {
@@ -138,6 +352,7 @@ export function Composer({
       })
       setText('')
       setAttachments([])
+      setEditingAltUrl(null)
       setPreviewMode(false)
       onPublished?.(published)
     } catch (err) {
@@ -200,158 +415,14 @@ export function Composer({
           size={compact ? 'sm' : 'md'}
         />
         <div className="flex-1 min-w-0">
-          {previewMode && parsedPreview ? (
-            <div className="rounded-xl bg-[#0e0f15] border border-[#2a2d3d] p-3 space-y-2.5">
-              <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#1f2230]">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-xs font-semibold text-white truncate">
-                    {profile?.display_name || profile?.name || (pubkey ? `${pubkey.slice(0, 10)}…` : 'You')}
-                  </span>
-                  {profile?.nip05 && (
-                    <span className="text-[11px] text-[#7c7a72] truncate">
-                      {profile.nip05.replace(/^_@/, '')}
-                    </span>
-                  )}
-                  <span className="text-[11px] text-[#6f6d66] shrink-0">· now</span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full bg-[#e8590c]/15 border border-[#e8590c]/30 text-[10px] font-semibold text-[#ff922b] shrink-0">
-                  Preview
-                </span>
-              </div>
-
-              {parsedPreview.segments.some((s) => s.type !== 'text' || s.text.trim().length > 0) && (
-                <div className="text-[15px] leading-relaxed text-[#ece9e1] whitespace-pre-wrap break-words">
-                  {parsedPreview.segments.map((seg, i) => {
-                    if (seg.type === 'text') return <span key={i}>{seg.text}</span>
-                    if (seg.type === 'link') {
-                      return (
-                        <a
-                          key={i}
-                          href={seg.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[#ff8a3d] hover:underline break-all"
-                        >
-                          {seg.display}
-                        </a>
-                      )
-                    }
-                    if (seg.type === 'hashtag') {
-                      return (
-                        <span key={i} className="text-[#f59f00]">
-                          #{seg.tag}
-                        </span>
-                      )
-                    }
-                    if (seg.type === 'mention') {
-                      const mp = profiles[seg.pubkey]
-                      const label = mp?.display_name || mp?.name || `${seg.bech32.slice(0, 12)}…`
-                      return (
-                        <span key={i} className="text-[#ff8a3d] font-medium">
-                          @{label}
-                        </span>
-                      )
-                    }
-                    if (seg.type === 'quote') {
-                      const quotedEv = seg.eventId ? events[seg.eventId] : undefined
-                      const qp = quotedEv ? profiles[quotedEv.pubkey] : undefined
-                      return (
-                        <div
-                          key={i}
-                          className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#272a36] text-xs"
-                        >
-                          {quotedEv ? (
-                            <>
-                              <div className="font-semibold text-[#c9c6be] mb-1">
-                                {qp?.display_name || qp?.name || `${quotedEv.pubkey.slice(0, 12)}…`}
-                              </div>
-                              <p className="text-[#dcd9d0] line-clamp-3 whitespace-pre-wrap break-words">
-                                {quotedEv.content}
-                              </p>
-                            </>
-                          ) : (
-                            <span className="text-[#ff8a3d]">
-                              Quoted note ({seg.bech32.slice(0, 18)}…)
-                            </span>
-                          )}
-                        </div>
-                      )
-                    }
-                    if (seg.type === 'live') {
-                      const entry = liveStreams[buildLiveATag(seg.hostPubkey, seg.dTag)]
-                      return (
-                        <div
-                          key={i}
-                          className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#e8590c]/40 flex items-center gap-2 text-xs"
-                        >
-                          <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
-                            <Radio className="w-2.5 h-2.5" />
-                            LIVE
-                          </span>
-                          <span className="text-white font-medium truncate">
-                            {entry?.activity.title || `Live Stream (${seg.dTag.slice(0, 24)})`}
-                          </span>
-                        </div>
-                      )
-                    }
-                    return null
-                  })}
-                </div>
-              )}
-
-              {parsedPreview.media.length > 0 && (
-                <div
-                  className={`grid gap-2 ${
-                    parsedPreview.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
-                  }`}
-                >
-                  {parsedPreview.media.map((m) =>
-                    m.kind === 'image' ? (
-                      <div
-                        key={m.url}
-                        className="relative rounded-xl overflow-hidden border border-[#242734] bg-[#0b0b0e] flex items-center justify-center"
-                      >
-                        <img
-                          src={m.url}
-                          alt={m.alt || 'Note image preview'}
-                          referrerPolicy="no-referrer"
-                          className={
-                            parsedPreview.media.length === 1
-                              ? 'max-h-[480px] max-w-full w-auto h-auto object-contain'
-                              : 'max-h-64 max-w-full w-auto h-auto object-contain'
-                          }
-                        />
-                        {m.alt && (
-                          <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-semibold text-emerald-300">
-                            ALT
-                          </span>
-                        )}
-                      </div>
-                    ) : m.kind === 'video' ? (
-                      <video
-                        key={m.url}
-                        src={m.poster ? m.url : `${m.url}#t=0.001`}
-                        poster={m.poster}
-                        controls
-                        playsInline
-                        preload="metadata"
-                        className="rounded-xl max-h-80 w-full bg-black border border-[#242734]"
-                      />
-                    ) : (
-                      <audio key={m.url} src={m.url} controls className="w-full" />
-                    ),
-                  )}
-                </div>
-              )}
-
-              {parsedPreview.youtube.length > 0 && (
-                <div className="space-y-2">
-                  {parsedPreview.youtube.map((yt) => (
-                    <YouTubeCard key={yt.videoId} video={yt} previewOnly />
-                  ))}
-                </div>
-              )}
-            </div>
+          {previewMode ? (
+            <ComposerPreview
+              text={text}
+              attachments={attachments}
+              pubkey={pubkey}
+              displayName={profile?.display_name || profile?.name || ''}
+              nip05={profile?.nip05}
+            />
           ) : (
             <>
               <textarea
@@ -398,7 +469,7 @@ export function Composer({
 
               {attachments.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {attachments.map((att, idx) => (
+                  {attachments.map((att) => (
                     <div
                       key={att.upload.url}
                       title={`Hosted on ${formatBlossomHost(att.upload.server)}`}
@@ -417,14 +488,19 @@ export function Composer({
                         </div>
                       )}
                       <button
-                        onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
+                        type="button"
+                        onClick={() => {
+                          setAttachments((p) => p.filter((a) => a.upload.url !== att.upload.url))
+                          if (editingAltUrl === att.upload.url) setEditingAltUrl(null)
+                        }}
                         className="absolute top-1 right-1 p-1 rounded-full bg-black/75 text-white hover:bg-red-600 cursor-pointer"
                         aria-label="Remove attachment"
                       >
                         <X className="w-3 h-3" />
                       </button>
                       <button
-                        onClick={() => setEditingAltIdx(idx)}
+                        type="button"
+                        onClick={() => setEditingAltUrl(att.upload.url)}
                         className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer ${
                           att.alt
                             ? 'bg-emerald-600/90 text-white'
@@ -439,15 +515,17 @@ export function Composer({
                 </div>
               )}
 
-              {editingAltIdx !== null && attachments[editingAltIdx] && (
+              {editingAttachment && (
                 <div className="mt-2 p-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] flex items-center gap-2">
                   <input
                     type="text"
-                    value={attachments[editingAltIdx].alt}
+                    value={editingAttachment.alt}
                     onChange={(e) => {
                       const val = e.target.value
                       setAttachments((prev) =>
-                        prev.map((a, i) => (i === editingAltIdx ? { ...a, alt: val } : a)),
+                        prev.map((a) =>
+                          a.upload.url === editingAttachment.upload.url ? { ...a, alt: val } : a,
+                        ),
                       )
                     }}
                     placeholder="Describe this image for accessibility (NIP-92 alt text)…"
@@ -455,7 +533,8 @@ export function Composer({
                     autoFocus
                   />
                   <button
-                    onClick={() => setEditingAltIdx(null)}
+                    type="button"
+                    onClick={() => setEditingAltUrl(null)}
                     className="px-2.5 py-1 rounded-lg bg-[#e8590c] text-xs font-medium cursor-pointer"
                   >
                     Save

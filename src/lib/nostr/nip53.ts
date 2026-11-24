@@ -1,6 +1,6 @@
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
-import { isValidHex64, sanitizePublicHttpsUrl, sanitizeRelayUrl } from '../sanitize'
+import { isValidHex64, sanitizePublicHttpsUrl, sanitizePublicRelayUrl } from '../sanitize'
 
 export const KIND_LIVE_ACTIVITY = 30311
 export const KIND_LIVE_CHAT_MESSAGE = 1311
@@ -85,7 +85,7 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
     if (t[0] !== 'relays' && t[0] !== 'relay' && t[0] !== 'r') continue
     const vals = t[0] === 'relays' ? t.slice(1) : [t[1]]
     for (const raw of vals) {
-      const clean = sanitizeRelayUrl(raw)
+      const clean = sanitizePublicRelayUrl(raw)
       if (clean && !seenRelays.has(clean)) {
         seenRelays.add(clean)
         relayHints.push(clean)
@@ -115,9 +115,15 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
 
 export function getChatActivityRef(event: Pick<Event, 'kind' | 'tags'>): string | null {
   if (event.kind !== KIND_LIVE_CHAT_MESSAGE) return null
-  const aTag = event.tags.find((t) => t[0] === 'a' && t[1])?.[1]
+  const aTag = event.tags.find((t) => t[0] === 'a' && t[1])?.[1]?.trim()
   if (!aTag || !aTag.startsWith(`${KIND_LIVE_ACTIVITY}:`)) return null
-  return aTag
+  const firstSep = aTag.indexOf(':')
+  const secondSep = aTag.indexOf(':', firstSep + 1)
+  if (secondSep <= firstSep + 1) return null
+  const pubkey = aTag.slice(firstSep + 1, secondSep)
+  const dTag = aTag.slice(secondSep + 1)
+  if (!isValidHex64(pubkey) || !dTag) return null
+  return buildLiveATag(pubkey, dTag)
 }
 
 export function encodeLiveNaddr(hostPubkey: string, dTag: string, relays: string[] = []): string {
@@ -140,7 +146,7 @@ export function decodeLiveNaddr(raw: string): {
     const dec = nip19.decode(clean)
     if (dec.type === 'naddr' && dec.data.kind === KIND_LIVE_ACTIVITY && isValidHex64(dec.data.pubkey)) {
       const relays = (dec.data.relays || [])
-        .map((r) => sanitizeRelayUrl(r))
+        .map((r) => sanitizePublicRelayUrl(r))
         .filter((r): r is string => Boolean(r))
       return {
         hostPubkey: dec.data.pubkey.toLowerCase(),
@@ -230,6 +236,8 @@ export function isLiveStreamFresh(
   if (activity.status !== 'live') return false
   if (!isPlayableStreamUrl(activity.streamingUrl)) return false
   if (activity.ends && activity.ends > 0 && activity.ends <= nowSec) return false
+  // Reject far-future created_at timestamps trying to stay "fresh" indefinitely
+  if (activity.createdAt > nowSec + 300) return false
 
   const ageSec = nowSec - activity.createdAt
   if (ageSec <= LIVE_HEARTBEAT_MAX_AGE_SEC) return true

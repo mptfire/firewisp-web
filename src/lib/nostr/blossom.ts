@@ -5,7 +5,7 @@ import {
   DEFAULT_BLOSSOM_PRIMARY,
   MAX_BLOSSOM_UPLOAD_BYTES,
 } from '../constants'
-import { sanitizeBlossomUrl, sanitizePublicHttpsUrl } from '../sanitize'
+import { isValidHex64, sanitizeBlossomUrl, sanitizePublicHttpsUrl } from '../sanitize'
 
 export const KIND_BLOSSOM_AUTH = 24242
 export const KIND_BLOSSOM_SERVER_LIST = 10063
@@ -112,12 +112,15 @@ export async function stripImageExifClientSide(
       if (!ctx) return { blob: file, mimeType }
       ctx.drawImage(bitmap, 0, 0)
       const outMime = cleanMime === 'image/jpg' ? 'image/jpeg' : cleanMime
-      const quality = outMime === 'image/jpeg' || outMime === 'image/webp' ? 0.92 : undefined
-      const stripped = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob((b) => resolve(b), outMime, quality),
-      )
-      if (stripped && stripped.size > 0 && stripped.size <= MAX_BLOSSOM_UPLOAD_BYTES) {
-        return { blob: stripped, mimeType: outMime }
+      const qualities =
+        outMime === 'image/jpeg' || outMime === 'image/webp' ? [0.92, 0.82, 0.68] : [undefined]
+      for (const quality of qualities) {
+        const stripped = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), outMime, quality),
+        )
+        if (stripped && stripped.size > 0 && stripped.size <= MAX_BLOSSOM_UPLOAD_BYTES) {
+          return { blob: stripped, mimeType: outMime }
+        }
       }
     } finally {
       bitmap.close()
@@ -151,6 +154,8 @@ export async function uploadToBlossom(
   const isMediaEndpointEligible = effectiveMime.startsWith('image/') || effectiveMime.startsWith('video/')
 
   let lastError: Error = new Error('No Blossom servers available')
+  // Cache BUD-11 auth headers per action across fallback servers (avoids repeated NIP-07/Bunker prompts)
+  const authHeaderCache = new Map<'media' | 'upload', string>()
 
   for (const server of candidates) {
     // Try BUD-05 /media first for images/videos, then fall back to BUD-02 /upload.
@@ -169,7 +174,11 @@ export async function uploadToBlossom(
           host: formatBlossomHost(server),
           endpoint: ep.path,
         })
-        const auth = await buildBlossomAuthHeader(signer, ep.action, hash)
+        let auth = authHeaderCache.get(ep.action)
+        if (!auth) {
+          auth = await buildBlossomAuthHeader(signer, ep.action, hash)
+          authHeaderCache.set(ep.action, auth)
+        }
         const resp = await fetchImpl(`${server}${ep.path}`, {
           method: 'PUT',
           headers: {
@@ -196,9 +205,13 @@ export async function uploadToBlossom(
           continue
         }
 
-        // For raw /upload (untransformed), enforce SHA-256 descriptor match (fail-closed).
-        // For /media (server-side EXIF stripping / transcoding), the returned hash may differ.
-        const returnedHash = (data.sha256 || '').toLowerCase()
+        // For raw /upload (untransformed), enforce strict SHA-256 descriptor match when returned (fail-closed).
+        // For /media (server-side EXIF stripping / transcoding), validate 64-hex if returned.
+        const returnedHash = (data.sha256 || '').trim().toLowerCase()
+        if (returnedHash && !isValidHex64(returnedHash)) {
+          lastError = new Error(`${server} returned invalid SHA-256 descriptor`)
+          continue
+        }
         if (ep.path === '/upload' && returnedHash && returnedHash !== hash) {
           lastError = new Error(`${server} returned mismatched SHA-256 descriptor`)
           continue

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bell, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 
 function formatRelative(unixSec: number): string {
@@ -20,7 +21,17 @@ export function NotificationsPage() {
   const notificationIds = useNostrStore((s) => s.notificationIds)
   const events = useNostrStore((s) => s.events)
   const profiles = useNostrStore((s) => s.profiles)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
+  const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const subscribeNotifications = useNostrStore((s) => s.subscribeNotifications)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -32,11 +43,37 @@ export function NotificationsPage() {
       clearTimeout(timer)
       unsub()
     }
-  }, [pubkey, subscribeNotifications])
+  }, [pubkey, userReadRelays, subscribeNotifications])
+
+  const visibleNotificationIds = useMemo(() => {
+    const allMutedPks =
+      privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
+    return notificationIds.filter((id) => {
+      const ev = events[id]
+      if (!ev || isEventDeleted(ev) || isEventMuted(ev)) return false
+      if (ev.kind === 9735) {
+        const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
+        if (allMutedPks.includes(actorPk)) return false
+      }
+      return true
+    })
+  }, [
+    notificationIds,
+    events,
+    isEventDeleted,
+    isEventMuted,
+    deletedByAuthor,
+    mutedPubkeys,
+    mutedHashtags,
+    mutedWords,
+    privateMutedPubkeys,
+    privateMutedHashtags,
+    privateMutedWords,
+  ])
 
   useEffect(() => {
-    if (notificationIds.length > 0) setLoading(false)
-  }, [notificationIds.length])
+    if (visibleNotificationIds.length > 0) setLoading(false)
+  }, [visibleNotificationIds.length])
 
   if (!pubkey) {
     return (
@@ -60,14 +97,14 @@ export function NotificationsPage() {
         <h1 className="font-bold text-base">Notifications</h1>
       </div>
 
-      {loading && notificationIds.length === 0 ? (
+      {loading && visibleNotificationIds.length === 0 ? (
         <div className="py-16 flex justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-[#e8590c]" />
         </div>
-      ) : notificationIds.length === 0 ? (
+      ) : visibleNotificationIds.length === 0 ? (
         <div className="p-12 text-center text-sm text-[#8c8a82]">No notifications yet.</div>
       ) : (
-        notificationIds.map((id) => {
+        visibleNotificationIds.map((id) => {
           const ev = events[id]
           if (!ev) return null
           const zapInfo = ev.kind === 9735 ? parseZapReceiptInfo(ev) : null

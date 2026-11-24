@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Loader2, PictureInPicture2, Play, Radio, Shield } from 'lucide-react'
+import { createSafeHlsConfig } from '../lib/nostr/hlsSafe'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 
 interface HlsVideoPlayerProps {
   streamUrl: string
@@ -9,6 +11,7 @@ interface HlsVideoPlayerProps {
   autoStart?: boolean
   compact?: boolean
   onPopOut?: () => void
+  onPlaybackStart?: () => void
   onVideoElement?: (el: HTMLVideoElement | null) => void
   onStreamOffline?: () => void
 }
@@ -21,44 +24,77 @@ export function HlsVideoPlayer({
   autoStart = false,
   compact = false,
   onPopOut,
+  onPlaybackStart,
   onVideoElement,
   onStreamOffline,
 }: HlsVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const isLiveRef = useRef(isLive)
+  const onStreamOfflineRef = useRef(onStreamOffline)
+  const onPlaybackStartRef = useRef(onPlaybackStart)
+  isLiveRef.current = isLive
+  onStreamOfflineRef.current = onStreamOffline
+  onPlaybackStartRef.current = onPlaybackStart
+
+  const safeStreamUrl = useMemo(() => sanitizePublicHttpsUrl(streamUrl), [streamUrl])
+  const safePosterUrl = useMemo(() => sanitizePublicHttpsUrl(posterUrl) || undefined, [posterUrl])
+
   const [started, setStarted] = useState(autoStart)
+  const [retryNonce, setRetryNonce] = useState(0)
   const [buffering, setBuffering] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const streamHost = useMemo(() => {
+    if (!safeStreamUrl) return 'external stream'
     try {
-      return new URL(streamUrl).hostname
+      return new URL(safeStreamUrl).hostname
     } catch {
       return 'external stream'
     }
-  }, [streamUrl])
+  }, [safeStreamUrl])
 
   useEffect(() => {
-    setStarted(autoStart)
+    if (autoStart) setStarted(true)
+  }, [autoStart])
+
+  useEffect(() => {
     setError(null)
     setBuffering(false)
-  }, [streamUrl, autoStart])
+  }, [safeStreamUrl])
 
   useEffect(() => {
     if (!started) return
+    onPlaybackStartRef.current?.()
     const video = videoRef.current
     if (!video) return
+    if (!safeStreamUrl) {
+      setError('Stream URL is invalid or blocked for security.')
+      setBuffering(false)
+      return
+    }
 
     let destroyed = false
     let hlsInstance: { destroy: () => void } | null = null
+    let mediaRecoveryAttempts = 0
+    let networkRecoveryAttempts = 0
+    let nativeCanPlay: (() => void) | null = null
+    let nativeErr: (() => void) | null = null
+
     setError(null)
     setBuffering(true)
 
-    const isHls = /\.m3u8(\?.*)?$/i.test(streamUrl) || streamUrl.includes('/hls/')
+    const destroyHls = () => {
+      if (hlsInstance) {
+        hlsInstance.destroy()
+        hlsInstance = null
+      }
+    }
+
+    const isHls = /\.m3u8(\?.*)?$/i.test(safeStreamUrl) || safeStreamUrl.includes('/hls/')
 
     void (async () => {
       if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
         try {
-          // Lazy-load hls.js in its own async chunk with enableWorker: false so strict CSP worker-src 'self' stays intact
           const { default: Hls } = await import('hls.js')
           if (destroyed) return
           if (!Hls.isSupported()) {
@@ -66,13 +102,14 @@ export function HlsVideoPlayer({
             setBuffering(false)
             return
           }
-          const hls = new Hls({
-            enableWorker: false,
-            lowLatencyMode: true,
-            backBufferLength: 30,
-          })
+          const hls = new Hls(
+            createSafeHlsConfig(Hls, {
+              lowLatencyMode: true,
+              backBufferLength: 30,
+            }),
+          )
           hlsInstance = hls
-          hls.loadSource(streamUrl)
+          hls.loadSource(safeStreamUrl)
           hls.attachMedia(video)
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (destroyed) return
@@ -80,56 +117,82 @@ export function HlsVideoPlayer({
             void video.play().catch(() => {})
           })
           hls.on(Hls.Events.ERROR, (_evt, data) => {
-            if (destroyed) return
-            if (data.fatal) {
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                setError('Stream appears offline or unreachable. Click Retry to reconnect.')
-                if (isLive) onStreamOffline?.()
-              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                hls.recoverMediaError()
-                return
-              } else {
-                setError('Unable to play this live stream.')
-              }
-              setBuffering(false)
+            if (destroyed || !data.fatal) return
+
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryAttempts < 2) {
+              mediaRecoveryAttempts++
+              if (mediaRecoveryAttempts === 2) hls.swapAudioCodec()
+              hls.recoverMediaError()
+              return
             }
+
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              const statusCode = data.response?.code
+              const definitiveOffline =
+                statusCode === 404 || statusCode === 410 || statusCode === 403
+              if (!definitiveOffline && networkRecoveryAttempts < 1) {
+                networkRecoveryAttempts++
+                hls.startLoad()
+                return
+              }
+              destroyHls()
+              setError('Stream appears offline or unreachable. Click Retry to reconnect.')
+              setBuffering(false)
+              const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+              if (isLiveRef.current && definitiveOffline && isOnline) {
+                onStreamOfflineRef.current?.()
+              }
+              return
+            }
+
+            destroyHls()
+            setError('Unable to play this live stream.')
+            setBuffering(false)
           })
         } catch (err) {
           if (!destroyed) {
+            destroyHls()
             setError(err instanceof Error ? err.message : 'Failed to initialize HLS player')
             setBuffering(false)
           }
         }
       } else {
         // Safari native HLS or direct MP4/WebM recording
-        video.src = streamUrl
-        const onCanPlay = () => {
+        video.src = safeStreamUrl
+        nativeCanPlay = () => {
           if (!destroyed) {
             setBuffering(false)
             void video.play().catch(() => {})
           }
         }
-        const onErr = () => {
+        nativeErr = () => {
           if (!destroyed) {
             setError('Stream could not be loaded. It may be offline.')
             setBuffering(false)
-            if (isLive) onStreamOffline?.()
           }
         }
-        video.addEventListener('canplay', onCanPlay, { once: true })
-        video.addEventListener('error', onErr, { once: true })
+        video.addEventListener('canplay', nativeCanPlay, { once: true })
+        video.addEventListener('error', nativeErr, { once: true })
       }
     })()
 
     return () => {
       destroyed = true
-      if (hlsInstance) {
-        hlsInstance.destroy()
+      destroyHls()
+      if (nativeCanPlay) video.removeEventListener('canplay', nativeCanPlay)
+      if (nativeErr) video.removeEventListener('error', nativeErr)
+      if (
+        typeof document !== 'undefined' &&
+        document.pictureInPictureElement &&
+        document.pictureInPictureElement === video
+      ) {
+        void document.exitPictureInPicture().catch(() => {})
       }
+      video.pause()
       video.removeAttribute('src')
       video.load()
     }
-  }, [started, streamUrl])
+  }, [started, safeStreamUrl, retryNonce])
 
   useEffect(() => {
     onVideoElement?.(started ? videoRef.current : null)
@@ -144,9 +207,9 @@ export function HlsVideoPlayer({
     >
       {!started ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-          {posterUrl && (
+          {safePosterUrl && (
             <img
-              src={posterUrl}
+              src={safePosterUrl}
               alt={title || 'Live stream preview'}
               referrerPolicy="no-referrer"
               className="absolute inset-0 w-full h-full object-cover opacity-45"
@@ -183,7 +246,7 @@ export function HlsVideoPlayer({
             ref={videoRef}
             controls
             playsInline
-            poster={posterUrl}
+            poster={safePosterUrl}
             className="w-full h-full object-contain bg-black"
           />
           {onPopOut && !error && (
@@ -210,8 +273,7 @@ export function HlsVideoPlayer({
                 type="button"
                 onClick={() => {
                   setError(null)
-                  setStarted(false)
-                  setTimeout(() => setStarted(true), 20)
+                  setRetryNonce((n) => n + 1)
                 }}
                 className="px-4 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold text-white cursor-pointer"
               >

@@ -25,7 +25,7 @@ import {
   type BlossomUploadResult,
 } from '../lib/nostr/blossom'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
-import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr } from '../lib/nostr/nip53'
+import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr, isPlayableStreamUrl } from '../lib/nostr/nip53'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore, type LiveChatMessage } from '../lib/store/useLiveStore'
@@ -360,7 +360,7 @@ function ChatBubble({
                     className="max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
                   />
                 ) : (
-                  <audio key={m.url} src={m.url} controls className="w-full h-8" />
+                  <audio key={m.url} src={m.url} controls preload="none" className="w-full h-8" />
                 ),
               )}
             </div>
@@ -398,10 +398,16 @@ export function LiveStreamPage() {
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
-  const [resumedFromMini, setResumedFromMini] = useState(false)
+  const [resumedFromMini, setResumedFromMini] = useState(() => {
+    if (!decoded) return false
+    const aTagInit = buildLiveATag(decoded.hostPubkey, decoded.dTag)
+    return useLiveStore.getState().miniPlayer?.aTag === aTagInit
+  })
 
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const blossomServers = useSettingsStore((s) => s.blossomServers)
 
@@ -429,36 +435,60 @@ export function LiveStreamPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const currentATagStr = decoded ? buildLiveATag(decoded.hostPubkey, decoded.dTag) : ''
+  const prevATagRef = useRef(currentATagStr)
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!decoded) return
     return subscribeActiveStream(decoded.hostPubkey, decoded.dTag, decoded.relays)
   }, [decoded, subscribeActiveStream])
 
-  // On entering /live/:naddr, if this exact stream is already running in the floating mini-player,
-  // dock it cleanly back into the main player with zero duplicate audio.
+  // Reset per-stream composer/modal state on /live/:naddr navigation and dock mini-player cleanly (StrictMode-safe)
   useEffect(() => {
-    if (!decoded) return
-    const currentATag = buildLiveATag(decoded.hostPubkey, decoded.dTag)
+    const streamChanged = prevATagRef.current !== currentATagStr
+    prevATagRef.current = currentATagStr
+    if (streamChanged) {
+      setDraft('')
+      setAttachments([])
+      setReplyTarget(null)
+      setZapOpen(false)
+      setLightboxMedia(null)
+      stickToBottomRef.current = true
+    }
+    if (!currentATagStr) {
+      setResumedFromMini(false)
+      return
+    }
     const activeMini = useLiveStore.getState().miniPlayer
-    if (activeMini && activeMini.aTag === currentATag) {
+    if (activeMini && activeMini.aTag === currentATagStr) {
       setResumedFromMini(true)
       closeMiniPlayer()
-    } else {
+    } else if (streamChanged) {
       setResumedFromMini(false)
     }
-  }, [decoded, closeMiniPlayer])
+  }, [currentATagStr, closeMiniPlayer])
 
   const messages = useMemo(() => {
+    const allMutedPks =
+      privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
+    const allMutedWords =
+      privateMutedWords.length > 0 ? [...mutedWords, ...privateMutedWords] : mutedWords
     return rawMessages.filter((m) => {
-      if (mutedPubkeys.includes(m.senderPubkey)) return false
-      if (mutedWords.length > 0 && m.content) {
+      if (allMutedPks.includes(m.senderPubkey)) return false
+      if (allMutedWords.length > 0 && m.content) {
         const lower = m.content.toLowerCase()
-        if (mutedWords.some((w) => w.length >= 2 && lower.includes(w))) return false
+        if (allMutedWords.some((w) => w.length >= 2 && lower.includes(w))) return false
       }
       return true
     })
-  }, [rawMessages, mutedPubkeys, mutedWords])
+  }, [rawMessages, mutedPubkeys, mutedWords, privateMutedPubkeys, privateMutedWords])
 
   const messageById = useMemo(() => {
     const map = new Map<string, LiveChatMessage>()
@@ -466,11 +496,12 @@ export function LiveStreamPage() {
     return map
   }, [messages])
 
+  const lastMessageId = messages[messages.length - 1]?.id
   useEffect(() => {
     if (!stickToBottomRef.current) return
     const el = chatScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages.length])
+  }, [messages.length, lastMessageId])
 
   if (!decoded) {
     return (
@@ -490,9 +521,15 @@ export function LiveStreamPage() {
     hostProfile?.display_name || hostProfile?.name || `${hostPubkey.slice(0, 10)}…`
   const isMe = Boolean(myPubkey && hostPubkey && myPubkey.toLowerCase() === hostPubkey.toLowerCase())
   const isFollowing = Boolean(hostPubkey && follows.includes(hostPubkey.toLowerCase()))
-  const isLive = activeActivity?.status === 'live'
-  const playableUrl = activeActivity?.streamingUrl || activeActivity?.recordingUrl
-  const aTag = buildLiveATag(decoded.hostPubkey, decoded.dTag)
+  const nowSec = Math.floor(Date.now() / 1000)
+  const isExpired = Boolean(activeActivity?.ends && activeActivity.ends > 0 && activeActivity.ends <= nowSec)
+  const isLive = activeActivity?.status === 'live' && !isExpired
+  const rawCandidateUrl =
+    activeActivity?.status === 'ended' || isExpired
+      ? activeActivity?.recordingUrl
+      : activeActivity?.streamingUrl || activeActivity?.recordingUrl
+  const playableUrl = isPlayableStreamUrl(rawCandidateUrl) ? rawCandidateUrl : undefined
+  const aTag = currentATagStr
 
   const handlePopOutMiniPlayer = () => {
     if (!playableUrl) return
@@ -621,9 +658,17 @@ export function LiveStreamPage() {
                 decoded.dTag,
                 activeActivity?.relayHints || decoded.relays,
               )
-              await navigator.clipboard.writeText(`https://firewisp.rtard.de/live/${addr}`)
-              setCopiedLink(true)
-              setTimeout(() => setCopiedLink(false), 1800)
+              try {
+                await navigator.clipboard.writeText(`https://firewisp.rtard.de/live/${addr}`)
+                setCopiedLink(true)
+                if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+                copyTimerRef.current = setTimeout(() => {
+                  copyTimerRef.current = null
+                  setCopiedLink(false)
+                }, 1800)
+              } catch {
+                useNostrStore.getState().setToast('Clipboard permission unavailable')
+              }
             }}
             className="px-2.5 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2a2d3a] text-xs text-[#d4d2cb] flex items-center gap-1.5 shrink-0 cursor-pointer"
           >
@@ -653,11 +698,17 @@ export function LiveStreamPage() {
               </div>
             ) : playableUrl ? (
               <HlsVideoPlayer
+                key={aTag}
                 streamUrl={playableUrl}
                 posterUrl={activeActivity?.image}
                 title={activeActivity?.title}
                 isLive={isLive}
                 autoStart={resumedFromMini}
+                onPlaybackStart={() => {
+                  // Stop any other stream running in mini-player or inline feed to prevent duplicate audio
+                  if (useLiveStore.getState().miniPlayer) closeMiniPlayer()
+                  useLiveStore.getState().setActiveInlineStream(null)
+                }}
                 onPopOut={handlePopOutMiniPlayer}
                 onStreamOffline={() => markStreamOffline(aTag)}
               />

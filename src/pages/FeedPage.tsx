@@ -69,6 +69,9 @@ export function FeedPage() {
   const loadOlderFeed = useNostrStore((s) => s.loadOlderFeed)
   const clearFeedTab = useNostrStore((s) => s.clearFeedTab)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
+  const followsLoaded = useNostrStore((s) => s.followsLoaded)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
@@ -78,6 +81,9 @@ export function FeedPage() {
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
   const visibleTabs = useMemo(() => {
@@ -113,10 +119,11 @@ export function FeedPage() {
     sessionRestored,
     tab,
     pubkey,
-    follows.length,
-    followedHashtags.length,
-    userReadRelays.length,
-    extendedAuthors.length,
+    followsLoaded,
+    follows,
+    followedHashtags,
+    userReadRelays,
+    extendedAuthors,
     refreshTick,
     subscribeFeed,
   ])
@@ -171,10 +178,11 @@ export function FeedPage() {
     const resolveVisibleItem = (
       id: string,
       trackSpamBlock: boolean,
+      spamSeenContent: Map<string, Set<string>>,
+      spamAuthorCounts: Map<string, number>,
     ): { event: Event; repostedBy?: string } | null => {
-      if (deletedEventIds[id]) return null
       const ev = events[id]
-      if (!ev || isEventMuted(ev)) return null
+      if (!ev || isEventDeleted(ev) || isEventMuted(ev)) return null
 
       // STRICT FOLLOWS GATE: never render unfollowed accounts inside Follows
       if (tab === 'following') {
@@ -200,7 +208,7 @@ export function FeedPage() {
       if (ev.kind === 6) {
         const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
         const inner = targetId ? events[targetId] : undefined
-        if (!inner || deletedEventIds[inner.id] || isEventMuted(inner)) return null
+        if (!inner || isEventDeleted(inner) || isEventMuted(inner)) return null
         targetEv = inner
         repostedBy = ev.pubkey
       }
@@ -230,8 +238,8 @@ export function FeedPage() {
         const verdict = evaluateNoteSpam(targetEv, {
           myPubkey: pubkey,
           follows: followSet,
-          seenContentAuthors,
-          authorCounts,
+          seenContentAuthors: spamSeenContent,
+          authorCounts: spamAuthorCounts,
           maxPerAuthor: tab === 'foryou' ? 3 : 2,
           requirePowBits: tab === 'global' && requirePowInExplore ? 12 : 0,
         })
@@ -245,18 +253,20 @@ export function FeedPage() {
     }
 
     for (const id of ids) {
-      const resolved = resolveVisibleItem(id, true)
+      const resolved = resolveVisibleItem(id, true, seenContentAuthors, authorCounts)
       if (!resolved) continue
       seen.add(resolved.event.id)
       out.push(resolved)
     }
 
-    // Count only pending notes that will ACTUALLY render when clicked (excludes hidden replies, muted, duplicates)
+    // Count pending notes with fresh spam maps so authors already in `ids` don't hide the "Show new notes" pill
     let visiblePending = 0
     if (pendingIds && pendingIds.length > 0) {
       const pendingSeen = new Set<string>()
+      const pendingContentAuthors = new Map<string, Set<string>>()
+      const pendingAuthorCounts = new Map<string, number>()
       for (const pid of pendingIds) {
-        const resolved = resolveVisibleItem(pid, false)
+        const resolved = resolveVisibleItem(pid, false, pendingContentAuthors, pendingAuthorCounts)
         if (!resolved || pendingSeen.has(resolved.event.id)) continue
         pendingSeen.add(resolved.event.id)
         visiblePending++
@@ -269,6 +279,8 @@ export function FeedPage() {
     pendingIds,
     events,
     deletedEventIds,
+    deletedByAuthor,
+    isEventDeleted,
     isEventMuted,
     tab,
     showRepliesInFollows,
@@ -278,6 +290,9 @@ export function FeedPage() {
     mutedPubkeys,
     mutedHashtags,
     mutedWords,
+    privateMutedPubkeys,
+    privateMutedHashtags,
+    privateMutedWords,
     pubkey,
     follows,
     extendedAuthors,
@@ -447,8 +462,8 @@ export function FeedPage() {
         ))}
       </div>
 
-      {/* Pagination: reveal buffered notes first, then fetch older from relays */}
-      {items.length > 0 && (visibleCount < items.length || tab !== 'trending') && (
+      {/* Pagination: reveal buffered notes first, then fetch older from relays (even when Replies: Off hid current batch) */}
+      {(items.length > 0 || ids.length > 0) && (visibleCount < items.length || tab !== 'trending') && (
         <div className="py-6 flex justify-center">
           {noMoreOlder && visibleCount >= items.length ? (
             <span className="text-xs text-[#6f6d66]">No older notes found on these relays</span>

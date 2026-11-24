@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -53,6 +53,20 @@ export function Layout({ children }: { children: ReactNode }) {
   const setToast = useNostrStore((s) => s.setToast)
   const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
   const [relaysExpanded, setRelaysExpanded] = useState(false)
+  const [isDesktopLg, setIsDesktopLg] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : true,
+  )
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const onChange = (e: MediaQueryListEvent) => setIsDesktopLg(e.matches)
+    setIsDesktopLg(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
 
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
   const totalCount = Math.max(Object.keys(relayStatuses).length, 1)
@@ -320,8 +334,8 @@ export function Layout({ children }: { children: ReactNode }) {
           {children}
         </main>
 
-        {/* Right Info Sidebar (large desktop; hidden on /live/* for wide theater video + chat) */}
-        {!isTheaterMode && (
+        {/* Right Info Sidebar (large desktop only — unmounted on mobile/tablet so zero hidden trending queries run) */}
+        {!isTheaterMode && isDesktopLg && (
           <aside className="hidden lg:flex flex-col w-[340px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-screen overflow-y-auto">
             <TrendingSidebar />
 

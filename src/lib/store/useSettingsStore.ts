@@ -13,6 +13,7 @@ const STORAGE_KEY = 'firewisp_settings_v1'
 export interface SettingsState {
   relays: RelayEntry[]
   blossomServers: string[]
+  blossomCustomized: boolean
   notePowEnabled: boolean
   notePowBits: number
   reactionPowEnabled: boolean
@@ -20,6 +21,10 @@ export interface SettingsState {
   mutedPubkeys: string[]
   mutedHashtags: string[]
   mutedWords: string[]
+  // In-memory only (decrypted NIP-44 kind-10000 tags — NEVER persisted to localStorage)
+  privateMutedPubkeys: string[]
+  privateMutedHashtags: string[]
+  privateMutedWords: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
   spamFilterEnabled: boolean
@@ -52,7 +57,10 @@ export interface SettingsState {
   unmutePubkey: (pubkey: string) => void
   muteHashtag: (tag: string) => void
   unmuteHashtag: (tag: string) => void
+  removeMutedWord: (word: string) => void
   mergeRemoteMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
+  mergePrivateMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
+  clearPrivateSessionMutes: () => void
 
   setDmAutoLoadMedia: (enabled: boolean) => void
   setClientTagEnabled: (enabled: boolean) => void
@@ -74,6 +82,7 @@ export interface SettingsState {
 interface PersistedSettings {
   relays: RelayEntry[]
   blossomServers: string[]
+  blossomCustomized: boolean
   notePowEnabled: boolean
   notePowBits: number
   reactionPowEnabled: boolean
@@ -92,13 +101,24 @@ interface PersistedSettings {
   showLiveNowBar: boolean
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
-  // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
+  // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
-function loadInitial(): PersistedSettings & { nwcUri: string } {
-  const defaults: PersistedSettings & { nwcUri: string } = {
+function loadInitial(): PersistedSettings & {
+  nwcUri: string
+  privateMutedPubkeys: string[]
+  privateMutedHashtags: string[]
+  privateMutedWords: string[]
+} {
+  const defaults: PersistedSettings & {
+    nwcUri: string
+    privateMutedPubkeys: string[]
+    privateMutedHashtags: string[]
+    privateMutedWords: string[]
+  } = {
     relays: DEFAULT_RELAYS,
     blossomServers: DEFAULT_BLOSSOM_SERVERS,
+    blossomCustomized: false,
     notePowEnabled: true,
     notePowBits: DEFAULT_NOTE_POW_BITS,
     reactionPowEnabled: true,
@@ -106,6 +126,9 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     mutedPubkeys: [],
     mutedHashtags: [],
     mutedWords: [],
+    privateMutedPubkeys: [],
+    privateMutedHashtags: [],
+    privateMutedWords: [],
     dmAutoLoadMedia: false,
     clientTagEnabled: true,
     spamFilterEnabled: true,
@@ -128,8 +151,16 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     const hadLegacyNwc = Boolean(parsed.nwcUri)
     let blossomServers =
       Array.isArray(parsed.blossomServers) && parsed.blossomServers.length > 0
-        ? parsed.blossomServers
+        ? [
+            ...new Set(
+              parsed.blossomServers
+                .map((u) => sanitizeBlossomUrl(typeof u === 'string' ? u : ''))
+                .filter((u): u is string => Boolean(u)),
+            ),
+          ]
         : DEFAULT_BLOSSOM_SERVERS
+
+    if (blossomServers.length === 0) blossomServers = DEFAULT_BLOSSOM_SERVERS
 
     // Migrate old untouched default pair away from private firewisp.blossom.rtard.de
     if (
@@ -140,18 +171,34 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
       blossomServers = DEFAULT_BLOSSOM_SERVERS
     }
 
-    const merged: PersistedSettings & { nwcUri: string } = {
+    const sanitizedRelays =
+      Array.isArray(parsed.relays) && parsed.relays.length > 0
+        ? parsed.relays
+            .map((r) => {
+              const url = sanitizeRelayUrl(r?.url)
+              return url ? { url, read: Boolean(r.read), write: Boolean(r.write) } : null
+            })
+            .filter((r): r is RelayEntry => Boolean(r))
+        : DEFAULT_RELAYS
+
+    const merged = {
       ...defaults,
       ...parsed,
-      relays:
-        Array.isArray(parsed.relays) && parsed.relays.length > 0
-          ? parsed.relays
-          : DEFAULT_RELAYS,
+      relays: sanitizedRelays.length > 0 ? sanitizedRelays : DEFAULT_RELAYS,
       blossomServers,
+      privateMutedPubkeys: [],
+      privateMutedHashtags: [],
+      privateMutedWords: [],
       nwcUri: '',
     }
     if (hadLegacyNwc) {
-      const { nwcUri: _drop, ...cleanSnap } = merged
+      const {
+        nwcUri: _drop,
+        privateMutedPubkeys: _p1,
+        privateMutedHashtags: _p2,
+        privateMutedWords: _p3,
+        ...cleanSnap
+      } = merged
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanSnap))
     }
     return merged
@@ -165,6 +212,7 @@ function persist(state: SettingsState) {
   const snap: PersistedSettings = {
     relays: state.relays,
     blossomServers: state.blossomServers,
+    blossomCustomized: state.blossomCustomized,
     notePowEnabled: state.notePowEnabled,
     notePowBits: state.notePowBits,
     reactionPowEnabled: state.reactionPowEnabled,
@@ -228,13 +276,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (!url) return false
     const existing = get().blossomServers
     if (existing.includes(url)) return false
-    set({ blossomServers: [url, ...existing] })
+    set({ blossomServers: [url, ...existing], blossomCustomized: true })
     persist(get())
     return true
   },
 
   removeBlossomServer: (url) => {
-    set((s) => ({ blossomServers: s.blossomServers.filter((u) => u !== url) }))
+    set((s) => ({
+      blossomServers: s.blossomServers.filter((u) => u !== url),
+      blossomCustomized: true,
+    }))
     persist(get())
   },
 
@@ -243,21 +294,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     if (!url) return
     set((s) => ({
       blossomServers: [url, ...s.blossomServers.filter((u) => u !== url)],
+      blossomCustomized: true,
     }))
     persist(get())
   },
 
   mergeRemoteBlossomServers: (servers) => {
-    const cleaned = servers
-      .map((u) => sanitizeBlossomUrl(u))
-      .filter((u): u is string => Boolean(u))
+    const cleaned = [
+      ...new Set(
+        servers
+          .map((u) => sanitizeBlossomUrl(u))
+          .filter((u): u is string => Boolean(u)),
+      ),
+    ]
     if (cleaned.length === 0) return
     set((s) => {
-      // Prepend newly discovered remote servers without overriding an existing user-selected primary
+      if (!s.blossomCustomized) {
+        // Adopt the user's published BUD-03 server priority order before local fallbacks
+        const rest = s.blossomServers.filter((u) => !cleaned.includes(u))
+        return { blossomServers: [...cleaned, ...rest] }
+      }
+      // User locally customized primary server — append any unseen remote servers without overriding primary
       const unseen = cleaned.filter((u) => !s.blossomServers.includes(u))
       if (unseen.length === 0) return s
       return {
-        blossomServers: [...unseen, ...s.blossomServers],
+        blossomServers: [...s.blossomServers, ...unseen],
       }
     })
     persist(get())
@@ -291,7 +352,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   unmutePubkey: (pubkey) => {
     const clean = pubkey.toLowerCase()
-    set((s) => ({ mutedPubkeys: s.mutedPubkeys.filter((p) => p !== clean) }))
+    set((s) => ({
+      mutedPubkeys: s.mutedPubkeys.filter((p) => p !== clean),
+      privateMutedPubkeys: s.privateMutedPubkeys.filter((p) => p !== clean),
+    }))
     persist(get())
   },
 
@@ -307,7 +371,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   unmuteHashtag: (tag) => {
     const clean = tag.trim().toLowerCase().replace(/^#/, '')
-    set((s) => ({ mutedHashtags: s.mutedHashtags.filter((t) => t !== clean) }))
+    set((s) => ({
+      mutedHashtags: s.mutedHashtags.filter((t) => t !== clean),
+      privateMutedHashtags: s.privateMutedHashtags.filter((t) => t !== clean),
+    }))
+    persist(get())
+  },
+  removeMutedWord: (word) => {
+    const clean = word.trim().toLowerCase()
+    set((s) => ({
+      mutedWords: s.mutedWords.filter((w) => w !== clean),
+      privateMutedWords: s.privateMutedWords.filter((w) => w !== clean),
+    }))
     persist(get())
   },
   mergeRemoteMutes: ({ pubkeys = [], hashtags = [], words = [] }) => {
@@ -329,6 +404,37 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ],
     }))
     persist(get())
+  },
+  mergePrivateMutes: ({ pubkeys = [], hashtags = [], words = [] }) => {
+    // SECURITY: Decrypted NIP-44 private mutes stay strictly in RAM — never persisted to localStorage.
+    set((s) => ({
+      privateMutedPubkeys: [
+        ...new Set([
+          ...s.privateMutedPubkeys,
+          ...pubkeys.map((p) => p.toLowerCase()).filter(Boolean),
+        ]),
+      ],
+      privateMutedHashtags: [
+        ...new Set([
+          ...s.privateMutedHashtags,
+          ...hashtags.map((t) => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean),
+        ]),
+      ],
+      privateMutedWords: [
+        ...new Set([
+          ...s.privateMutedWords,
+          ...words.map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2),
+        ]),
+      ],
+    }))
+  },
+  clearPrivateSessionMutes: () => {
+    set({
+      privateMutedPubkeys: [],
+      privateMutedHashtags: [],
+      privateMutedWords: [],
+      nwcUri: '',
+    })
   },
 
   setDmAutoLoadMedia: (dmAutoLoadMedia) => {

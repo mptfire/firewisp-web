@@ -3,7 +3,7 @@ import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
 import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, FIREWISP_RELAY, TRENDING_RELAY } from '../constants'
-import { sanitizeRelayUrl } from '../sanitize'
+import { sanitizePublicRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
@@ -92,7 +92,12 @@ export interface NostrState {
   // targetEventId -> array of the current user's kind-6 repost event IDs (enables NIP-09 undo repost!)
   userRepostIds: Record<string, string[]>
   deletedEventIds: Record<string, boolean>
+  // NIP-09 author-verified deletions: targetEventId -> deleting author pubkeys[] (prevents forged pre-load deletions)
+  deletedByAuthor: Record<string, string[]>
   zapTotalsSats: Record<string, number>
+  followsLoaded: boolean
+  rawFollowsEvent: Event | null
+  rawBookmarksEvent: Event | null
 
   // Feed UI state (persisted across route transitions so Back never resets tab!)
   activeFeedTab: FeedTab
@@ -151,6 +156,7 @@ export interface NostrState {
   sendDm: (recipientPubkey: string, plaintext: string) => Promise<DecryptedDm>
 
   isEventMuted: (event: Event) => boolean
+  isEventDeleted: (event: Pick<Event, 'id' | 'pubkey'>) => boolean
 }
 
 // Track last fetch timestamp per pubkey (60s miss cooldown so failed fetches can recover later)
@@ -258,7 +264,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   repostCounts: {},
   userRepostIds: {},
   deletedEventIds: {},
+  deletedByAuthor: {},
   zapTotalsSats: {},
+  followsLoaded: false,
+  rawFollowsEvent: null,
+  rawBookmarksEvent: null,
 
   activeFeedTab: 'foryou',
   showRepliesInFollows: false,
@@ -341,18 +351,28 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   resetUserState: () => {
+    seenDmWraps.clear()
+    useSettingsStore.getState().clearPrivateSessionMutes()
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.removeItem(PROFILES_CACHE_KEY)
+        localStorage.removeItem(BOOKMARKS_KEY)
       } catch {
         // ignore
       }
     }
     set((s) => ({
+      profiles: {},
       follows: [],
+      followsLoaded: false,
+      rawFollowsEvent: null,
+      rawBookmarksEvent: null,
       followedHashtags: [],
       userReadRelays: [],
       userWriteRelays: [],
+      bookmarks: [],
+      userLiked: {},
+      userRepostIds: {},
       forYouFeedIds: [],
       forYouSuppIds: {},
       followingFeedIds: [],
@@ -369,17 +389,32 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   isEventMuted: (event) => {
-    const { mutedPubkeys, mutedHashtags, mutedWords } = useSettingsStore.getState()
-    if (mutedPubkeys.includes(event.pubkey.toLowerCase())) return true
-    if (mutedHashtags.length > 0) {
+    const st = useSettingsStore.getState()
+    const pk = event.pubkey.toLowerCase()
+    if (st.mutedPubkeys.includes(pk) || st.privateMutedPubkeys.includes(pk)) return true
+    const allTags =
+      st.privateMutedHashtags.length > 0
+        ? [...st.mutedHashtags, ...st.privateMutedHashtags]
+        : st.mutedHashtags
+    if (allTags.length > 0) {
       const tags = extractEventHashtags(event)
-      if (tags.some((t) => mutedHashtags.includes(t))) return true
+      if (tags.some((t) => allTags.includes(t))) return true
     }
-    if (mutedWords && mutedWords.length > 0 && event.content) {
+    const allWords =
+      st.privateMutedWords.length > 0
+        ? [...st.mutedWords, ...st.privateMutedWords]
+        : st.mutedWords
+    if (allWords.length > 0 && event.content) {
       const lower = event.content.toLowerCase()
-      if (mutedWords.some((w) => w.length >= 2 && lower.includes(w))) return true
+      if (allWords.some((w) => w.length >= 2 && lower.includes(w))) return true
     }
     return false
+  },
+
+  isEventDeleted: (event) => {
+    const deleters = get().deletedByAuthor[event.id]
+    if (!deleters || deleters.length === 0) return false
+    return deleters.includes(event.pubkey.toLowerCase())
   },
 
   ingestEvent: (event) => {
@@ -400,34 +435,46 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return
     }
 
-    // Kind 5: NIP-09 author-verified deletion (handles undo repost & deleted notes!)
+    // Kind 5: NIP-09 strictly author-verified deletion (prevents forged pre-load censorship!)
     if (event.kind === 5) {
       const targetIds = event.tags.filter((t) => t[0] === 'e' && t[1]).map((t) => t[1])
       if (targetIds.length === 0) return
+      const deleterPk = event.pubkey.toLowerCase()
       set((s) => {
         const nextDeleted = { ...s.deletedEventIds }
+        const nextByAuthor = { ...s.deletedByAuthor }
         const nextUserReposts = { ...s.userRepostIds }
         const nextRepostCounts = { ...s.repostCounts }
 
         for (const tid of targetIds) {
-          const targetEv = s.events[tid]
-          // Verify author ownership if we have the original event (NIP-09)
-          if (targetEv && targetEv.pubkey !== event.pubkey) continue
-          nextDeleted[tid] = true
+          const existingDeleters = nextByAuthor[tid] || []
+          if (!existingDeleters.includes(deleterPk)) {
+            nextByAuthor[tid] = [...existingDeleters, deleterPk]
+          }
 
-          // If this deleted one of the user's repost events, undo repost state cleanly
-          for (const [repostedTarget, ids] of Object.entries(nextUserReposts)) {
-            if (ids.includes(tid)) {
-              nextUserReposts[repostedTarget] = ids.filter((id) => id !== tid)
-              nextRepostCounts[repostedTarget] = Math.max(
-                0,
-                (nextRepostCounts[repostedTarget] || 1) - 1,
-              )
+          const targetEv = s.events[tid]
+          // Only set deletedEventIds[tid] when we can cryptographically confirm author ownership
+          if (targetEv) {
+            if (targetEv.pubkey.toLowerCase() !== deleterPk) continue
+            nextDeleted[tid] = true
+          }
+
+          // Only undo the current user's repost state if the deleter IS the current user
+          if (myPubkey && deleterPk === myPubkey) {
+            for (const [repostedTarget, ids] of Object.entries(nextUserReposts)) {
+              if (ids.includes(tid)) {
+                nextUserReposts[repostedTarget] = ids.filter((id) => id !== tid)
+                nextRepostCounts[repostedTarget] = Math.max(
+                  0,
+                  (nextRepostCounts[repostedTarget] || 1) - 1,
+                )
+              }
             }
           }
         }
         return {
           deletedEventIds: nextDeleted,
+          deletedByAuthor: nextByAuthor,
           userRepostIds: nextUserReposts,
           repostCounts: nextRepostCounts,
         }
@@ -457,13 +504,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     // Kind 6: Repost
     if (event.kind === 6) {
-      if (state.deletedEventIds[event.id]) return
+      if (get().isEventDeleted(event)) return
       const targetId = event.tags.find((t) => t[0] === 'e' && t[1])?.[1]
-      // Also parse embedded reposted note ONLY if its cryptographic signature verifies
+      // Also parse embedded reposted note ONLY if its cryptographic signature & ID match
       if (event.content && event.content.startsWith('{')) {
         try {
           const inner = JSON.parse(event.content) as Event
-          if (inner?.id && inner?.pubkey && inner?.kind === 1 && verifyEvent(inner)) {
+          const allowedKind =
+            inner?.kind === 1 || inner?.kind === 20 || inner?.kind === 21 || inner?.kind === 22
+          if (
+            inner?.id &&
+            inner?.pubkey &&
+            allowedKind &&
+            (!targetId || inner.id === targetId) &&
+            verifyEvent(inner)
+          ) {
             if (!state.events[inner.id]) {
               set((s) => ({ events: { ...s.events, [inner.id]: inner } }))
             }
@@ -547,7 +602,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return !lastTry || now - lastTry > 60_000
     })
     if (needed.length === 0) return
-    for (const p of needed) requestedProfilesAt.set(p, now)
+    const batch = needed.slice(0, 100)
+    for (const p of batch) requestedProfilesAt.set(p, now)
 
     const relays = [
       ...new Set([
@@ -558,7 +614,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     try {
       const events = await nostrPool.query(
         relays,
-        { kinds: [0], authors: needed.slice(0, 100) },
+        { kinds: [0], authors: batch },
         3500,
       )
       for (const ev of events) {
@@ -571,117 +627,135 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   loadUserGraph: async (pubkey) => {
     const relays = useSettingsStore.getState().getReadRelays()
-    const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents, blossomEvents] = await Promise.all([
-      nostrPool.query(relays, { kinds: [3], authors: [pubkey], limit: 3 }, 4000),
-      nostrPool.query(relays, { kinds: [10003], authors: [pubkey], limit: 2 }, 3500),
-      nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 3 }, 3500),
-      nostrPool.query(relays, { kinds: [10015, 30015], authors: [pubkey], limit: 25 }, 3500),
-      nostrPool.query(relays, { kinds: [10000], authors: [pubkey], limit: 2 }, 3500),
-      nostrPool.query(relays, { kinds: [10063], authors: [pubkey], limit: 3 }, 3500),
-    ])
+    try {
+      const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents, blossomEvents] = await Promise.all([
+        nostrPool.query(relays, { kinds: [3], authors: [pubkey], limit: 3 }, 4000),
+        nostrPool.query(relays, { kinds: [10003], authors: [pubkey], limit: 2 }, 3500),
+        nostrPool.query(relays, { kinds: [10002], authors: [pubkey], limit: 3 }, 3500),
+        nostrPool.query(relays, { kinds: [10015, 30015], authors: [pubkey], limit: 25 }, 3500),
+        nostrPool.query(relays, { kinds: [10000], authors: [pubkey], limit: 2 }, 3500),
+        nostrPool.query(relays, { kinds: [10063], authors: [pubkey], limit: 3 }, 3500),
+      ])
 
-    // Sync BUD-03 kind-10063 Blossom media server list (user's published servers prioritized first)
-    if (blossomEvents.length > 0) {
-      const latestBlossom = [...blossomEvents].sort((a, b) => b.created_at - a.created_at)[0]
-      const remoteServers = latestBlossom.tags
-        .filter((t) => t[0] === 'server' && t[1])
-        .map((t) => t[1].trim())
-      if (remoteServers.length > 0) {
-        useSettingsStore.getState().mergeRemoteBlossomServers(remoteServers)
+      // Sync BUD-03 kind-10063 Blossom media server list (user's published servers prioritized first)
+      if (blossomEvents.length > 0) {
+        const latestBlossom = [...blossomEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const remoteServers = latestBlossom.tags
+          .filter((t) => t[0] === 'server' && t[1])
+          .map((t) => t[1].trim())
+        if (remoteServers.length > 0) {
+          useSettingsStore.getState().mergeRemoteBlossomServers(remoteServers)
+        }
       }
-    }
 
-    // Sync NIP-51 kind-10000 mute list (public + NIP-44 private encrypted tags, matching Wisp Android!)
-    if (muteEvents.length > 0) {
-      const latestMute = muteEvents[0]
-      const allMuteTags: string[][] = [...latestMute.tags]
-      if (latestMute.content) {
-        const signer = useAuthStore.getState().signer
-        if (signer?.canEncrypt) {
-          try {
-            const decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
-            const parsed = JSON.parse(decrypted) as unknown
-            if (Array.isArray(parsed)) {
-              for (const item of parsed) {
-                if (Array.isArray(item) && item.every((x) => typeof x === 'string')) {
-                  allMuteTags.push(item as string[])
+      // Sync NIP-51 kind-10000 mute list:
+      // Public tags go to persisted settings; NIP-44 encrypted private tags stay strictly in RAM!
+      if (muteEvents.length > 0) {
+        const latestMute = [...muteEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const pubPubkeys: string[] = []
+        const pubHashtags: string[] = []
+        const pubWords: string[] = []
+        for (const t of latestMute.tags) {
+          if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubPubkeys.push(t[1].toLowerCase())
+          else if (t[0] === 't' && t[1]) pubHashtags.push(t[1])
+          else if (t[0] === 'word' && t[1]) pubWords.push(t[1])
+        }
+        if (pubPubkeys.length > 0 || pubHashtags.length > 0 || pubWords.length > 0) {
+          useSettingsStore
+            .getState()
+            .mergeRemoteMutes({ pubkeys: pubPubkeys, hashtags: pubHashtags, words: pubWords })
+        }
+
+        if (latestMute.content) {
+          const signer = useAuthStore.getState().signer
+          if (signer?.canEncrypt) {
+            try {
+              const decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
+              const parsed = JSON.parse(decrypted) as unknown
+              if (Array.isArray(parsed)) {
+                const privPubkeys: string[] = []
+                const privHashtags: string[] = []
+                const privWords: string[] = []
+                for (const item of parsed) {
+                  if (!Array.isArray(item) || !item.every((x) => typeof x === 'string')) continue
+                  const t = item as string[]
+                  if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) privPubkeys.push(t[1].toLowerCase())
+                  else if (t[0] === 't' && t[1]) privHashtags.push(t[1])
+                  else if (t[0] === 'word' && t[1]) privWords.push(t[1])
+                }
+                if (privPubkeys.length > 0 || privHashtags.length > 0 || privWords.length > 0) {
+                  useSettingsStore
+                    .getState()
+                    .mergePrivateMutes({ pubkeys: privPubkeys, hashtags: privHashtags, words: privWords })
                 }
               }
+            } catch {
+              // Encrypted with legacy NIP-04 or signer declined — keep public tags cleanly
             }
-          } catch {
-            // Encrypted with legacy NIP-04 or signer declined — keep public tags cleanly
           }
         }
       }
-      const pubkeys: string[] = []
-      const hashtags: string[] = []
-      const words: string[] = []
-      for (const t of allMuteTags) {
-        if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubkeys.push(t[1].toLowerCase())
-        else if (t[0] === 't' && t[1]) hashtags.push(t[1])
-        else if (t[0] === 'word' && t[1]) words.push(t[1])
-      }
-      if (pubkeys.length > 0 || hashtags.length > 0 || words.length > 0) {
-        useSettingsStore.getState().mergeRemoteMutes({ pubkeys, hashtags, words })
-      }
-    }
 
-    if (interestEvents.length > 0) {
-      const tagSet = new Set<string>()
-      for (const ev of interestEvents) {
-        for (const t of ev.tags) {
-          if (t[0] === 't' && t[1]) {
-            const clean = t[1].trim().toLowerCase().replace(/^#/, '')
-            if (clean) tagSet.add(clean)
+      if (interestEvents.length > 0) {
+        const tagSet = new Set<string>()
+        for (const ev of interestEvents) {
+          for (const t of ev.tags) {
+            if (t[0] === 't' && t[1]) {
+              const clean = t[1].trim().toLowerCase().replace(/^#/, '')
+              if (clean) tagSet.add(clean)
+            }
           }
         }
+        set({ followedHashtags: [...tagSet].slice(0, 40) })
       }
-      set({ followedHashtags: [...tagSet].slice(0, 40) })
-    }
 
-    if (relayListEvents.length > 0) {
-      const latestRelayList = [...relayListEvents].sort((a, b) => b.created_at - a.created_at)[0]
-      const nip65Read: string[] = []
-      const nip65Write: string[] = []
-      for (const t of latestRelayList.tags) {
-        if (t[0] !== 'r' || !t[1]) continue
-        const clean = sanitizeRelayUrl(t[1])
-        if (!clean) continue
-        const marker = t[2]
-        if (!marker || marker === 'read') nip65Read.push(clean)
-        if (!marker || marker === 'write') nip65Write.push(clean)
+      if (relayListEvents.length > 0) {
+        const latestRelayList = [...relayListEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const nip65Read: string[] = []
+        const nip65Write: string[] = []
+        for (const t of latestRelayList.tags) {
+          if (t[0] !== 'r' || !t[1]) continue
+          const clean = sanitizePublicRelayUrl(t[1])
+          if (!clean) continue
+          const marker = t[2]
+          if (!marker || marker === 'read') nip65Read.push(clean)
+          if (!marker || marker === 'write') nip65Write.push(clean)
+        }
+        set({
+          userReadRelays: [...new Set(nip65Read)].slice(0, 12),
+          userWriteRelays: [...new Set(nip65Write)].slice(0, 12),
+        })
       }
-      set({
-        userReadRelays: [...new Set(nip65Read)].slice(0, 12),
-        userWriteRelays: [...new Set(nip65Write)].slice(0, 12),
-      })
-    }
 
-    if (contactEvents.length > 0) {
-      const latest = contactEvents[0]
-      const follows = [
-        ...new Set(
-          latest.tags
-            .filter((t) => t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1]))
-            .map((t) => t[1].toLowerCase()),
-        ),
-      ]
-      // Clear any signed-out For You notes when the user's real follow graph arrives
-      set({ follows, forYouFeedIds: [], forYouSuppIds: {} })
-      void get().fetchProfiles([pubkey, ...follows.slice(0, 60)])
-    } else {
-      void get().fetchProfiles([pubkey])
-    }
-
-    if (bookmarkEvents.length > 0) {
-      const remoteIds = bookmarkEvents[0].tags
-        .filter((t) => t[0] === 'e' && t[1])
-        .map((t) => t[1])
-      const merged = [...new Set([...remoteIds, ...get().bookmarks])]
-      set({ bookmarks: merged })
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(merged))
+      if (contactEvents.length > 0) {
+        const latest = [...contactEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const follows = [
+          ...new Set(
+            latest.tags
+              .filter((t) => t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1]))
+              .map((t) => t[1].toLowerCase()),
+          ),
+        ]
+        // Clear any signed-out For You notes when the user's real follow graph arrives
+        set({ follows, rawFollowsEvent: latest, forYouFeedIds: [], forYouSuppIds: {} })
+        void get().fetchProfiles([pubkey, ...follows.slice(0, 60)])
+      } else {
+        void get().fetchProfiles([pubkey])
       }
+
+      if (bookmarkEvents.length > 0) {
+        const latestBm = [...bookmarkEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const remoteIds = latestBm.tags
+          .filter((t) => t[0] === 'e' && t[1])
+          .map((t) => t[1])
+        const merged = [...new Set([...remoteIds, ...get().bookmarks])]
+        set({ bookmarks: merged, rawBookmarksEvent: latestBm })
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(merged))
+        }
+      }
+    } finally {
+      set({ followsLoaded: true })
     }
   },
 
@@ -692,7 +766,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (follows.length === 0) return []
     set({ loadingExtendedGraph: true })
     try {
-      const relays = useSettingsStore.getState().getReadRelays()
+      const relays = [
+        ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
+      ].slice(0, 10)
       // Sample up to 60 direct follows' kind-3 contact lists and keep 2-hop pubkeys endorsed by >= 3 follows
       const sample = follows.slice(0, 60)
       const contactLists = await nostrPool.query(
@@ -774,14 +850,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           })
       }
 
-      set((s) => {
-        const eventsMap = { ...s.events }
-        for (const ev of hotPosts) eventsMap[ev.id] = ev
-        return {
-          events: eventsMap,
-          trendingSidebarIds: hotPosts.map((e) => e.id),
-        }
-      })
+      if (hotPosts.length > 0) {
+        set((s) => {
+          const eventsMap = { ...s.events }
+          for (const ev of hotPosts) eventsMap[ev.id] = ev
+          return {
+            events: eventsMap,
+            trendingSidebarIds: hotPosts.map((e) => e.id),
+          }
+        })
+      }
     } finally {
       set({ loadingTrends: false })
     }
@@ -952,8 +1030,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
-    // While signed in and waiting for kind-3 follows to load, NEVER fall back to global explore!
-    if ((tab === 'foryou' || tab === 'following') && myPubkey && follows.length === 0) {
+    // While signed in and still loading kind-3 follows, wait cleanly before subscribing;
+    // once loaded, a 0-follow account still subscribes to its own notes (never stuck on skeleton!).
+    if (
+      (tab === 'foryou' || tab === 'following') &&
+      myPubkey &&
+      follows.length === 0 &&
+      !get().followsLoaded
+    ) {
       return () => {}
     }
 
@@ -1292,6 +1376,19 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const relays = [
       ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
     ].slice(0, 10)
+    const pendingActors = new Set<string>()
+    let actorTimer: ReturnType<typeof setTimeout> | null = null
+    const queueActorProfile = (pk: string) => {
+      pendingActors.add(pk)
+      if (!actorTimer) {
+        actorTimer = setTimeout(() => {
+          actorTimer = null
+          const batch = [...pendingActors]
+          pendingActors.clear()
+          if (batch.length > 0) void get().fetchProfiles(batch)
+        }, 300)
+      }
+    }
     const sub = nostrPool.subscribe(
       relays,
       { kinds: [1, 6, 7, 1111, 9735], '#p': [pubkey], limit: 60 },
@@ -1301,7 +1398,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             ev.kind === 9735 ? parseZapReceiptInfo(ev).senderPubkey : ev.pubkey.toLowerCase()
           if (actorPubkey === pubkey.toLowerCase()) return
           get().ingestEvent(ev)
-          void get().fetchProfiles([actorPubkey])
+          queueActorProfile(actorPubkey)
           set((s) => ({
             events: { ...s.events, [ev.id]: ev },
             notificationIds: insertSortedUnique(
@@ -1313,7 +1410,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         },
       },
     )
-    return () => sub.close()
+    return () => {
+      if (actorTimer) clearTimeout(actorTimer)
+      sub.close()
+    }
   },
 
   subscribeDms: () => {
@@ -1357,9 +1457,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const tags: string[][] = [...extraTags]
 
     if (replyTo) {
-      const rootTag = replyTo.tags.find((t) => t[0] === 'e' && t[3] === 'root')
-      if (rootTag) {
-        tags.push(['e', rootTag[1], FIREWISP_RELAY, 'root'])
+      const parentRefs = extractReplyRefs(replyTo)
+      if (parentRefs.rootId && parentRefs.rootId !== replyTo.id) {
+        tags.push(['e', parentRefs.rootId, FIREWISP_RELAY, 'root'])
         tags.push(['e', replyTo.id, FIREWISP_RELAY, 'reply'])
       } else {
         tags.push(['e', replyTo.id, FIREWISP_RELAY, 'root'])
@@ -1371,8 +1471,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       for (const p of pSet) tags.push(['p', p])
     }
 
-    // Extract #hashtags into `t` tags
-    const hashtags = content.match(/#[a-zA-Z0-9_]{1,64}/g) || []
+    // Extract #hashtags into `t` tags (strip URLs first so #fragments aren't tagged)
+    const hashtags = content.replace(/https?:\/\/\S+/gi, ' ').match(/#[a-zA-Z0-9_]{1,64}/g) || []
     const tSeen = new Set<string>()
     for (const h of hashtags) {
       const clean = h.slice(1).toLowerCase()
@@ -1522,20 +1622,53 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return
     }
     const clean = targetPubkey.toLowerCase()
-    const current = get().follows
-    const next = current.includes(clean)
-      ? current.filter((p) => p !== clean)
-      : [...current, clean]
-
-    const wasFollowing = current.includes(clean)
     try {
+      // SAFETY: Fetch latest kind-3 before modifying if not yet loaded so we NEVER wipe a follow list!
+      let baseEvent = get().rawFollowsEvent
+      if (!baseEvent) {
+        const readRelays = [
+          ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
+        ].slice(0, 10)
+        const latest = await nostrPool.query(
+          readRelays,
+          { kinds: [3], authors: [signer.pubkey], limit: 3 },
+          4000,
+        )
+        if (latest.length > 0) {
+          baseEvent = [...latest].sort((a, b) => b.created_at - a.created_at)[0]
+          const syncedFollows = [
+            ...new Set(
+              baseEvent.tags
+                .filter((t) => t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1]))
+                .map((t) => t[1].toLowerCase()),
+            ),
+          ]
+          set({ rawFollowsEvent: baseEvent, follows: syncedFollows, followsLoaded: true })
+        }
+      }
+
+      const existingTags = baseEvent ? baseEvent.tags.map((t) => [...t]) : get().follows.map((p) => ['p', p])
+      const wasFollowing = existingTags.some(
+        (t) => t[0] === 'p' && t[1]?.toLowerCase() === clean,
+      )
+      const nextTags = wasFollowing
+        ? existingTags.filter((t) => !(t[0] === 'p' && t[1]?.toLowerCase() === clean))
+        : [...existingTags, ['p', clean]]
+      const nextFollows = [
+        ...new Set(
+          nextTags
+            .filter((t) => t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1]))
+            .map((t) => t[1].toLowerCase()),
+        ),
+      ]
+
       const ev = await signer.signEvent({
         kind: 3,
         created_at: Math.floor(Date.now() / 1000),
-        tags: next.map((p) => ['p', p]),
-        content: '',
+        tags: nextTags,
+        content: baseEvent?.content || '',
       })
-      set({ follows: next })
+      set({ follows: nextFollows, rawFollowsEvent: ev, followsLoaded: true })
       const writeRelays = [
         ...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays]),
       ]
@@ -1550,7 +1683,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   toggleBookmark: async (eventId) => {
     const current = get().bookmarks
-    const next = current.includes(eventId)
+    const wasBookmarked = current.includes(eventId)
+    const next = wasBookmarked
       ? current.filter((id) => id !== eventId)
       : [eventId, ...current]
     set({ bookmarks: next })
@@ -1560,13 +1694,43 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const signer = useAuthStore.getState().signer
     if (signer?.canSign) {
       try {
+        let baseEvent = get().rawBookmarksEvent
+        if (!baseEvent) {
+          const readRelays = [
+            ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
+          ].slice(0, 10)
+          const latest = await nostrPool.query(
+            readRelays,
+            { kinds: [10003], authors: [signer.pubkey], limit: 2 },
+            3500,
+          )
+          if (latest.length > 0) {
+            baseEvent = [...latest].sort((a, b) => b.created_at - a.created_at)[0]
+          }
+        }
+        // Preserve non-`e` tags and any private encrypted content in kind-10003
+        const preservedOtherTags = (baseEvent?.tags || []).filter((t) => t[0] !== 'e')
+        const existingEIds = (baseEvent?.tags || [])
+          .filter((t) => t[0] === 'e' && t[1])
+          .map((t) => t[1])
+        const mergedEIds = wasBookmarked
+          ? [...new Set([...next, ...existingEIds])].filter((id) => id !== eventId)
+          : [...new Set([eventId, ...next, ...existingEIds])]
+        const nextTags = [...preservedOtherTags, ...mergedEIds.map((id) => ['e', id])]
+
         const ev = await signer.signEvent({
           kind: 10003,
           created_at: Math.floor(Date.now() / 1000),
-          tags: next.map((id) => ['e', id]),
-          content: '',
+          tags: nextTags,
+          content: baseEvent?.content || '',
         })
-        const writeRelays = [...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays])]
+        set({ bookmarks: mergedEIds, rawBookmarksEvent: ev })
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(mergedEIds))
+        }
+        const writeRelays = [
+          ...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays]),
+        ]
         await nostrPool.publish(writeRelays, ev)
       } catch {
         // Local bookmark still saved
@@ -1597,7 +1761,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (dmRelayEvents.length > 0) {
         const inbox = dmRelayEvents[0].tags
           .filter((t) => t[0] === 'relay' && t[1])
-          .map((t) => sanitizeRelayUrl(t[1]))
+          .map((t) => sanitizePublicRelayUrl(t[1]))
           .filter((u): u is string => Boolean(u))
         if (inbox.length > 0) recipientRelays = [...new Set(inbox)].slice(0, 6)
       }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Flame,
@@ -36,22 +36,40 @@ function stripPreviewText(raw: string): string {
     .trim()
 }
 
-function TrendingPostCard({ eventId }: { eventId: string }) {
+const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: string }) {
   const ev = useNostrStore((s) => s.events[eventId])
-  const isMuted = useSettingsStore((s) =>
-    ev ? s.mutedPubkeys.includes(ev.pubkey.toLowerCase()) : false,
-  )
+  const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
   const profile = useNostrStore((s) => (ev ? s.profiles[ev.pubkey] : undefined))
   const likes = useNostrStore((s) => s.reactionCounts[eventId] || 0)
   const reposts = useNostrStore((s) => s.repostCounts[eventId] || 0)
   const replies = useNostrStore((s) => s.replyCounts[eventId] || 0)
   const zapSats = useNostrStore((s) => s.zapTotalsSats[eventId] || 0)
 
-  if (!ev || isMuted) return null
+  const parsed = useMemo(() => (ev ? parseNoteContent(ev) : null), [ev])
+  const hidden = useMemo(() => {
+    if (!ev) return true
+    return isEventDeleted(ev) || isEventMuted(ev)
+  }, [
+    ev,
+    isEventDeleted,
+    isEventMuted,
+    deletedByAuthor,
+    mutedPubkeys,
+    privateMutedPubkeys,
+    mutedHashtags,
+    mutedWords,
+  ])
+
+  if (!ev || !parsed || hidden) return null
 
   const authorName = profile?.display_name || profile?.name || `${ev.pubkey.slice(0, 10)}…`
   const handle = profile?.nip05 ? profile.nip05.replace(/^_@/, '') : null
-  const parsed = parseNoteContent(ev)
   const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
   const firstVideo = parsed.media.find((m) => m.kind === 'video')
   const firstYoutube = parsed.youtube[0]
@@ -180,7 +198,7 @@ function TrendingPostCard({ eventId }: { eventId: string }) {
       )}
     </Link>
   )
-}
+})
 
 export function TrendingSidebar() {
   const navigate = useNavigate()
@@ -188,12 +206,16 @@ export function TrendingSidebar() {
   const loadingTrends = useNostrStore((s) => s.loadingTrends)
   const loadTrendingSidebar = useNostrStore((s) => s.loadTrendingSidebar)
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
+  const didInitRef = useRef(false)
 
+  // Initial load once on mount (never re-trigger in a loop if relay returns 0 posts)
   useEffect(() => {
-    if (trendingSidebarIds.length === 0 && !loadingTrends) {
+    if (didInitRef.current) return
+    didInitRef.current = true
+    if (useNostrStore.getState().trendingSidebarIds.length === 0) {
       void loadTrendingSidebar()
     }
-  }, [trendingSidebarIds.length, loadingTrends, loadTrendingSidebar])
+  }, [loadTrendingSidebar])
 
   // Auto-refresh trending posts every 5 minutes while the tab is visible
   useEffect(() => {

@@ -167,10 +167,12 @@ export async function fetchYouTubeMeta(videoId: string): Promise<YouTubeMeta | n
   const result = await promise
   inflight.delete(videoId)
 
-  if (metaCache.size >= MAX_CACHE_ENTRIES) {
-    const oldestKey = metaCache.keys().next().value
-    if (oldestKey) metaCache.delete(oldestKey)
+  if (result) {
+    if (metaCache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = metaCache.keys().next().value
+      if (oldestKey) metaCache.delete(oldestKey)
+    }
+    metaCache.set(videoId, result)
   }
-  metaCache.set(videoId, result)
   return result
 }

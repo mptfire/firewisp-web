@@ -22,6 +22,7 @@ import {
   sanitizeBlossomUrl,
   sanitizeHttpUrl,
   sanitizePublicHttpsUrl,
+  sanitizePublicRelayUrl,
   sanitizeRelayUrl,
 } from '../sanitize'
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
@@ -31,6 +32,7 @@ import {
   buildLiveATag,
   decodeLiveNaddr,
   encodeLiveNaddr,
+  getChatActivityRef,
   isLiveStreamFresh,
   isPlayableStreamUrl,
   parseLiveActivity,
@@ -39,6 +41,7 @@ import {
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
 import { parseSharedQueryParams } from '../shareTarget'
+import { useNostrStore } from '../store/useNostrStore'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -746,5 +749,97 @@ describe('YouTube preview card parser & security guards (Option 1B)', () => {
     ).toBe('Same https://youtu.be/20t-IZZztOk')
 
     expect(parseSharedQueryParams('')).toBeNull()
+  })
+})
+
+describe('Full code-audit regression & security hardening', () => {
+  it('blocks SSRF bypasses in sanitizePublicRelayUrl, sanitizePublicHttpsUrl, and isPublicHostname', () => {
+    expect(sanitizePublicRelayUrl('wss://relay.damus.io')).toBe('wss://relay.damus.io')
+    expect(sanitizePublicRelayUrl('ws://localhost:8080')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://localhost:8080')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://sub.localhost')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://localhost.')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://127.0.0.1:443')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://192.168.1.5')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://169.254.169.254')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://[::1]')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://router')).toBeNull()
+    expect(sanitizePublicRelayUrl('wss://0.1.2.3')).toBeNull()
+    expect(sanitizePublicHttpsUrl('https://user:pass@cdn.example.com/a.mp4')).toBeNull()
+    expect(isPublicHostname('foo.local.')).toBe(false)
+    expect(isPublicHostname('app.localhost')).toBe(false)
+    expect(isPublicHostname('[::7f00:1]')).toBe(false)
+    expect(isPublicHostname('2606:4700:4700::1111')).toBe(true)
+  })
+
+  it('rejects far-future live timestamps and normalizes uppercase chat activity refs', () => {
+    const now = 1_800_000_000
+    expect(
+      isLiveStreamFresh(
+        {
+          activity: {
+            status: 'live',
+            streamingUrl: 'https://stream.example.com/live/index.m3u8',
+            createdAt: now + 3600,
+          },
+        },
+        now,
+      ),
+    ).toBe(false)
+
+    const upperPk = 'A'.repeat(64)
+    expect(
+      getChatActivityRef({
+        kind: 1311,
+        tags: [['a', `30311:${upperPk}:show-1`]],
+      }),
+    ).toBe(`30311:${'a'.repeat(64)}:show-1`)
+    expect(getChatActivityRef({ kind: 1311, tags: [['a', '30311:not-hex:show']] })).toBeNull()
+  })
+
+  it('ignores URL #fragments in hashtags and preserves 5th+ unique YouTube links as links', () => {
+    const tags = extractEventHashtags({
+      content: 'Read https://example.com/docs#section123 #Bitcoin',
+      tags: [],
+    })
+    expect(tags).toEqual(['bitcoin'])
+
+    const fiveYt = [
+      'https://youtu.be/aaaaaaaaaaa',
+      'https://youtu.be/bbbbbbbbbbb',
+      'https://youtu.be/ccccccccccc',
+      'https://youtu.be/ddddddddddd',
+      'https://youtu.be/eeeeeeeeeee',
+    ].join(' ')
+    const parsed = parseNoteContent({ content: fiveYt, tags: [] })
+    expect(parsed.youtube).toHaveLength(4)
+    expect(parsed.segments.some((s) => s.type === 'link' && s.url.includes('eeeeeeeeeee'))).toBe(
+      true,
+    )
+  })
+
+  it('prevents forged pre-load NIP-09 kind-5 deletions by non-authors', () => {
+    const victimSk = generateSecretKey()
+    const attackerSk = generateSecretKey()
+    const victimNote = finalizeEvent(
+      { kind: 1, created_at: 1_800_000_000, tags: [], content: 'Legitimate note' },
+      victimSk,
+    )
+    // Attacker broadcasts forged kind-5 BEFORE victimNote is even loaded in store
+    const forgedDel = finalizeEvent(
+      { kind: 5, created_at: 1_800_000_001, tags: [['e', victimNote.id]], content: '' },
+      attackerSk,
+    )
+    const store = useNostrStore.getState()
+    store.ingestEvent(forgedDel)
+    expect(store.isEventDeleted(victimNote)).toBe(false)
+
+    // Genuine author deletion DOES mark victimNote deleted
+    const realDel = finalizeEvent(
+      { kind: 5, created_at: 1_800_000_002, tags: [['e', victimNote.id]], content: '' },
+      victimSk,
+    )
+    store.ingestEvent(realDel)
+    expect(store.isEventDeleted(victimNote)).toBe(true)
   })
 })

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Volume2, VolumeX } from 'lucide-react'
+import { createSafeHlsConfig } from '../lib/nostr/hlsSafe'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 
 export type HoverPreviewStatus = 'connecting' | 'playing' | 'audio-only' | 'error'
 
@@ -11,8 +13,9 @@ interface LiveHoverPreviewProps {
 
 /**
  * Lightweight muted live-stream preview mounted only while hovering a stream card.
- * Uses lowest starting HLS bitrate capped to the preview box and tears down
- * immediately on mouse leave so zero background streams linger.
+ * Uses lowest starting HLS bitrate capped to the preview box, validates every
+ * manifest/segment URL against public HTTPS SSRF guards, and tears down cleanly
+ * on mouse leave or timeout.
  */
 export function LiveHoverPreview({
   streamUrl,
@@ -20,27 +23,52 @@ export function LiveHoverPreview({
   onStatusChange,
 }: LiveHoverPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const onStatusChangeRef = useRef(onStatusChange)
+  onStatusChangeRef.current = onStatusChange
+
   const [status, setStatus] = useState<HoverPreviewStatus>('connecting')
   const [muted, setMuted] = useState(true)
 
   const updateStatus = (next: HoverPreviewStatus) => {
     setStatus(next)
-    onStatusChange?.(next)
+    onStatusChangeRef.current?.(next)
   }
 
   useEffect(() => {
     const video = videoRef.current
-    if (!video || !streamUrl.startsWith('https://')) {
+    const safeUrl = sanitizePublicHttpsUrl(streamUrl)
+    setMuted(true)
+    if (!video || !safeUrl) {
       updateStatus('error')
       return
     }
 
     let destroyed = false
     let hlsInstance: { destroy: () => void } | null = null
-    updateStatus('connecting')
+    let mediaRecoveryAttempts = 0
+    let nativeCanPlay: (() => void) | null = null
+    let nativeErr: (() => void) | null = null
+
+    const teardown = () => {
+      destroyed = true
+      clearTimeout(timeout)
+      video.removeEventListener('playing', markPlaying)
+      video.removeEventListener('loadeddata', onResize)
+      video.removeEventListener('resize', onResize)
+      if (nativeCanPlay) video.removeEventListener('canplay', nativeCanPlay)
+      if (nativeErr) video.removeEventListener('error', nativeErr)
+      if (hlsInstance) {
+        hlsInstance.destroy()
+        hlsInstance = null
+      }
+      video.pause()
+      video.removeAttribute('src')
+      video.load()
+    }
 
     const markPlaying = () => {
       if (destroyed) return
+      clearTimeout(timeout)
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         updateStatus('playing')
       } else {
@@ -50,10 +78,21 @@ export function LiveHoverPreview({
 
     const onResize = () => {
       if (!destroyed && video.videoWidth > 0 && video.videoHeight > 0) {
+        clearTimeout(timeout)
         updateStatus('playing')
       }
     }
 
+    const safePlay = () => {
+      void video.play().catch((err: unknown) => {
+        if (destroyed) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        teardown()
+        updateStatus('error')
+      })
+    }
+
+    updateStatus('connecting')
     video.muted = true
     video.addEventListener('playing', markPlaying)
     video.addEventListener('loadeddata', onResize)
@@ -61,86 +100,74 @@ export function LiveHoverPreview({
 
     const timeout = setTimeout(() => {
       if (!destroyed && video.readyState < 2) {
-        hlsInstance?.destroy()
-        hlsInstance = null
+        teardown()
         updateStatus('error')
       }
     }, 8000)
 
-    const isHls = /\.m3u8(\?.*)?$/i.test(streamUrl) || streamUrl.includes('/hls/')
+    const isHls = /\.m3u8(\?.*)?$/i.test(safeUrl) || safeUrl.includes('/hls/')
 
     void (async () => {
       if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
         try {
           const { default: Hls } = await import('hls.js')
           if (destroyed || !Hls.isSupported()) {
-            if (!destroyed) updateStatus('error')
+            if (!destroyed) {
+              teardown()
+              updateStatus('error')
+            }
             return
           }
-          const hls = new Hls({
-            enableWorker: false,
-            lowLatencyMode: true,
-            startLevel: 0,
-            capLevelToPlayerSize: true,
-            maxBufferLength: 6,
-            maxMaxBufferLength: 10,
-            backBufferLength: 0,
-          })
+          const hls = new Hls(
+            createSafeHlsConfig(Hls, {
+              lowLatencyMode: true,
+              startLevel: 0,
+              capLevelToPlayerSize: true,
+              maxBufferLength: 6,
+              maxMaxBufferLength: 10,
+              backBufferLength: 0,
+            }),
+          )
           hlsInstance = hls
-          hls.loadSource(streamUrl)
+          hls.loadSource(safeUrl)
           hls.attachMedia(video)
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             if (destroyed) return
-            void video.play().catch(() => {
-              if (!destroyed) updateStatus('error')
-            })
+            safePlay()
           })
           hls.on(Hls.Events.ERROR, (_evt, data) => {
-            if (destroyed) return
-            if (data.fatal) {
-              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                hls.recoverMediaError()
-              } else {
-                hls.destroy()
-                hlsInstance = null
-                updateStatus('error')
-              }
+            if (destroyed || !data.fatal) return
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryAttempts < 1) {
+              mediaRecoveryAttempts++
+              hls.recoverMediaError()
+              return
             }
+            teardown()
+            updateStatus('error')
           })
         } catch {
-          if (!destroyed) updateStatus('error')
+          if (!destroyed) {
+            teardown()
+            updateStatus('error')
+          }
         }
       } else {
-        video.src = streamUrl
-        const onCanPlay = () => {
+        video.src = safeUrl
+        nativeCanPlay = () => {
           if (destroyed) return
-          void video.play().catch(() => {
-            if (!destroyed) updateStatus('error')
-          })
+          safePlay()
         }
-        const onErr = () => {
-          if (!destroyed) updateStatus('error')
+        nativeErr = () => {
+          if (destroyed) return
+          teardown()
+          updateStatus('error')
         }
-        video.addEventListener('canplay', onCanPlay, { once: true })
-        video.addEventListener('error', onErr, { once: true })
+        video.addEventListener('canplay', nativeCanPlay, { once: true })
+        video.addEventListener('error', nativeErr, { once: true })
       }
     })()
 
-    return () => {
-      destroyed = true
-      clearTimeout(timeout)
-      video.removeEventListener('playing', markPlaying)
-      video.removeEventListener('loadeddata', onResize)
-      video.removeEventListener('resize', onResize)
-      if (hlsInstance) {
-        hlsInstance.destroy()
-        hlsInstance = null
-      }
-      video.pause()
-      video.removeAttribute('src')
-      video.load()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return teardown
   }, [streamUrl])
 
   const toggleMute = (e: React.MouseEvent) => {
@@ -161,7 +188,6 @@ export function LiveHoverPreview({
       <video
         ref={videoRef}
         muted={muted}
-        autoPlay
         playsInline
         className={`absolute inset-0 w-full h-full object-cover bg-black transition-opacity duration-200 pointer-events-none ${
           status === 'playing' ? 'opacity-100' : 'opacity-0'
