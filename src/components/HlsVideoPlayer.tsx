@@ -6,6 +6,7 @@ interface HlsVideoPlayerProps {
   posterUrl?: string
   title?: string
   isLive?: boolean
+  onStreamOffline?: () => void
 }
 
 export function HlsVideoPlayer({
@@ -13,6 +14,7 @@ export function HlsVideoPlayer({
   posterUrl,
   title,
   isLive = true,
+  onStreamOffline,
 }: HlsVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [started, setStarted] = useState(false)
@@ -73,7 +75,8 @@ export function HlsVideoPlayer({
             if (destroyed) return
             if (data.fatal) {
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                setError('Stream unreachable or offline. Click Retry to reconnect.')
+                setError('Stream appears offline or unreachable. Click Retry to reconnect.')
+                if (isLive) onStreamOffline?.()
               } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 hls.recoverMediaError()
                 return
@@ -102,6 +105,7 @@ export function HlsVideoPlayer({
           if (!destroyed) {
             setError('Stream could not be loaded. It may be offline.')
             setBuffering(false)
+            if (isLive) onStreamOffline?.()
           }
         }
         video.addEventListener('canplay', onCanPlay, { once: true })

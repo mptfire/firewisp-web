@@ -4,10 +4,12 @@ import { nostrPool } from '../nostr/pool'
 import {
   buildLiveATag,
   getChatActivityRef,
+  isPlayableStreamUrl,
   KIND_LIVE_ACTIVITY,
   KIND_LIVE_CHAT_MESSAGE,
   LIVE_DISCOVERY_RELAYS,
   parseLiveActivity,
+  shouldAcceptLiveActivityUpdate,
   type LiveActivity,
 } from '../nostr/nip53'
 import { sanitizeRelayUrl } from '../sanitize'
@@ -45,6 +47,7 @@ interface LiveState {
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
+  markStreamOffline: (aTag: string) => void
   subscribeActiveStream: (
     hostPubkey: string,
     dTag: string,
@@ -61,6 +64,7 @@ interface LiveState {
 
 const pendingChatters = new Map<string, Set<string>>()
 const pendingChatAt = new Map<string, number>()
+const latestActivitySeen = new Map<string, { createdAt: number; status: string }>()
 const fetchedFollowerPubkeys = new Set<string>()
 const NIP45_COUNT_RELAYS = ['wss://relay.primal.net', 'wss://nos.lol']
 
@@ -166,10 +170,32 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     }
   },
 
+  markStreamOffline: (aTag) => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const prevSeen = latestActivitySeen.get(aTag)
+    latestActivitySeen.set(aTag, {
+      createdAt: Math.max(prevSeen?.createdAt || 0, nowSec),
+      status: 'ended',
+    })
+    set((s) => {
+      const next = { ...s.liveStreams }
+      delete next[aTag]
+      return {
+        liveStreams: next,
+        activeActivity:
+          s.activeATag === aTag && s.activeActivity
+            ? { ...s.activeActivity, status: 'ended' }
+            : s.activeActivity,
+      }
+    })
+  },
+
   subscribeLiveDiscovery: () => {
     const readRelays = useSettingsStore.getState().getReadRelays()
     const relays = [...new Set([...LIVE_DISCOVERY_RELAYS, ...readRelays])].slice(0, 8)
-    const since = Math.floor(Date.now() / 1000) - 3600
+    const nowSec = Math.floor(Date.now() / 1000)
+    const since = nowSec - 3600
+    const activitySince = nowSec - 12 * 3600
 
     const profileBatch = new Set<string>()
     let profileTimer: ReturnType<typeof setTimeout> | null = null
@@ -190,20 +216,29 @@ export const useLiveStore = create<LiveState>((set, get) => ({
 
     const subActivities = nostrPool.subscribe(
       relays,
-      { kinds: [KIND_LIVE_ACTIVITY], limit: 60 },
+      { kinds: [KIND_LIVE_ACTIVITY], since: activitySince, limit: 80 },
       {
         onevent: (ev: Event) => {
           const activity = parseLiveActivity(ev)
           if (!activity) return
           const aTag = buildLiveATag(activity.hostPubkey, activity.dTag)
 
+          // Tombstone check: never let an older `live` event from a lagging relay override a newer `ended` event
+          const prevSeen = latestActivitySeen.get(aTag)
+          if (!shouldAcceptLiveActivityUpdate(prevSeen, activity)) {
+            return
+          }
+          latestActivitySeen.set(aTag, {
+            createdAt: activity.createdAt,
+            status: activity.status || '',
+          })
+
           set((s) => {
             const existing = s.liveStreams[aTag]
-            if (existing && existing.activity.createdAt > activity.createdAt) {
-              return s
-            }
             if (activity.status !== 'live') {
-              if (!existing) return s
+              if (!existing) {
+                return s.activeATag === aTag ? { activeActivity: activity } : s
+              }
               const next = { ...s.liveStreams }
               delete next[aTag]
               return {
@@ -211,7 +246,10 @@ export const useLiveStore = create<LiveState>((set, get) => ({
                 activeActivity: s.activeATag === aTag ? activity : s.activeActivity,
               }
             }
-            if (!activity.streamingUrl) return s
+            if (!isPlayableStreamUrl(activity.streamingUrl)) return s
+            if (activity.ends && activity.ends > 0 && activity.ends <= Math.floor(Date.now() / 1000)) {
+              return s
+            }
 
             const pChatters = pendingChatters.get(aTag)
             const pAt = pendingChatAt.get(aTag) || 0

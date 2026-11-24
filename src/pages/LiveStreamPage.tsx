@@ -394,6 +394,7 @@ export function LiveStreamPage() {
   const loadingStream = useLiveStore((s) => s.loadingStream)
   const subscribeActiveStream = useLiveStore((s) => s.subscribeActiveStream)
   const sendChatMessage = useLiveStore((s) => s.sendChatMessage)
+  const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
 
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
@@ -606,6 +607,7 @@ export function LiveStreamPage() {
                 posterUrl={activeActivity?.image}
                 title={activeActivity?.title}
                 isLive={isLive}
+                onStreamOffline={() => markStreamOffline(aTag)}
               />
             ) : (
               <div className="w-full aspect-video rounded-xl bg-[#15161c] border border-[#232530] flex flex-col items-center justify-center p-6 text-center gap-2">

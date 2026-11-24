@@ -23,6 +23,8 @@ export interface LiveActivity {
   status?: 'live' | 'planned' | 'ended' | string
   streamingUrl?: string
   recordingUrl?: string
+  starts?: number
+  ends?: number
   currentParticipants?: number
   participants: Array<{ pubkey: string; role?: string }>
   relayHints: string[]
@@ -56,6 +58,14 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
   const rawCount = getTag('current_participants')
   const parsedCount = rawCount ? parseInt(rawCount, 10) : NaN
   const currentParticipants = Number.isFinite(parsedCount) && parsedCount >= 0 ? parsedCount : undefined
+
+  const rawStarts = getTag('starts')
+  const parsedStarts = rawStarts ? parseInt(rawStarts, 10) : NaN
+  const starts = Number.isFinite(parsedStarts) && parsedStarts > 0 ? parsedStarts : undefined
+
+  const rawEnds = getTag('ends')
+  const parsedEnds = rawEnds ? parseInt(rawEnds, 10) : NaN
+  const ends = Number.isFinite(parsedEnds) && parsedEnds > 0 ? parsedEnds : undefined
 
   const participants: Array<{ pubkey: string; role?: string }> = []
   let streamerPubkey: string | undefined
@@ -94,6 +104,8 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
     status,
     streamingUrl,
     recordingUrl,
+    starts,
+    ends,
     currentParticipants,
     participants,
     relayHints: relayHints.slice(0, 8),
@@ -145,6 +157,90 @@ export function decodeLiveNaddr(raw: string): {
 export interface RankableLiveStream {
   activity: Pick<LiveActivity, 'hostPubkey' | 'streamerPubkey' | 'currentParticipants' | 'createdAt'>
   chatters: string[]
+}
+
+export interface FreshnessLiveStream {
+  activity: Pick<LiveActivity, 'status' | 'streamingUrl' | 'ends' | 'createdAt'>
+  chatters?: string[]
+  lastChatAt?: number
+}
+
+const NON_STREAM_HOSTS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'twitch.tv',
+  'www.twitch.tv',
+  'x.com',
+  'twitter.com',
+  'kick.com',
+  'www.kick.com',
+  'rumble.com',
+  'njump.me',
+  'nostr.com',
+])
+
+/**
+ * Rejects obvious HTML webpage URLs placed in NIP-53 `streaming` tags that cannot play in HLS/video players.
+ */
+export function isPlayableStreamUrl(rawUrl?: string | null): boolean {
+  if (!rawUrl) return false
+  const safe = sanitizePublicHttpsUrl(rawUrl)
+  if (!safe) return false
+  try {
+    const u = new URL(safe)
+    const host = u.hostname.toLowerCase()
+    if (NON_STREAM_HOSTS.has(host)) return false
+    if (/\.(html?|php|asp|aspx)$/i.test(u.pathname)) return false
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Tombstone-aware comparison so an older `live` event from a lagging relay can never resurrect
+ * a stream after a newer (or same-second) `ended` / `planned` event has already been observed.
+ */
+export function shouldAcceptLiveActivityUpdate(
+  existing: { createdAt: number; status?: string } | undefined,
+  incoming: { createdAt: number; status?: string },
+): boolean {
+  if (!existing) return true
+  if (incoming.createdAt > existing.createdAt) return true
+  if (incoming.createdAt < existing.createdAt) return false
+  // Equal timestamp tie-breaker: non-live (ended/planned) beats live
+  return existing.status === 'live' && incoming.status !== 'live'
+}
+
+export const LIVE_HEARTBEAT_MAX_AGE_SEC = 2 * 3600
+export const LIVE_CHAT_GRACE_MAX_AGE_SEC = 3 * 3600
+export const LIVE_RECENT_CHAT_WINDOW_SEC = 30 * 60
+
+/**
+ * Zero-privacy-leak liveness gate: checks NIP-53 status, playable HTTPS URL, `ends` expiry,
+ * and heartbeat freshness (2h default, or 3h if chat was active within the last 30 min).
+ */
+export function isLiveStreamFresh(
+  stream: FreshnessLiveStream,
+  nowSec = Math.floor(Date.now() / 1000),
+): boolean {
+  const { activity } = stream
+  if (activity.status !== 'live') return false
+  if (!isPlayableStreamUrl(activity.streamingUrl)) return false
+  if (activity.ends && activity.ends > 0 && activity.ends <= nowSec) return false
+
+  const ageSec = nowSec - activity.createdAt
+  if (ageSec <= LIVE_HEARTBEAT_MAX_AGE_SEC) return true
+  if (
+    ageSec <= LIVE_CHAT_GRACE_MAX_AGE_SEC &&
+    stream.lastChatAt &&
+    nowSec - stream.lastChatAt <= LIVE_RECENT_CHAT_WINDOW_SEC
+  ) {
+    return true
+  }
+  return false
 }
 
 export function isStreamFollowed(

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Play, Radio } from 'lucide-react'
 import {
   encodeLiveNaddr,
   getStreamPrimaryPubkey,
+  isLiveStreamFresh,
   isStreamFollowed,
   sortLiveStreams,
 } from '../lib/nostr/nip53'
@@ -143,6 +144,13 @@ export function LiveNowRow() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
+
+  // Periodically prune stale/expired streams while the tab stays open
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   const followSet = useMemo(
     () => new Set(follows.map((p) => p.toLowerCase())),
@@ -150,18 +158,16 @@ export function LiveNowRow() {
   )
 
   const activeStreams = useMemo(() => {
-    const cutoff = Math.floor(Date.now() / 1000) - 6 * 3600
     const filtered = Object.values(liveStreams).filter((s) => {
-      if (s.activity.status !== 'live' || !s.activity.streamingUrl) return false
+      if (!isLiveStreamFresh(s, nowSec)) return false
       const hostPk = getStreamPrimaryPubkey(s.activity)
       if (mutedPubkeys.includes(hostPk) || mutedPubkeys.includes(s.activity.hostPubkey)) {
         return false
       }
-      // Match Wisp Android: surface streams with active chatters or freshly started within 6h
-      return s.chatters.length > 0 || s.activity.createdAt >= cutoff
+      return true
     })
     return sortLiveStreams(filtered, followSet, followerCounts).slice(0, 15)
-  }, [liveStreams, mutedPubkeys, followSet, followerCounts])
+  }, [liveStreams, mutedPubkeys, followSet, followerCounts, nowSec])
 
   const updateScrollArrows = () => {
     const el = scrollRef.current

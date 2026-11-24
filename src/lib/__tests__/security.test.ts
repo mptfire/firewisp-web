@@ -31,7 +31,10 @@ import {
   buildLiveATag,
   decodeLiveNaddr,
   encodeLiveNaddr,
+  isLiveStreamFresh,
+  isPlayableStreamUrl,
   parseLiveActivity,
+  shouldAcceptLiveActivityUpdate,
   sortLiveStreams,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
@@ -603,6 +606,74 @@ describe('NIP-53 live streaming parser & security guards', () => {
       'stranger-huge',
       'stranger-mid',
     ])
+  })
+
+  it('hardens live stream liveness with tombstones, ends expiry, heartbeat cutoffs, and URL validation', () => {
+    const now = 1_800_000_000
+
+    // Ended tombstone blocks older or equal-timestamp live event from lagging relays
+    expect(
+      shouldAcceptLiveActivityUpdate(
+        { createdAt: now - 10, status: 'ended' },
+        { createdAt: now - 120, status: 'live' },
+      ),
+    ).toBe(false)
+    expect(
+      shouldAcceptLiveActivityUpdate(
+        { createdAt: now - 10, status: 'ended' },
+        { createdAt: now - 10, status: 'live' },
+      ),
+    ).toBe(false)
+    expect(
+      shouldAcceptLiveActivityUpdate(
+        { createdAt: now - 120, status: 'ended' },
+        { createdAt: now - 10, status: 'live' },
+      ),
+    ).toBe(true)
+
+    // Rejects non-stream web pages while keeping real HTTPS HLS URLs
+    expect(isPlayableStreamUrl('https://api-uk.zap.stream/abc/hls/live.m3u8')).toBe(true)
+    expect(isPlayableStreamUrl('https://youtu.be/20t-IZZztOk')).toBe(false)
+    expect(isPlayableStreamUrl('https://www.twitch.tv/someone')).toBe(false)
+    expect(isPlayableStreamUrl('https://example.com/watch.html')).toBe(false)
+
+    const baseActivity = {
+      hostPubkey: 'a'.repeat(64),
+      status: 'live' as const,
+      streamingUrl: 'https://cdn.example/live.m3u8',
+      createdAt: now - 600,
+    }
+    expect(isLiveStreamFresh({ activity: baseActivity, chatters: [] }, now)).toBe(true)
+    // Past `ends` tag -> not live
+    expect(
+      isLiveStreamFresh({ activity: { ...baseActivity, ends: now - 5 }, chatters: [] }, now),
+    ).toBe(false)
+    // >2h stale with no recent chat -> dropped
+    expect(
+      isLiveStreamFresh({ activity: { ...baseActivity, createdAt: now - 2.5 * 3600 }, chatters: [] }, now),
+    ).toBe(false)
+    // 2.5h old BUT active chat 10m ago -> kept within 3h grace
+    expect(
+      isLiveStreamFresh(
+        {
+          activity: { ...baseActivity, createdAt: now - 2.5 * 3600 },
+          chatters: ['b'.repeat(64)],
+          lastChatAt: now - 600,
+        },
+        now,
+      ),
+    ).toBe(true)
+    // >3h old -> dropped even if someone dropped a stray chat message
+    expect(
+      isLiveStreamFresh(
+        {
+          activity: { ...baseActivity, createdAt: now - 4 * 3600 },
+          chatters: ['b'.repeat(64)],
+          lastChatAt: now - 60,
+        },
+        now,
+      ),
+    ).toBe(false)
   })
 })
 
