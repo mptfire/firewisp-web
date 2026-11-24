@@ -2,10 +2,16 @@ import { create } from 'zustand'
 import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
-import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, FIREWISP_RELAY, TRENDING_RELAY } from '../constants'
+import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, DEFAULT_RELAYS, FIREWISP_RELAY, TRENDING_RELAY, type RelayEntry } from '../constants'
 import { sanitizePublicRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
+import {
+  buildBud03BlossomListTags,
+  buildNip65RelayListTags,
+  KIND_BLOSSOM_SERVER_LIST,
+  KIND_RELAY_LIST,
+} from '../nostr/lists'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
@@ -153,6 +159,16 @@ export interface NostrState {
   toggleRepost: (target: Event) => Promise<void>
   toggleFollow: (targetPubkey: string) => Promise<void>
   toggleBookmark: (eventId: string) => Promise<void>
+  publishRelayList: (relays: RelayEntry[]) => Promise<{
+    okCount: number
+    totalRelays: number
+    publishedCount: number
+  }>
+  publishBlossomList: (servers: string[]) => Promise<{
+    okCount: number
+    totalRelays: number
+    publishedCount: number
+  }>
   sendDm: (recipientPubkey: string, plaintext: string) => Promise<DecryptedDm>
 
   isEventMuted: (event: Event) => boolean
@@ -1736,6 +1752,77 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         // Local bookmark still saved
       }
     }
+  },
+
+  publishRelayList: async (relays) => {
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useAuthStore.getState().openAuthModal()
+      throw new Error('Sign in with a signing method (NIP-07, Bunker, or key) to publish your relay list')
+    }
+    const { tags, readRelays, writeRelays } = buildNip65RelayListTags(relays)
+    if (tags.length === 0) {
+      throw new Error('Add at least one public wss:// relay with Read or Write enabled')
+    }
+    const signed = await signer.signEvent({
+      kind: KIND_RELAY_LIST,
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+      content: '',
+    })
+    const targets = [
+      ...new Set([
+        ...writeRelays,
+        ...get().userWriteRelays,
+        ...useSettingsStore.getState().getWriteRelays(),
+        ...DEFAULT_RELAYS.map((r) => r.url),
+      ]),
+    ].slice(0, 14)
+    const results = await nostrPool.publish(targets, signed)
+    const okCount = results.filter((r) => r.ok).length
+    if (okCount === 0) {
+      throw new Error('Could not publish relay list to any relay — check your connection and try again')
+    }
+    set({
+      userReadRelays: readRelays,
+      userWriteRelays: writeRelays,
+      toastMessage: `Published ${tags.length} relays (NIP-65) to ${okCount}/${targets.length} relays`,
+    })
+    return { okCount, totalRelays: targets.length, publishedCount: tags.length }
+  },
+
+  publishBlossomList: async (servers) => {
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useAuthStore.getState().openAuthModal()
+      throw new Error('Sign in with a signing method (NIP-07, Bunker, or key) to publish your Blossom list')
+    }
+    const { tags, servers: cleanServers } = buildBud03BlossomListTags(servers)
+    if (tags.length === 0) {
+      throw new Error('Add at least one public https:// Blossom server first')
+    }
+    const signed = await signer.signEvent({
+      kind: KIND_BLOSSOM_SERVER_LIST,
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+      content: '',
+    })
+    const targets = [
+      ...new Set([
+        ...get().userWriteRelays,
+        ...useSettingsStore.getState().getWriteRelays(),
+        ...DEFAULT_RELAYS.map((r) => r.url),
+      ]),
+    ].slice(0, 12)
+    const results = await nostrPool.publish(targets, signed)
+    const okCount = results.filter((r) => r.ok).length
+    if (okCount === 0) {
+      throw new Error('Could not publish Blossom list to any relay — check your connection and try again')
+    }
+    set({
+      toastMessage: `Published ${cleanServers.length} Blossom ${cleanServers.length === 1 ? 'server' : 'servers'} (BUD-03) to ${okCount}/${targets.length} relays`,
+    })
+    return { okCount, totalRelays: targets.length, publishedCount: cleanServers.length }
   },
 
   sendDm: async (recipientPubkey, plaintext) => {

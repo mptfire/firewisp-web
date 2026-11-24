@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
@@ -14,11 +14,16 @@ import {
   RotateCcw,
   Copy,
   Check,
+  ArrowUp,
+  Download,
+  Loader2,
+  Send,
 } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
+import { sanitizePublicRelayUrl } from '../lib/sanitize'
 
 export function SettingsPage() {
   const settings = useSettingsStore()
@@ -27,7 +32,10 @@ export function SettingsPage() {
   const userWriteRelays = useNostrStore((s) => s.userWriteRelays)
   const profiles = useNostrStore((s) => s.profiles)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
+  const publishRelayList = useNostrStore((s) => s.publishRelayList)
+  const publishBlossomList = useNostrStore((s) => s.publishBlossomList)
   const signer = useAuthStore((s) => s.signer)
+  const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const hasVault = useAuthStore((s) => s.hasEncryptedVault)
   const exportNcryptsec = useAuthStore((s) => s.exportNcryptsec)
   const clearEncryptedVault = useAuthStore((s) => s.clearEncryptedVault)
@@ -39,6 +47,27 @@ export function SettingsPage() {
   const [mutedTagsOpen, setMutedTagsOpen] = useState(false)
   const [nwcInput, setNwcInput] = useState(settings.nwcUri)
   const [nwcStatus, setNwcStatus] = useState<string | null>(null)
+  const [publishingRelays, setPublishingRelays] = useState(false)
+  const [relayPublishStatus, setRelayPublishStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [confirmRelayDrop, setConfirmRelayDrop] = useState(false)
+  const [publishingBlossom, setPublishingBlossom] = useState(false)
+  const [blossomPublishStatus, setBlossomPublishStatus] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const syncedNip65Relays = useMemo(
+    () => [...new Set([...userReadRelays, ...userWriteRelays])],
+    [userReadRelays, userWriteRelays],
+  )
+  const missingNip65Relays = useMemo(() => {
+    const localSet = new Set(
+      settings.relays
+        .map((r) => sanitizePublicRelayUrl(r.url))
+        .filter((u): u is string => Boolean(u)),
+    )
+    return syncedNip65Relays.filter((url) => {
+      const clean = sanitizePublicRelayUrl(url)
+      return clean ? !localSet.has(clean) : false
+    })
+  }, [settings.relays, syncedNip65Relays])
 
   useEffect(() => {
     setNwcInput(settings.nwcUri)
@@ -252,7 +281,10 @@ export function SettingsPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (settings.addRelay(newRelay)) setNewRelay('')
+            if (settings.addRelay(newRelay)) {
+              setNewRelay('')
+              setConfirmRelayDrop(false)
+            }
           }}
           className="flex gap-2"
         >
@@ -271,15 +303,133 @@ export function SettingsPage() {
           </button>
         </form>
 
-        {(userReadRelays.length > 0 || userWriteRelays.length > 0) && (
-          <div className="pt-2 space-y-1.5">
-            <div className="text-[11px] font-medium text-[#9a9890] flex items-center justify-between">
-              <span>Synced from your Nostr NIP-65 list (kind 10002)</span>
-              <span className="text-[10px] text-[#6f6d66]">
-                {new Set([...userReadRelays, ...userWriteRelays]).size} relays
+        {/* Publish NIP-65 Relay List (kind 10002) */}
+        <div className="pt-1 space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] text-[#8c8a82]">
+              Broadcast your relay list to Nostr so all clients sync your Read/Write relays (NIP-65).
+            </span>
+            <button
+              type="button"
+              disabled={publishingRelays}
+              onClick={async () => {
+                if (!signer?.canSign) {
+                  openAuthModal()
+                  return
+                }
+                if (missingNip65Relays.length > 0 && !confirmRelayDrop) {
+                  setConfirmRelayDrop(true)
+                  return
+                }
+                setConfirmRelayDrop(false)
+                setRelayPublishStatus(null)
+                setPublishingRelays(true)
+                try {
+                  const res = await publishRelayList(settings.relays)
+                  setRelayPublishStatus({
+                    ok: true,
+                    text: `Published ${res.publishedCount} relays (kind 10002) to ${res.okCount}/${res.totalRelays} relays.`,
+                  })
+                } catch (err) {
+                  setRelayPublishStatus({
+                    ok: false,
+                    text: err instanceof Error ? err.message : 'Failed to publish relay list',
+                  })
+                } finally {
+                  setPublishingRelays(false)
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+            >
+              {publishingRelays ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              {publishingRelays
+                ? 'Publishing…'
+                : confirmRelayDrop
+                  ? 'Confirm Replace NIP-65'
+                  : 'Publish to Nostr (kind 10002)'}
+            </button>
+          </div>
+
+          {confirmRelayDrop && missingNip65Relays.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/35 text-xs text-amber-200 flex items-center justify-between gap-2 flex-wrap">
+              <span>
+                Your current Nostr NIP-65 list has {missingNip65Relays.length} extra{' '}
+                {missingNip65Relays.length === 1 ? 'relay' : 'relays'} not in the editor above. Load them first or click Confirm to replace.
               </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    settings.importRelays(
+                      syncedNip65Relays.map((url) => ({
+                        url,
+                        read: userReadRelays.includes(url),
+                        write: userWriteRelays.includes(url),
+                      })),
+                    )
+                    setConfirmRelayDrop(false)
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-100 font-semibold cursor-pointer"
+                >
+                  Load NIP-65 first
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmRelayDrop(false)}
+                  className="px-2 py-1 rounded-lg bg-[#1d1f29] text-[#c2bfb7] hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-            {[...new Set([...userReadRelays, ...userWriteRelays])].map((url) => {
+          )}
+
+          {relayPublishStatus && (
+            <p
+              className={`text-xs ${
+                relayPublishStatus.ok ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {relayPublishStatus.text}
+            </p>
+          )}
+        </div>
+
+        {syncedNip65Relays.length > 0 && (
+          <div className="pt-2 space-y-1.5">
+            <div className="text-[11px] font-medium text-[#9a9890] flex items-center justify-between gap-2 flex-wrap">
+              <span>Synced from your Nostr NIP-65 list (kind 10002)</span>
+              <div className="flex items-center gap-2">
+                {missingNip65Relays.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      settings.importRelays(
+                        syncedNip65Relays.map((url) => ({
+                          url,
+                          read: userReadRelays.includes(url),
+                          write: userWriteRelays.includes(url),
+                        })),
+                      )
+                      setConfirmRelayDrop(false)
+                    }}
+                    className="px-2 py-0.5 rounded-lg bg-[#1b1d27] hover:bg-[#252838] border border-[#2d3042] text-[10px] font-semibold text-[#ff922b] flex items-center gap-1 cursor-pointer"
+                    title="Copy your published NIP-65 relays into the editable list above"
+                  >
+                    <Download className="w-3 h-3" />
+                    Load into editor ({missingNip65Relays.length})
+                  </button>
+                )}
+                <span className="text-[10px] text-[#6f6d66]">
+                  {syncedNip65Relays.length} relays
+                </span>
+              </div>
+            </div>
+            {syncedNip65Relays.map((url) => {
               const st = relayStatuses[url]
               const dot =
                 st === 'connected'
@@ -324,7 +474,7 @@ export function SettingsPage() {
             <UploadCloud className="w-4 h-4 text-[#f59f00]" />
             Blossom Media Servers
           </h2>
-          <span className="text-[11px] text-[#8c8a82]">Auto-synced with NIP-63 / BUD-03</span>
+          <span className="text-[11px] text-[#8c8a82]">BUD-03 (kind 10063)</span>
         </div>
         <div className="space-y-1.5">
           {settings.blossomServers.map((url, idx) => (
@@ -340,12 +490,27 @@ export function SettingsPage() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={() => settings.removeBlossomServer(url)}
-                className="p-1 text-[#7c7a72] hover:text-red-400 cursor-pointer shrink-0"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {idx > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => settings.setPrimaryBlossomServer(url)}
+                    title="Move to top as primary Blossom server"
+                    className="px-2 py-1 rounded-lg bg-[#1d1f29] hover:bg-[#262936] text-[10px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1 cursor-pointer"
+                  >
+                    <ArrowUp className="w-3 h-3 text-[#f59f00]" />
+                    Primary
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => settings.removeBlossomServer(url)}
+                  title="Remove Blossom server"
+                  className="p-1 text-[#7c7a72] hover:text-red-400 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -370,6 +535,58 @@ export function SettingsPage() {
             <Plus className="w-3.5 h-3.5" /> Add
           </button>
         </form>
+
+        {/* Publish BUD-03 Blossom Server List (kind 10063) */}
+        <div className="pt-1 space-y-1.5">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] text-[#8c8a82]">
+              Save this server order to Nostr so Fire Wisp Web, Android, and other clients use it automatically.
+            </span>
+            <button
+              type="button"
+              disabled={publishingBlossom || settings.blossomServers.length === 0}
+              onClick={async () => {
+                if (!signer?.canSign) {
+                  openAuthModal()
+                  return
+                }
+                setBlossomPublishStatus(null)
+                setPublishingBlossom(true)
+                try {
+                  const res = await publishBlossomList(settings.blossomServers)
+                  setBlossomPublishStatus({
+                    ok: true,
+                    text: `Published ${res.publishedCount} Blossom ${res.publishedCount === 1 ? 'server' : 'servers'} (kind 10063) to ${res.okCount}/${res.totalRelays} relays.`,
+                  })
+                } catch (err) {
+                  setBlossomPublishStatus({
+                    ok: false,
+                    text: err instanceof Error ? err.message : 'Failed to publish Blossom list',
+                  })
+                } finally {
+                  setPublishingBlossom(false)
+                }
+              }}
+              className="px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 shrink-0 transition cursor-pointer"
+            >
+              {publishingBlossom ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              {publishingBlossom ? 'Publishing…' : 'Publish to Nostr (kind 10063)'}
+            </button>
+          </div>
+          {blossomPublishStatus && (
+            <p
+              className={`text-xs ${
+                blossomPublishStatus.ok ? 'text-emerald-400' : 'text-red-400'
+              }`}
+            >
+              {blossomPublishStatus.text}
+            </p>
+          )}
+        </div>
       </section>
 
       {/* NIP-13 Anti-Spam PoW */}

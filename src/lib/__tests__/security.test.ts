@@ -42,6 +42,7 @@ import {
   sortLiveStreams,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
+import { buildBud03BlossomListTags, buildNip65RelayListTags } from '../nostr/lists'
 import { computeLiveZapsStats, parseLiveZapReceipt } from '../nostr/zapsFeed'
 import { parseSharedQueryParams } from '../shareTarget'
 import { useLiveStore } from '../store/useLiveStore'
@@ -1039,5 +1040,39 @@ describe('Full code-audit regression & security hardening', () => {
     expect(stats.totalSats).toBe(121)
     expect(stats.zapCount).toBe(2)
     expect(stats.zapsPerMinute).toBe(1)
+  })
+
+  it('builds canonical NIP-65 (kind 10002) and BUD-03 (kind 10063) tags while filtering private/unsafe URLs', () => {
+    const relayResult = buildNip65RelayListTags([
+      { url: 'wss://relay.mptfire.de/', read: true, write: true },
+      { url: 'wss://relay.primal.net', read: true, write: false },
+      { url: 'wss://firewisp.relay.rtard.de', read: false, write: true },
+      { url: 'wss://disabled.example.com', read: false, write: false },
+      { url: 'ws://127.0.0.1:4869', read: true, write: true }, // local Citrine must NOT leak to public NIP-65
+      { url: 'wss://relay.mptfire.de', read: true, write: true }, // duplicate
+    ])
+    expect(relayResult.tags).toEqual([
+      ['r', 'wss://relay.mptfire.de'],
+      ['r', 'wss://relay.primal.net', 'read'],
+      ['r', 'wss://firewisp.relay.rtard.de', 'write'],
+    ])
+    expect(relayResult.readRelays).toEqual(['wss://relay.mptfire.de', 'wss://relay.primal.net'])
+    expect(relayResult.writeRelays).toEqual(['wss://relay.mptfire.de', 'wss://firewisp.relay.rtard.de'])
+
+    const blossomResult = buildBud03BlossomListTags([
+      'https://blossom.mptfire.de/',
+      'https://blossom.nostr.build',
+      'http://insecure.example.com',
+      'https://192.168.1.5',
+      'https://blossom.mptfire.de',
+    ])
+    expect(blossomResult.tags).toEqual([
+      ['server', 'https://blossom.mptfire.de'],
+      ['server', 'https://blossom.nostr.build'],
+    ])
+    expect(blossomResult.servers).toEqual([
+      'https://blossom.mptfire.de',
+      'https://blossom.nostr.build',
+    ])
   })
 })

@@ -80,6 +80,7 @@ export interface SettingsState {
   addRelay: (url: string) => boolean
   removeRelay: (url: string) => void
   toggleRelayMode: (url: string, field: 'read' | 'write') => void
+  importRelays: (entries: RelayEntry[]) => number
   resetRelays: () => void
 
   addBlossomServer: (url: string) => boolean
@@ -314,6 +315,28 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       relays: s.relays.map((r) => (r.url === url ? { ...r, [field]: !r[field] } : r)),
     }))
     persist(get())
+  },
+
+  importRelays: (entries) => {
+    const current = get().relays
+    const map = new Map<string, RelayEntry>()
+    for (const r of current) map.set(r.url, { ...r })
+    let added = 0
+    for (const raw of entries) {
+      const url = sanitizeRelayUrl(raw.url)
+      if (!url) continue
+      const existing = map.get(url)
+      if (existing) {
+        existing.read = existing.read || raw.read
+        existing.write = existing.write || raw.write
+      } else {
+        map.set(url, { url, read: raw.read, write: raw.write })
+        added++
+      }
+    }
+    set({ relays: [...map.values()] })
+    persist(get())
+    return added
   },
 
   resetRelays: () => {
