@@ -42,9 +42,9 @@ import { LiveNowRow } from '../components/LiveNowRow'
 import { MediaLightbox } from '../components/MediaLightbox'
 import { ShareStreamModal } from '../components/ShareStreamModal'
 import { StreamTopZappersCard } from '../components/StreamTopZappersCard'
+import { StreamZapBar } from '../components/StreamZapBar'
 import { WatchWithModal, type WatchWithSelection } from '../components/WatchWithModal'
 import { YouTubeCard } from '../components/YouTubeCard'
-import { ZapModal } from '../components/ZapModal'
 
 // Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
 const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:\?.*)?$/i
@@ -457,7 +457,6 @@ export function LiveStreamPage() {
   }, [blossomServers])
   const [sending, setSending] = useState(false)
   const [replyTarget, setReplyTarget] = useState<LiveChatMessage | null>(null)
-  const [zapOpen, setZapOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [showOtherStreams, setShowOtherStreams] = useState(false)
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
@@ -535,7 +534,6 @@ export function LiveStreamPage() {
       setDraft('')
       setAttachments([])
       setReplyTarget(null)
-      setZapOpen(false)
       setShareOpen(false)
       setWatchWithOpen(false)
       setLightboxMedia(null)
@@ -1319,15 +1317,6 @@ export function LiveStreamPage() {
                 <Share2 className="w-3.5 h-3.5 text-[#ff922b]" />
                 Share Stream
               </button>
-              {hostProfile?.lud16 && (
-                <button
-                  onClick={() => setZapOpen(true)}
-                  className="px-3.5 py-2 rounded-xl bg-[#f59f00]/15 hover:bg-[#f59f00]/25 border border-[#f59f00]/40 text-[#f59f00] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Zap className="w-3.5 h-3.5 fill-[#f59f00]/40" />
-                  Zap Stream
-                </button>
-              )}
               {!isMe && hostPubkey && (
                 <button
                   onClick={() => void toggleFollow(hostPubkey)}
@@ -1353,6 +1342,16 @@ export function LiveStreamPage() {
             <p className="text-xs text-[#c2bfb7] leading-relaxed whitespace-pre-wrap">
               {focusedActivity.summary}
             </p>
+          )}
+
+          {hostProfile?.lud16 && (
+            <StreamZapBar
+              recipientPubkey={hostPubkey}
+              recipientName={hostName}
+              lud16={hostProfile.lud16}
+              eventId={focusedActivity?.eventId}
+              eventATag={focusedATag}
+            />
           )}
         </div>
 
@@ -1435,17 +1434,6 @@ export function LiveStreamPage() {
           viewers={focusedActivity?.currentParticipants}
           relayHint={focusedRelays[0]}
           onClose={() => setShareOpen(false)}
-        />
-      )}
-
-      {zapOpen && hostProfile?.lud16 && (
-        <ZapModal
-          recipientPubkey={hostPubkey}
-          recipientName={hostName}
-          lud16={hostProfile.lud16}
-          eventId={focusedActivity?.eventId}
-          eventATag={focusedATag}
-          onClose={() => setZapOpen(false)}
         />
       )}
 
