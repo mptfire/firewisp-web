@@ -9,12 +9,51 @@ const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u20
 const FANCY_UNICODE_RE = /[\u{1D400}-\u{1D7FF}]/gu
 
 const SPAM_PHRASE_RE =
-  /(?:\b(?:airdrop|claim\s+your\s+(?:free|reward|tokens?|btc|sats)|free\s+(?:btc|bitcoin|usdt|crypto|money)|guaranteed\s+(?:profit|returns?)|100x\s+gem|pump\s+signal|dm\s+(?:me\s+)?for\s+promo|whatsapp\s*\+?\d|casino\s+bonus|slot\s+gacor|judi\s+online|togel|betting\s+tips|double\s+your\s+(?:btc|bitcoin|sats)|send\s+\d+\s*(?:btc|sats)\s+get)\b|https?:\/\/(?:t\.me|wa\.me|tinyurl\.com|bit\.ly)\/)/i
+  /(?:\b(?:airdrop|giveaway|claim\s+your\s+(?:free|reward|tokens?|btc|eth|sats)|free\s+(?:btc|eth|bitcoin|usdt|crypto|money)|guaranteed\s+(?:profit|returns?)|100x\s+gem|pump\s+signal|dm\s+(?:me\s+)?for\s+promo|whatsapp\s*\+?\d|casino\s+bonus|slot\s+gacor|judi\s+online|togel|betting\s+tips|double\s+your\s+(?:btc|eth|bitcoin|sats)|send\s+\d+\s*(?:btc|eth|sats)\s+get)\b|https?:\/\/(?:t\.me|wa\.me|tinyurl\.com|bit\.ly)\/)/i
 
 const URL_RE = /https?:\/\/[^\s]+/gi
 
-// Machine/telemetry t-tags abused on public kind-1 feeds
+// Machine/telemetry & scam t-tags abused on public kind-1 feeds
 const MACHINE_T_TAG_RE = /^(?:relay-selftest|xvd-stat|zambo-receipt|sp_[0-9a-f]{6,}|heartbeat|nostr-test|bot-ping)$/i
+const SCAM_T_TAG_RE = /^(?:airdrop|airdrops|giveaway|giveaways|freecrypto|freebtc|freeeth|cryptogiveaway|ethgiveaway|btcgiveaway)$/i
+
+// Mixed-script homoglyph obfuscation inside a single word (e.g. "givᎬaway", "EᎢH", "livΕ", "ᎻurrΥ")
+// Detects Latin letters mixed with Greek, Cyrillic, Cherokee, Armenian, or Math Alphanumeric inside the same token.
+const LATIN_RE = /[A-Za-z]/
+const CONFUSABLE_SCRIPT_RE = /[\u0370-\u03FF\u0400-\u04FF\u0530-\u058F\u13A0-\u13FF\u{1D400}-\u{1D7FF}]/u
+
+const CONFUSABLE_MAP: Record<string, string> = {
+  // Cherokee
+  'Ꭺ': 'a', 'Ᏼ': 'b', 'Ꮯ': 'c', 'Ꭰ': 'd', 'Ꭼ': 'e', 'Ꮐ': 'g', 'Ꮋ': 'h', 'Ꭵ': 'i',
+  'Ꮷ': 'j', 'Ꮶ': 'k', 'Ꮮ': 'l', 'Ꮇ': 'm', 'Ꮎ': 'o', 'Ꮲ': 'p', 'Ꭱ': 'r', 'Ꮪ': 's',
+  'Ꭲ': 't', 'Ꮩ': 'v', 'Ꮃ': 'w', 'Ꮍ': 'y', 'Ꮓ': 'z',
+  // Greek
+  'Α': 'a', 'α': 'a', 'Β': 'b', 'Ε': 'e', 'Ζ': 'z', 'Η': 'h', 'Ι': 'i', 'Κ': 'k',
+  'Μ': 'm', 'Ν': 'n', 'Ο': 'o', 'ο': 'o', 'Ρ': 'p', 'Τ': 't', 'Υ': 'y', 'Χ': 'x',
+  // Cyrillic
+  'А': 'a', 'а': 'a', 'В': 'b', 'Е': 'e', 'е': 'e', 'К': 'k', 'к': 'k', 'М': 'm',
+  'Н': 'h', 'О': 'o', 'о': 'o', 'Р': 'p', 'р': 'p', 'С': 'c', 'с': 'c', 'Т': 't',
+  'У': 'y', 'у': 'y', 'Х': 'x', 'х': 'x', 'І': 'i', 'і': 'i', 'Ј': 'j', 'ј': 'j',
+}
+
+export function foldConfusables(text: string): string {
+  let out = ''
+  for (const ch of text) {
+    out += CONFUSABLE_MAP[ch] ?? ch
+  }
+  return out
+}
+
+export function hasMixedScriptHomoglyph(text: string): boolean {
+  const cleaned = text.replace(URL_RE, ' ')
+  const tokens = cleaned.split(/[\s.,!?:;()[\]{}"'<>|\\/@#]+/)
+  for (const tok of tokens) {
+    if (tok.length >= 2 && LATIN_RE.test(tok) && CONFUSABLE_SCRIPT_RE.test(tok)) {
+      return true
+    }
+  }
+  return false
+}
 
 // Clock / ASCII divider bots (e.g. "--------20:30--------", "✄--- 20:30 ---✄")
 const CLOCK_DIVIDER_RE = /^[\s\-_=~*✄✂─═•·:|—–]+\d{1,2}:\d{2}(?::\d{2})?[\s\-_=~*✄✂─═•·:|—–]*$/
@@ -119,10 +158,19 @@ export function evaluateNoteSpam(
     reasons.push('many hashtags')
   }
 
-  // 4. Known crypto/gambling/scam/promo spam patterns
-  if (SPAM_PHRASE_RE.test(content)) {
+  // 4. Known crypto/gambling/scam/promo spam patterns (also checked after folding homoglyphs!)
+  const foldedContent = foldConfusables(content)
+  if (hasMixedScriptHomoglyph(content)) {
+    score += 80
+    reasons.push('mixed-script homoglyph obfuscation')
+  }
+  if (SPAM_PHRASE_RE.test(content) || SPAM_PHRASE_RE.test(foldedContent)) {
     score += 75
     reasons.push('spam phrase/link')
+  }
+  if (hashtags.some((t) => SCAM_T_TAG_RE.test(t))) {
+    score += 70
+    reasons.push('scam/giveaway hashtag')
   }
 
   // 5. Link flooding

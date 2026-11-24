@@ -390,6 +390,23 @@ describe('Explore anti-spam filter (matching Android NSpam heuristics)', () => {
     expect(evaluateNoteSpam({ ...base, content: 'yWMRZStZcloNBXOYf4M9xuWRhVwfSPSM2i3PaidZA7OFjFKO7hEPFv6Ei2yd+2O13PQ1FYaVNvkD2', tags: [['t', 'xvd-stat']] }).isSpam).toBe(true)
     expect(evaluateNoteSpam({ ...base, content: '✄------------ 20:30 ------------✄', tags: [] }).isSpam).toBe(true)
 
+    // Real reported homoglyph ETH giveaway scam (note1lyu3cjpld6aet7utp38ngjsyw4ql9952c2hhvemhkkaxxkelyc8swl7tnu)
+    const realScamVerdict = evaluateNoteSpam({
+      id: 'f9391c483f6ebb95fb8b0c4f344a047541f2968ac2af766777b5ba635b3f260f',
+      pubkey: '620f89010421b149a6dfb2c92955dbffbfa6ecefb1ed3aad98740fbc1a85b0c0',
+      kind: 1,
+      content: '⚡️ 1 EᎢH givᎬaway livΕ: https://one.evmverse.cc/?ref=0oolbj\n⚡️ ᎻurrΥ up!',
+      tags: [
+        ['t', 'crypto'],
+        ['t', 'ethereum'],
+        ['t', 'airdrop'],
+        ['t', 'nostr'],
+        ['t', 'bitcoin'],
+      ],
+    })
+    expect(realScamVerdict.isSpam).toBe(true)
+    expect(realScamVerdict.reasons).toContain('mixed-script homoglyph obfuscation')
+
     // Author burst cap
     const counts = new Map<string, number>()
     expect(evaluateNoteSpam({ ...base, content: 'First post from bot' }, { authorCounts: counts, maxPerAuthor: 2 }).isSpam).toBe(false)
