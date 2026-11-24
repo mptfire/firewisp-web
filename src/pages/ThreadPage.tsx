@@ -25,6 +25,7 @@ export function ThreadPage() {
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const relays = useSettingsStore((s) => s.relays)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const readRelays = useMemo(
@@ -104,6 +105,11 @@ export function ThreadPage() {
     }
   }, [eventId])
 
+  const visibleReplies = useMemo(
+    () => replies.filter((r) => !mutedPubkeys.includes(r.pubkey.toLowerCase())),
+    [replies, mutedPubkeys],
+  )
+
   return (
     <div>
       <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3 flex items-center gap-3">
@@ -152,10 +158,10 @@ export function ThreadPage() {
       )}
 
       <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#8c8a82] border-b border-[#20222c]">
-        Replies ({replies.length})
+        Replies ({visibleReplies.length})
       </div>
 
-      {replies.map((r) => (
+      {visibleReplies.map((r) => (
         <NoteCard key={r.id} event={r} hideParentPreview />
       ))}
     </div>

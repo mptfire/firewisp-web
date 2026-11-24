@@ -14,6 +14,7 @@ export function SearchPage() {
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const relays = useSettingsStore((s) => s.relays)
   const readRelays = useMemo(
     () => relays.filter((r) => r.read).map((r) => r.url),
@@ -94,6 +95,11 @@ export function SearchPage() {
     }
   }, [initialQ])
 
+  const visibleResults = useMemo(
+    () => results.filter((e) => !mutedPubkeys.includes(e.pubkey.toLowerCase())),
+    [results, mutedPubkeys],
+  )
+
   return (
     <div>
       <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] p-4">
@@ -132,14 +138,14 @@ export function SearchPage() {
         <div className="py-16 flex justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-[#e8590c]" />
         </div>
-      ) : results.length === 0 ? (
+      ) : visibleResults.length === 0 ? (
         <div className="p-10 text-center text-sm text-[#8c8a82]">
           Try searching a hashtag like <span className="text-[#f59f00]">#nostr</span> or{' '}
           <span className="text-[#f59f00]">#bitcoin</span>, or paste any <code>npub1</code> /{' '}
           <code>note1</code>.
         </div>
       ) : (
-        results.map((ev) => <NoteCard key={ev.id} event={ev} />)
+        visibleResults.map((ev) => <NoteCard key={ev.id} event={ev} />)
       )}
     </div>
   )

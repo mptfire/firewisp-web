@@ -558,6 +558,10 @@ export const NoteCard = memo(function NoteCard({
   const toggleBookmark = useNostrStore((s) => s.toggleBookmark)
   const myPubkey = useAuthStore((s) => s.pubkey)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
+  const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
+  const isAuthorMuted = useSettingsStore((s) =>
+    s.mutedPubkeys.includes(event.pubkey.toLowerCase()),
+  )
   const muteHashtag = useSettingsStore((s) => s.muteHashtag)
   const isMyNote = Boolean(myPubkey && myPubkey.toLowerCase() === event.pubkey.toLowerCase())
 
@@ -749,15 +753,26 @@ export const NoteCard = memo(function NoteCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    mutePubkey(event.pubkey)
-                    useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                    if (isAuthorMuted) {
+                      unmutePubkey(event.pubkey)
+                      useNostrStore.getState().setToast(`Unblocked ${displayName}`)
+                    } else {
+                      mutePubkey(event.pubkey)
+                      useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                    }
                   }}
-                  title={`Block & mute ${displayName}`}
-                  aria-label={`Block ${displayName}`}
-                  className="px-2 py-0.5 rounded-lg bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300 text-[11px] font-medium flex items-center gap-1 transition cursor-pointer"
+                  title={isAuthorMuted ? `Unblock ${displayName}` : `Block & mute ${displayName}`}
+                  aria-label={isAuthorMuted ? `Unblock ${displayName}` : `Block ${displayName}`}
+                  className={`px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                    isAuthorMuted
+                      ? 'bg-red-600/30 hover:bg-red-600/45 border-red-500/60 text-red-200'
+                      : 'bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300'
+                  }`}
                 >
                   <Ban className="w-3 h-3" />
-                  <span className="hidden sm:inline">Block User</span>
+                  <span className="hidden sm:inline">
+                    {isAuthorMuted ? 'Blocked' : 'Block User'}
+                  </span>
                 </button>
               )}
 
@@ -774,14 +789,19 @@ export const NoteCard = memo(function NoteCard({
                     {!isMyNote && (
                       <button
                         onClick={() => {
-                          mutePubkey(event.pubkey)
-                          useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                          if (isAuthorMuted) {
+                            unmutePubkey(event.pubkey)
+                            useNostrStore.getState().setToast(`Unblocked ${displayName}`)
+                          } else {
+                            mutePubkey(event.pubkey)
+                            useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                          }
                           setMenuOpen(false)
                         }}
                         className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 font-medium flex items-center gap-2 cursor-pointer"
                       >
                         <Ban className="w-3.5 h-3.5" />
-                        Block / Mute user
+                        {isAuthorMuted ? 'Unblock user' : 'Block / Mute user'}
                       </button>
                     )}
                     <button

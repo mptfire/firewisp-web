@@ -77,7 +77,7 @@ export function ProfilePage() {
 
   const isMe = Boolean(myPubkey && hexPubkey && myPubkey.toLowerCase() === hexPubkey.toLowerCase())
   const isFollowing = Boolean(hexPubkey && follows.includes(hexPubkey.toLowerCase()))
-  const isMuted = Boolean(hexPubkey && mutedPubkeys.includes(hexPubkey))
+  const isMuted = Boolean(hexPubkey && mutedPubkeys.includes(hexPubkey.toLowerCase()))
   const bannerUrl = sanitizePublicHttpsUrl(profile?.banner)
   const displayName = profile?.display_name || profile?.name || `${npub.slice(0, 14)}…`
 

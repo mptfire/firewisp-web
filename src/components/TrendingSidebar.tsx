@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
 import { useNostrStore } from '../lib/store/useNostrStore'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 
 function formatShortAge(unixSec: number): string {
@@ -37,13 +38,16 @@ function stripPreviewText(raw: string): string {
 
 function TrendingPostCard({ eventId }: { eventId: string }) {
   const ev = useNostrStore((s) => s.events[eventId])
+  const isMuted = useSettingsStore((s) =>
+    ev ? s.mutedPubkeys.includes(ev.pubkey.toLowerCase()) : false,
+  )
   const profile = useNostrStore((s) => (ev ? s.profiles[ev.pubkey] : undefined))
   const likes = useNostrStore((s) => s.reactionCounts[eventId] || 0)
   const reposts = useNostrStore((s) => s.repostCounts[eventId] || 0)
   const replies = useNostrStore((s) => s.replyCounts[eventId] || 0)
   const zapSats = useNostrStore((s) => s.zapTotalsSats[eventId] || 0)
 
-  if (!ev) return null
+  if (!ev || isMuted) return null
 
   const authorName = profile?.display_name || profile?.name || `${ev.pubkey.slice(0, 10)}…`
   const handle = profile?.nip05 ? profile.nip05.replace(/^_@/, '') : null
