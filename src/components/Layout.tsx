@@ -45,8 +45,8 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const navItems = [
     { to: '/', label: 'Feed', icon: Flame, end: true },
-    { to: '/search', label: 'Search', icon: Search },
     { to: '/notifications', label: 'Notifications', icon: Bell },
+    { to: '/search', label: 'Search', icon: Search },
     { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
     { to: '/settings', label: 'Settings', icon: Settings },
