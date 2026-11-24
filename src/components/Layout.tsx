@@ -55,7 +55,7 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
       <div className="w-full max-w-6xl flex min-h-screen">
         {/* Left Sidebar (desktop) */}
-        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen justify-between">
+        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen justify-between overflow-y-auto gap-4">
           <div>
             <Link to="/" className="flex items-center gap-2.5 px-3 py-2 mb-4">
               <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl" />
@@ -85,21 +85,35 @@ export function Layout({ children }: { children: ReactNode }) {
               ))}
             </nav>
 
-            <div className="mt-5 px-2">
-              <a
-                href={ANDROID_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-[#161820] border border-[#262834] hover:border-[#e8590c]/50 transition"
-              >
-                <Smartphone className="w-4 h-4 text-[#f59f00] shrink-0" />
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-white">Get Android App</div>
-                  <div className="text-[11px] text-[#9a9890] truncate">
-                    Direct APK &amp; Zapstore
-                  </div>
-                </div>
-              </a>
+            <div className="mt-4 p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">
+              <h3 className="font-semibold text-xs text-white flex items-center gap-1.5">
+                <Smartphone className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+                Fire Wisp for Android
+              </h3>
+              <p className="text-[11px] text-[#9a9890] leading-relaxed">
+                Built-in fail-closed Tor, Amber signer, NIP-49 backups, and a self-custodial
+                Lightning wallet.
+              </p>
+              <div className="flex flex-col gap-1.5 pt-0.5">
+                <a
+                  href={ANDROID_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold text-center text-white flex items-center justify-center gap-1.5"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  Download APK
+                </a>
+                <a
+                  href={ZAPSTORE_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-[11px] font-medium text-center text-[#d4d2cb] flex items-center justify-center gap-1.5"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Also on Zapstore
+                </a>
+              </div>
             </div>
           </div>
 
@@ -210,34 +224,6 @@ export function Layout({ children }: { children: ReactNode }) {
                 </span>{' '}
                 (configurable in Settings).
               </p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2.5">
-            <h3 className="font-semibold text-sm text-white">Fire Wisp for Android</h3>
-            <p className="text-xs text-[#9a9890] leading-relaxed">
-              Includes built-in fail-closed Tor, Amber signer support, NIP-49 encrypted backups, and
-              a self-custodial Lightning wallet.
-            </p>
-            <div className="flex flex-col gap-2 pt-1">
-              <a
-                href={ANDROID_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold text-center text-white flex items-center justify-center gap-1.5"
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                Download APK (app.firewisp.rtard.de)
-              </a>
-              <a
-                href={ZAPSTORE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-3 py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-xs font-medium text-center text-[#d4d2cb] flex items-center justify-center gap-1.5"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Also on Zapstore
-              </a>
             </div>
           </div>
 
