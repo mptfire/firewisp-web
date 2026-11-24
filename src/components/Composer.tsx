@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Event } from 'nostr-tools/pure'
-import { ImagePlus, Send, Cpu, X, FileText, Loader2 } from 'lucide-react'
+import { ImagePlus, Send, Cpu, X, FileText, Loader2, Eye, Pencil, Radio } from 'lucide-react'
 import {
   buildImetaTag,
   formatBlossomHost,
   uploadToBlossom,
   type BlossomUploadResult,
 } from '../lib/nostr/blossom'
+import { parseNoteContent } from '../lib/nostr/content'
+import { buildLiveATag } from '../lib/nostr/nip53'
 import { extractYouTubeRefsFromText } from '../lib/nostr/youtube'
 import { useAuthStore } from '../lib/store/useAuthStore'
+import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
@@ -46,13 +49,30 @@ export function Composer({
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<UploadedDraft[]>([])
   const [editingAltIdx, setEditingAltIdx] = useState<number | null>(null)
+  const [previewMode, setPreviewMode] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadingHost, setUploadingHost] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const profiles = useNostrStore((s) => s.profiles)
+  const events = useNostrStore((s) => s.events)
+  const liveStreams = useLiveStore((s) => s.liveStreams)
   const youtubePreviews = useMemo(() => extractYouTubeRefsFromText(text, 2), [text])
+  const hasDraft = Boolean(text.trim() || attachments.length > 0)
+
+  const parsedPreview = useMemo(() => {
+    if (!previewMode) return null
+    const mediaUrls = attachments.map((a) => a.upload.url).join('\n')
+    const fullContent = [text.trim(), mediaUrls].filter(Boolean).join('\n\n')
+    const imetaTags = attachments.map((a) => buildImetaTag(a.upload, a.alt))
+    return parseNoteContent({ content: fullContent, tags: imetaTags })
+  }, [previewMode, text, attachments])
+
+  useEffect(() => {
+    if (!hasDraft && previewMode) setPreviewMode(false)
+  }, [hasDraft, previewMode])
 
   // Consume incoming Android / OS Web Share Target content once signed in (only top-level composer)
   useEffect(() => {
@@ -118,6 +138,7 @@ export function Composer({
       })
       setText('')
       setAttachments([])
+      setPreviewMode(false)
       onPublished?.(published)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -179,113 +200,269 @@ export function Composer({
           size={compact ? 'sm' : 'md'}
         />
         <div className="flex-1 min-w-0">
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onPaste={(e) => {
-              const dt = e.clipboardData
-              if (!dt) return
-              const files: File[] = []
-              if (dt.files && dt.files.length > 0) {
-                files.push(...Array.from(dt.files))
-              } else if (dt.items) {
-                for (const item of Array.from(dt.items)) {
-                  if (item.kind === 'file') {
-                    const f = item.getAsFile()
-                    if (f) files.push(f)
-                  }
-                }
-              }
-              if (files.length > 0) {
-                e.preventDefault()
-                void handleFiles(files)
-              }
-            }}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !publishing && !uploading) {
-                e.preventDefault()
-                void handlePublish()
-              }
-            }}
-            rows={compact ? 2 : 3}
-            placeholder={`${placeholder} (Ctrl+Enter to post)`}
-            className="w-full bg-transparent resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#6c6a63] focus:outline-none"
-          />
-
-          {youtubePreviews.length > 0 && (
-            <div className="mt-2.5 grid gap-2 grid-cols-1 sm:grid-cols-2">
-              {youtubePreviews.map((yt) => (
-                <YouTubeCard key={yt.videoId} video={yt} compact previewOnly />
-              ))}
-            </div>
-          )}
-
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {attachments.map((att, idx) => (
-                <div
-                  key={att.upload.url}
-                  title={`Hosted on ${formatBlossomHost(att.upload.server)}`}
-                  className="relative group rounded-xl overflow-hidden border border-[#2a2d3a] bg-[#0e0e11]"
-                >
-                  {att.upload.type.startsWith('image/') ? (
-                    <img
-                      src={att.upload.url}
-                      alt={att.alt || 'Upload preview'}
-                      referrerPolicy="no-referrer"
-                      className="w-24 h-24 object-cover"
-                    />
-                  ) : (
-                    <div className="w-24 h-24 flex items-center justify-center text-xs text-[#9a9890] p-2 text-center">
-                      {att.upload.type}
-                    </div>
+          {previewMode && parsedPreview ? (
+            <div className="rounded-xl bg-[#0e0f15] border border-[#2a2d3d] p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#1f2230]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-xs font-semibold text-white truncate">
+                    {profile?.display_name || profile?.name || (pubkey ? `${pubkey.slice(0, 10)}…` : 'You')}
+                  </span>
+                  {profile?.nip05 && (
+                    <span className="text-[11px] text-[#7c7a72] truncate">
+                      {profile.nip05.replace(/^_@/, '')}
+                    </span>
                   )}
+                  <span className="text-[11px] text-[#6f6d66] shrink-0">· now</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-[#e8590c]/15 border border-[#e8590c]/30 text-[10px] font-semibold text-[#ff922b] shrink-0">
+                  Preview
+                </span>
+              </div>
+
+              {parsedPreview.segments.some((s) => s.type !== 'text' || s.text.trim().length > 0) && (
+                <div className="text-[15px] leading-relaxed text-[#ece9e1] whitespace-pre-wrap break-words">
+                  {parsedPreview.segments.map((seg, i) => {
+                    if (seg.type === 'text') return <span key={i}>{seg.text}</span>
+                    if (seg.type === 'link') {
+                      return (
+                        <a
+                          key={i}
+                          href={seg.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#ff8a3d] hover:underline break-all"
+                        >
+                          {seg.display}
+                        </a>
+                      )
+                    }
+                    if (seg.type === 'hashtag') {
+                      return (
+                        <span key={i} className="text-[#f59f00]">
+                          #{seg.tag}
+                        </span>
+                      )
+                    }
+                    if (seg.type === 'mention') {
+                      const mp = profiles[seg.pubkey]
+                      const label = mp?.display_name || mp?.name || `${seg.bech32.slice(0, 12)}…`
+                      return (
+                        <span key={i} className="text-[#ff8a3d] font-medium">
+                          @{label}
+                        </span>
+                      )
+                    }
+                    if (seg.type === 'quote') {
+                      const quotedEv = seg.eventId ? events[seg.eventId] : undefined
+                      const qp = quotedEv ? profiles[quotedEv.pubkey] : undefined
+                      return (
+                        <div
+                          key={i}
+                          className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#272a36] text-xs"
+                        >
+                          {quotedEv ? (
+                            <>
+                              <div className="font-semibold text-[#c9c6be] mb-1">
+                                {qp?.display_name || qp?.name || `${quotedEv.pubkey.slice(0, 12)}…`}
+                              </div>
+                              <p className="text-[#dcd9d0] line-clamp-3 whitespace-pre-wrap break-words">
+                                {quotedEv.content}
+                              </p>
+                            </>
+                          ) : (
+                            <span className="text-[#ff8a3d]">
+                              Quoted note ({seg.bech32.slice(0, 18)}…)
+                            </span>
+                          )}
+                        </div>
+                      )
+                    }
+                    if (seg.type === 'live') {
+                      const entry = liveStreams[buildLiveATag(seg.hostPubkey, seg.dTag)]
+                      return (
+                        <div
+                          key={i}
+                          className="my-2 p-2.5 rounded-xl bg-[#161820] border border-[#e8590c]/40 flex items-center gap-2 text-xs"
+                        >
+                          <span className="px-1.5 py-0.5 rounded bg-red-600 text-white text-[9px] font-bold uppercase flex items-center gap-1 shrink-0">
+                            <Radio className="w-2.5 h-2.5" />
+                            LIVE
+                          </span>
+                          <span className="text-white font-medium truncate">
+                            {entry?.activity.title || `Live Stream (${seg.dTag.slice(0, 24)})`}
+                          </span>
+                        </div>
+                      )
+                    }
+                    return null
+                  })}
+                </div>
+              )}
+
+              {parsedPreview.media.length > 0 && (
+                <div
+                  className={`grid gap-2 ${
+                    parsedPreview.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
+                  }`}
+                >
+                  {parsedPreview.media.map((m) =>
+                    m.kind === 'image' ? (
+                      <div
+                        key={m.url}
+                        className="relative rounded-xl overflow-hidden border border-[#242734] bg-[#0b0b0e] flex items-center justify-center"
+                      >
+                        <img
+                          src={m.url}
+                          alt={m.alt || 'Note image preview'}
+                          referrerPolicy="no-referrer"
+                          className={
+                            parsedPreview.media.length === 1
+                              ? 'max-h-[480px] max-w-full w-auto h-auto object-contain'
+                              : 'max-h-64 max-w-full w-auto h-auto object-contain'
+                          }
+                        />
+                        {m.alt && (
+                          <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-semibold text-emerald-300">
+                            ALT
+                          </span>
+                        )}
+                      </div>
+                    ) : m.kind === 'video' ? (
+                      <video
+                        key={m.url}
+                        src={m.poster ? m.url : `${m.url}#t=0.001`}
+                        poster={m.poster}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="rounded-xl max-h-80 w-full bg-black border border-[#242734]"
+                      />
+                    ) : (
+                      <audio key={m.url} src={m.url} controls className="w-full" />
+                    ),
+                  )}
+                </div>
+              )}
+
+              {parsedPreview.youtube.length > 0 && (
+                <div className="space-y-2">
+                  {parsedPreview.youtube.map((yt) => (
+                    <YouTubeCard key={yt.videoId} video={yt} previewOnly />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onPaste={(e) => {
+                  const dt = e.clipboardData
+                  if (!dt) return
+                  const files: File[] = []
+                  if (dt.files && dt.files.length > 0) {
+                    files.push(...Array.from(dt.files))
+                  } else if (dt.items) {
+                    for (const item of Array.from(dt.items)) {
+                      if (item.kind === 'file') {
+                        const f = item.getAsFile()
+                        if (f) files.push(f)
+                      }
+                    }
+                  }
+                  if (files.length > 0) {
+                    e.preventDefault()
+                    void handleFiles(files)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !publishing && !uploading) {
+                    e.preventDefault()
+                    void handlePublish()
+                  }
+                }}
+                rows={compact ? 2 : 3}
+                placeholder={`${placeholder} (Ctrl+Enter to post)`}
+                className="w-full bg-transparent resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#6c6a63] focus:outline-none"
+              />
+
+              {youtubePreviews.length > 0 && (
+                <div className="mt-2.5 grid gap-2 grid-cols-1 sm:grid-cols-2">
+                  {youtubePreviews.map((yt) => (
+                    <YouTubeCard key={yt.videoId} video={yt} compact previewOnly />
+                  ))}
+                </div>
+              )}
+
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {attachments.map((att, idx) => (
+                    <div
+                      key={att.upload.url}
+                      title={`Hosted on ${formatBlossomHost(att.upload.server)}`}
+                      className="relative group rounded-xl overflow-hidden border border-[#2a2d3a] bg-[#0e0e11]"
+                    >
+                      {att.upload.type.startsWith('image/') ? (
+                        <img
+                          src={att.upload.url}
+                          alt={att.alt || 'Upload preview'}
+                          referrerPolicy="no-referrer"
+                          className="w-24 h-24 object-cover"
+                        />
+                      ) : (
+                        <div className="w-24 h-24 flex items-center justify-center text-xs text-[#9a9890] p-2 text-center">
+                          {att.upload.type}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/75 text-white hover:bg-red-600 cursor-pointer"
+                        aria-label="Remove attachment"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setEditingAltIdx(idx)}
+                        className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer ${
+                          att.alt
+                            ? 'bg-emerald-600/90 text-white'
+                            : 'bg-black/75 text-[#d4d2cb] hover:bg-[#e8590c]'
+                        }`}
+                      >
+                        <FileText className="w-2.5 h-2.5" />
+                        {att.alt ? 'ALT ✓' : '+ ALT'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {editingAltIdx !== null && attachments[editingAltIdx] && (
+                <div className="mt-2 p-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={attachments[editingAltIdx].alt}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setAttachments((prev) =>
+                        prev.map((a, i) => (i === editingAltIdx ? { ...a, alt: val } : a)),
+                      )
+                    }}
+                    placeholder="Describe this image for accessibility (NIP-92 alt text)…"
+                    className="flex-1 bg-transparent text-xs text-white focus:outline-none"
+                    autoFocus
+                  />
                   <button
-                    onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
-                    className="absolute top-1 right-1 p-1 rounded-full bg-black/75 text-white hover:bg-red-600 cursor-pointer"
-                    aria-label="Remove attachment"
+                    onClick={() => setEditingAltIdx(null)}
+                    className="px-2.5 py-1 rounded-lg bg-[#e8590c] text-xs font-medium cursor-pointer"
                   >
-                    <X className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => setEditingAltIdx(idx)}
-                    className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer ${
-                      att.alt
-                        ? 'bg-emerald-600/90 text-white'
-                        : 'bg-black/75 text-[#d4d2cb] hover:bg-[#e8590c]'
-                    }`}
-                  >
-                    <FileText className="w-2.5 h-2.5" />
-                    {att.alt ? 'ALT ✓' : '+ ALT'}
+                    Save
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {editingAltIdx !== null && attachments[editingAltIdx] && (
-            <div className="mt-2 p-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] flex items-center gap-2">
-              <input
-                type="text"
-                value={attachments[editingAltIdx].alt}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setAttachments((prev) =>
-                    prev.map((a, i) => (i === editingAltIdx ? { ...a, alt: val } : a)),
-                  )
-                }}
-                placeholder="Describe this image for accessibility (NIP-92 alt text)…"
-                className="flex-1 bg-transparent text-xs text-white focus:outline-none"
-                autoFocus
-              />
-              <button
-                onClick={() => setEditingAltIdx(null)}
-                className="px-2.5 py-1 rounded-lg bg-[#e8590c] text-xs font-medium cursor-pointer"
-              >
-                Save
-              </button>
-            </div>
+              )}
+            </>
           )}
 
           {error && (
@@ -330,6 +507,21 @@ export function Composer({
                   → {uploadingHost}
                 </span>
               )}
+
+              <button
+                type="button"
+                disabled={!hasDraft}
+                onClick={() => setPreviewMode((v) => !v)}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition cursor-pointer disabled:opacity-35 disabled:cursor-default shrink-0 border ${
+                  previewMode
+                    ? 'bg-[#e8590c]/15 border-[#e8590c]/40 text-[#ff922b]'
+                    : 'bg-transparent border-transparent text-[#9a9890] hover:text-white hover:bg-white/5'
+                }`}
+                title={previewMode ? 'Return to editing note' : 'Preview how your note will look before posting'}
+              >
+                {previewMode ? <Pencil className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                <span>{previewMode ? 'Edit' : 'Preview'}</span>
+              </button>
 
               {notePowEnabled && (
                 <span
