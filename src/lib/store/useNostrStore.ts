@@ -221,6 +221,16 @@ function insertSortedUnique(ids: string[], ev: Event, eventsMap: Record<string, 
   return next.slice(0, 500)
 }
 
+/** Matches Wisp Android FeedSubscriptionManager dynamic follow window scaling */
+function getFollowWindowSeconds(followCount: number): number {
+  if (followCount <= 10) return 7 * 86400
+  if (followCount <= 30) return 5 * 86400
+  if (followCount <= 75) return 3 * 86400
+  if (followCount <= 150) return 2 * 86400
+  if (followCount <= 300) return 36 * 3600
+  return 24 * 3600
+}
+
 export const useNostrStore = create<NostrState>((set, get) => ({
   relayStatuses: {},
   events: {},
@@ -819,11 +829,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
-    // For You (matches Wisp Android): kick off 2-hop Web of Trust build in background when signed in
-    if (tab === 'foryou' && myPubkey && follows.length > 0 && extendedAuthors.length === 0) {
-      void get().loadExtendedNetwork()
-    }
-
     const allowedFollowingAuthors =
       tab === 'following'
         ? new Set(
@@ -941,8 +946,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     // so EVERY followed account's posts are fetched without hitting per-REQ filter limits.
     const filters = (() => {
       if (tab === 'foryou') {
-        const since = Math.floor(Date.now() / 1000) - 2 * 86400
+        const since = Math.floor(Date.now() / 1000) - getFollowWindowSeconds(follows.length)
         if (myPubkey && follows.length > 0) {
+          // Match Wisp Android: use Extended authors ONLY if already computed, otherwise direct Follows
           const blendedAuthors = [
             ...new Set([
               myPubkey.toLowerCase(),
@@ -956,24 +962,24 @@ export const useNostrStore = create<NostrState>((set, get) => ({
               kinds: [1, 6, 20, 21, 22],
               authors: blendedAuthors.slice(i, i + 250),
               since,
-              limit: 80,
+              limit: 40,
             })
           }
           return chunks
         }
-        return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
+        return [{ kinds: [1, 6, 20, 21, 22], limit: 40 }]
       }
       if (tab === 'following') {
         const allAuthors = [...(allowedFollowingAuthors || [])]
         if (allAuthors.length === 0) return []
-        const since = Math.floor(Date.now() / 1000) - 3 * 86400
+        const since = Math.floor(Date.now() / 1000) - getFollowWindowSeconds(follows.length)
         const chunks: Array<{ kinds: number[]; authors: string[]; since: number; limit: number }> = []
         for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
           chunks.push({
             kinds: [1, 6, 20, 21, 22],
             authors: allAuthors.slice(i, i + 250),
             since,
-            limit: 100,
+            limit: 60,
           })
         }
         return chunks
@@ -1041,26 +1047,36 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }),
     )
 
-    // Wisp Android For You supplementary sources: Trending + followed NIP-51 hashtags + Fire Wisp relay
+    // Wisp Android For You supplementary sources: capped Trending (24h) + followed NIP-51 hashtags
+    // Note: trending.relays.land ignores `limit` and returns 160+ notes, so cap client-side!
     let cancelled = false
     if (tab === 'foryou') {
       const since24h = Math.floor(Date.now() / 1000) - 86400
-      const suppQueries: Promise<Event[]>[] = [
-        nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 35 }, 4000),
-        nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 25 }, 3500),
-      ]
+      const trendingPromise = nostrPool
+        .query([TRENDING_RELAY], { kinds: [1], limit: 20 }, 4000)
+        .then((evs) => evs.filter((e) => e.created_at >= since24h).slice(0, 15))
+
+      const hashtagQueries: Promise<Event[]>[] = []
       if (followedHashtags.length > 0) {
-        for (let i = 0; i < Math.min(followedHashtags.length, 24); i += 8) {
-          suppQueries.push(
-            nostrPool.query(
-              mergedFollowingRelays,
-              { kinds: [1], '#t': followedHashtags.slice(i, i + 8), since: since24h, limit: 30 },
-              4500,
-            ),
+        for (let i = 0; i < Math.min(followedHashtags.length, 20); i += 10) {
+          hashtagQueries.push(
+            nostrPool
+              .query(
+                mergedFollowingRelays,
+                { kinds: [1], '#t': followedHashtags.slice(i, i + 10), since: since24h, limit: 20 },
+                4500,
+              )
+              .then((evs) => evs.slice(0, 15)),
           )
         }
       }
-      void Promise.allSettled(suppQueries).then((results) => {
+
+      const signedOutFallback =
+        !myPubkey || follows.length === 0
+          ? [nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 20 }, 3500)]
+          : []
+
+      void Promise.allSettled([trendingPromise, ...hashtagQueries, ...signedOutFallback]).then((results) => {
         if (cancelled) return
         const suppEvents: Event[] = []
         for (const r of results) {

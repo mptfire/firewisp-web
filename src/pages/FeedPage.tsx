@@ -71,11 +71,14 @@ export function FeedPage() {
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
+  const PAGE_SIZE = 40
   const [refreshTick, setRefreshTick] = useState(0)
   const [noMoreOlder, setNoMoreOlder] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
     setNoMoreOlder(false)
+    setVisibleCount(PAGE_SIZE)
     return subscribeFeed(tab)
   }, [
     tab,
@@ -90,6 +93,7 @@ export function FeedPage() {
 
   const handleRefresh = () => {
     setNoMoreOlder(false)
+    setVisibleCount(PAGE_SIZE)
     clearFeedTab(tab)
     setRefreshTick((n) => n + 1)
   }
@@ -99,9 +103,14 @@ export function FeedPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleLoadOlder = async () => {
+  const handleLoadOlder = async (loadedCount: number) => {
+    if (visibleCount < loadedCount) {
+      setVisibleCount((n) => n + PAGE_SIZE)
+      return
+    }
     const added = await loadOlderFeed(tab)
     if (added === 0) setNoMoreOlder(true)
+    else setVisibleCount((n) => n + PAGE_SIZE)
   }
 
   const ids =
@@ -359,7 +368,7 @@ export function FeedPage() {
       )}
 
       <div>
-        {items.map(({ event, repostedBy }) => (
+        {items.slice(0, visibleCount).map(({ event, repostedBy }) => (
           <NoteCard
             key={`${event.id}-${repostedBy || 'orig'}`}
             event={event}
@@ -368,19 +377,23 @@ export function FeedPage() {
         ))}
       </div>
 
-      {/* Pagination: Load older notes */}
-      {items.length > 0 && tab !== 'trending' && (
+      {/* Pagination: reveal buffered notes first, then fetch older from relays */}
+      {items.length > 0 && (visibleCount < items.length || tab !== 'trending') && (
         <div className="py-6 flex justify-center">
-          {noMoreOlder ? (
+          {noMoreOlder && visibleCount >= items.length ? (
             <span className="text-xs text-[#6f6d66]">No older notes found on these relays</span>
           ) : (
             <button
               disabled={loadingMore}
-              onClick={() => void handleLoadOlder()}
+              onClick={() => void handleLoadOlder(items.length)}
               className="px-5 py-2 rounded-xl bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-xs font-medium text-[#d4d2cb] disabled:opacity-50 flex items-center gap-2 transition cursor-pointer"
             >
               {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#e8590c]" />}
-              {loadingMore ? 'Loading older notes…' : 'Load older notes'}
+              {loadingMore
+                ? 'Loading older notes…'
+                : visibleCount < items.length
+                  ? `Load more (${items.length - visibleCount} ready)`
+                  : 'Load older notes'}
             </button>
           )}
         </div>
