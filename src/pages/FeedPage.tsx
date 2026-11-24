@@ -212,10 +212,10 @@ export function FeedPage() {
           [
             ['foryou', 'For You', Sparkles],
             ['following', 'Follows', Users],
-            ['global', 'Explore', Globe],
             ['trending', 'Trending', TrendingUp],
             ['firewisp', 'Fire Wisp', Flame],
             ['extended', 'Extended', Network],
+            ['global', 'Explore', Globe],
           ] as [FeedTab, string, typeof Flame][]
         ).map(([id, label, Icon]) => (
           <button
