@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
-import { CLIENT_TAG_VALUE, FIREWISP_RELAY } from '../constants'
+import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, FIREWISP_RELAY, TRENDING_RELAY } from '../constants'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags } from '../nostr/content'
 import { createGiftWrappedDm, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
@@ -53,7 +53,11 @@ export interface NostrState {
   // Feeds
   firewispFeedIds: string[]
   followingFeedIds: string[]
+  extendedFeedIds: string[]
+  trendingFeedIds: string[]
   globalFeedIds: string[]
+  extendedAuthors: string[]
+  loadingExtendedGraph: boolean
   notificationIds: string[]
   dms: DecryptedDm[]
 
@@ -66,7 +70,8 @@ export interface NostrState {
   ingestEvent: (event: Event) => void
   fetchProfiles: (pubkeys: string[]) => Promise<void>
   loadUserGraph: (pubkey: string) => Promise<void>
-  subscribeFeed: (tab: 'firewisp' | 'following' | 'global') => () => void
+  loadExtendedNetwork: () => Promise<string[]>
+  subscribeFeed: (tab: 'firewisp' | 'following' | 'extended' | 'trending' | 'global') => () => void
   subscribeNotifications: (pubkey: string) => () => void
   subscribeDms: () => () => void
 
@@ -153,7 +158,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   firewispFeedIds: [],
   followingFeedIds: [],
+  extendedFeedIds: [],
+  trendingFeedIds: [],
   globalFeedIds: [],
+  extendedAuthors: [],
+  loadingExtendedGraph: false,
   notificationIds: [],
   dms: [],
 
@@ -369,12 +378,77 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
   },
 
+  loadExtendedNetwork: async () => {
+    const existing = get().extendedAuthors
+    if (existing.length > 0 || get().loadingExtendedGraph) return existing
+    const follows = get().follows
+    if (follows.length === 0) return []
+    set({ loadingExtendedGraph: true })
+    try {
+      const relays = useSettingsStore.getState().getReadRelays()
+      // Sample up to 60 direct follows' kind-3 contact lists and keep 2-hop pubkeys endorsed by >= 3 follows
+      const sample = follows.slice(0, 60)
+      const contactLists = await nostrPool.query(
+        relays,
+        { kinds: [3], authors: sample, limit: sample.length * 2 },
+        4500,
+      )
+      const latestByAuthor = new Map<string, Event>()
+      for (const ev of contactLists) {
+        const prev = latestByAuthor.get(ev.pubkey)
+        if (!prev || ev.created_at > prev.created_at) {
+          latestByAuthor.set(ev.pubkey, ev)
+        }
+      }
+      const followSet = new Set(follows)
+      const myPubkey = useAuthStore.getState().pubkey?.toLowerCase()
+      const votes = new Map<string, number>()
+      for (const ev of latestByAuthor.values()) {
+        const seenInList = new Set<string>()
+        for (const t of ev.tags) {
+          if (t[0] !== 'p' || !t[1] || !/^[0-9a-f]{64}$/i.test(t[1])) continue
+          const pk = t[1].toLowerCase()
+          if (seenInList.has(pk) || followSet.has(pk) || pk === myPubkey) continue
+          seenInList.add(pk)
+          votes.set(pk, (votes.get(pk) || 0) + 1)
+        }
+      }
+      const minVotes = sample.length >= 15 ? 3 : 2
+      const qualified = [...votes.entries()]
+        .filter(([, count]) => count >= minVotes)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 200)
+        .map(([pk]) => pk)
+      set({ extendedAuthors: qualified })
+      return qualified
+    } finally {
+      set({ loadingExtendedGraph: false })
+    }
+  },
+
   subscribeFeed: (tab) => {
     set({ loadingFeed: true })
     const readRelays = useSettingsStore.getState().getReadRelays()
-    const targetRelays = tab === 'firewisp' ? [FIREWISP_RELAY] : readRelays
+    const targetRelays =
+      tab === 'firewisp'
+        ? [FIREWISP_RELAY]
+        : tab === 'trending'
+          ? [TRENDING_RELAY]
+          : tab === 'global'
+            ? CURATED_EXPLORE_RELAYS
+            : readRelays
     const follows = get().follows
+    const extendedAuthors = get().extendedAuthors
     const myPubkey = useAuthStore.getState().pubkey
+
+    if (tab === 'extended' && extendedAuthors.length === 0) {
+      if (follows.length > 0) {
+        void get().loadExtendedNetwork()
+      } else {
+        set({ loadingFeed: false })
+      }
+      return () => {}
+    }
 
     const filter =
       tab === 'following' && (follows.length > 0 || myPubkey)
@@ -383,10 +457,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             authors: [...new Set([...(myPubkey ? [myPubkey] : []), ...follows.slice(0, 200)])],
             limit: 60,
           }
-        : {
-            kinds: [1, 6, 20],
-            limit: 60,
-          }
+        : tab === 'extended'
+          ? {
+              kinds: [1, 20],
+              authors: extendedAuthors.slice(0, 200),
+              limit: 60,
+            }
+          : {
+              kinds: [1, 6, 20],
+              limit: 60,
+            }
 
     const authorBatch = new Set<string>()
     let batchTimer: ReturnType<typeof setTimeout> | null = null
@@ -424,6 +504,18 @@ export const useNostrStore = create<NostrState>((set, get) => ({
                 followingFeedIds: insertSortedUnique(s.followingFeedIds, ev, eventsMap),
               }
             }
+            if (tab === 'extended') {
+              return {
+                events: eventsMap,
+                extendedFeedIds: insertSortedUnique(s.extendedFeedIds, ev, eventsMap),
+              }
+            }
+            if (tab === 'trending') {
+              return {
+                events: eventsMap,
+                trendingFeedIds: insertSortedUnique(s.trendingFeedIds, ev, eventsMap),
+              }
+            }
             return {
               events: eventsMap,
               globalFeedIds: insertSortedUnique(s.globalFeedIds, ev, eventsMap),
@@ -434,14 +526,17 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       oneose: () => {
         flushAuthors()
         set({ loadingFeed: false })
-        // Fetch reactions/reposts/zaps for currently visible notes
         const s = get()
         const ids =
           tab === 'firewisp'
             ? s.firewispFeedIds.slice(0, 40)
             : tab === 'following'
               ? s.followingFeedIds.slice(0, 40)
-              : s.globalFeedIds.slice(0, 40)
+              : tab === 'extended'
+                ? s.extendedFeedIds.slice(0, 40)
+                : tab === 'trending'
+                  ? s.trendingFeedIds.slice(0, 40)
+                  : s.globalFeedIds.slice(0, 40)
         if (ids.length > 0) {
           void nostrPool
             .query(readRelays, { kinds: [5, 6, 7, 9735], '#e': ids, limit: 250 }, 3500)

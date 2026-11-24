@@ -5,6 +5,13 @@ export interface RelayEntry {
 }
 
 export const FIREWISP_RELAY = 'wss://firewisp.relay.rtard.de'
+export const TRENDING_RELAY = 'wss://trending.relays.land'
+export const CURATED_EXPLORE_RELAYS = [
+  FIREWISP_RELAY,
+  'wss://nostr.wine',
+  'wss://relay.primal.net',
+  TRENDING_RELAY,
+]
 export const DEFAULT_BLOSSOM_PRIMARY = 'https://blossom.nostr.build'
 export const DEFAULT_BLOSSOM_FALLBACK = 'https://blossom.primal.net'
 
