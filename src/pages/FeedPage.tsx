@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  Sparkles,
   Flame,
   Users,
   Globe,
@@ -45,12 +46,14 @@ export function FeedPage() {
   const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
   const setShowRepliesInFollows = useNostrStore((s) => s.setShowRepliesInFollows)
   const follows = useNostrStore((s) => s.follows)
+  const followedHashtags = useNostrStore((s) => s.followedHashtags)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
   const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
   const loadingMore = useNostrStore((s) => s.loadingMore)
   const events = useNostrStore((s) => s.events)
   const deletedEventIds = useNostrStore((s) => s.deletedEventIds)
+  const forYouFeedIds = useNostrStore((s) => s.forYouFeedIds)
   const firewispFeedIds = useNostrStore((s) => s.firewispFeedIds)
   const followingFeedIds = useNostrStore((s) => s.followingFeedIds)
   const extendedFeedIds = useNostrStore((s) => s.extendedFeedIds)
@@ -74,7 +77,16 @@ export function FeedPage() {
   useEffect(() => {
     setNoMoreOlder(false)
     return subscribeFeed(tab)
-  }, [tab, pubkey, follows.length, userReadRelays.length, extendedAuthors.length, refreshTick, subscribeFeed])
+  }, [
+    tab,
+    pubkey,
+    follows.length,
+    followedHashtags.length,
+    userReadRelays.length,
+    extendedAuthors.length,
+    refreshTick,
+    subscribeFeed,
+  ])
 
   const handleRefresh = () => {
     setNoMoreOlder(false)
@@ -93,15 +105,17 @@ export function FeedPage() {
   }
 
   const ids =
-    tab === 'firewisp'
-      ? firewispFeedIds
-      : tab === 'following'
-        ? followingFeedIds
-        : tab === 'extended'
-          ? extendedFeedIds
-          : tab === 'trending'
-            ? trendingFeedIds
-            : globalFeedIds
+    tab === 'foryou'
+      ? forYouFeedIds
+      : tab === 'firewisp'
+        ? firewispFeedIds
+        : tab === 'following'
+          ? followingFeedIds
+          : tab === 'extended'
+            ? extendedFeedIds
+            : tab === 'trending'
+              ? trendingFeedIds
+              : globalFeedIds
 
   const { items, spamBlockedCount } = useMemo(() => {
     const out: Array<{ event: Event; repostedBy?: string }> = []
@@ -112,7 +126,7 @@ export function FeedPage() {
     const myPk = pubkey?.toLowerCase()
     let blocked = 0
 
-    const shouldSpamFilter = (tab === 'global' || tab === 'trending') && spamFilterEnabled
+    const shouldSpamFilter = (tab === 'foryou' || tab === 'global' || tab === 'trending') && spamFilterEnabled
 
     for (const id of ids) {
       if (deletedEventIds[id]) continue
@@ -137,9 +151,9 @@ export function FeedPage() {
 
       if (seen.has(targetEv.id)) continue
 
-      // Hide replies in Follows when user has "Hide replies" active (Jumble-style clean feed)
+      // Hide replies in Follows & For You when "Hide replies" is active (clean top-level feed)
       if (
-        tab === 'following' &&
+        (tab === 'following' || tab === 'foryou') &&
         !showRepliesInFollows &&
         !repostedBy &&
         targetEv.kind === 1 &&
@@ -163,7 +177,7 @@ export function FeedPage() {
           follows: followSet,
           seenContentAuthors,
           authorCounts,
-          maxPerAuthor: 2,
+          maxPerAuthor: tab === 'foryou' ? 3 : 2,
           requirePowBits: tab === 'global' && requirePowInExplore ? 12 : 0,
         })
         if (verdict.isSpam) {
@@ -196,17 +210,18 @@ export function FeedPage() {
       <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] flex overflow-x-auto text-xs sm:text-sm font-medium">
         {(
           [
+            ['foryou', 'For You', Sparkles],
+            ['following', 'Follows', Users],
             ['global', 'Explore', Globe],
             ['trending', 'Trending', TrendingUp],
             ['firewisp', 'Fire Wisp', Flame],
-            ['following', 'Follows', Users],
             ['extended', 'Extended', Network],
           ] as [FeedTab, string, typeof Flame][]
         ).map(([id, label, Icon]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex-1 min-w-[76px] py-3.5 px-2 flex items-center justify-center gap-1.5 border-b-2 transition whitespace-nowrap cursor-pointer ${
+            className={`flex-1 min-w-[74px] py-3.5 px-2 flex items-center justify-center gap-1.5 border-b-2 transition whitespace-nowrap cursor-pointer ${
               tab === id
                 ? 'border-[#e8590c] text-white'
                 : 'border-transparent text-[#8c8a82] hover:text-white'
@@ -221,7 +236,23 @@ export function FeedPage() {
       {/* Status + Controls Strip */}
       <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1.5 text-[#9a9890] min-w-0 truncate">
-          {tab === 'extended' ? (
+          {tab === 'foryou' ? (
+            <>
+              <Sparkles className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+              <span className="truncate">
+                {pubkey
+                  ? [
+                      `For You · ${follows.length.toLocaleString()} follows`,
+                      extendedAuthors.length > 0 ? `+ ${extendedAuthors.length} 2-hop` : null,
+                      followedHashtags.length > 0 ? `+ ${followedHashtags.length} topics` : null,
+                      '+ Trending',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')
+                  : 'For You · Curated Trending & Fire Wisp highlights (sign in to personalize)'}
+              </span>
+            </>
+          ) : tab === 'extended' ? (
             <>
               <Network className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
               <span className="truncate">
@@ -265,7 +296,7 @@ export function FeedPage() {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          {tab === 'following' && pubkey && (
+          {(tab === 'following' || tab === 'foryou') && pubkey && (
             <button
               onClick={() => setShowRepliesInFollows(!showRepliesInFollows)}
               className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
