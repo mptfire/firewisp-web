@@ -30,3 +30,24 @@
 .ember-gradient {
   background: linear-gradient(135deg, #e8590c 0%, #f59f00 100%);
 }
+
+/* Bigger, high-contrast horizontal scrollbar for the Live Now stream strip */
+.live-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: #e8590c #181a24;
+}
+.live-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+.live-scroll::-webkit-scrollbar-track {
+  background: #181a24;
+  border-radius: 9999px;
+}
+.live-scroll::-webkit-scrollbar-thumb {
+  background: #4e536b;
+  border-radius: 9999px;
+  border: 2px solid #181a24;
+}
+.live-scroll::-webkit-scrollbar-thumb:hover {
+  background: #e8590c;
+}
