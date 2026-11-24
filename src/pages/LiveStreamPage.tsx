@@ -27,6 +27,7 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
 import { MediaLightbox } from '../components/MediaLightbox'
+import { YouTubeCard } from '../components/YouTubeCard'
 import { ZapModal } from '../components/ZapModal'
 
 // Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
@@ -357,6 +358,15 @@ function ChatBubble({
               )}
             </div>
           )}
+
+          {/* YouTube link preview cards in Live Chat */}
+          {parsed.youtube.length > 0 && (
+            <div className="mt-1.5 space-y-1.5">
+              {parsed.youtube.map((yt) => (
+                <YouTubeCard key={yt.videoId} video={yt} compact />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -615,7 +625,19 @@ export function LiveStreamPage() {
             onDrop={(e) => {
               e.preventDefault()
               setDragOver(false)
-              void handleUploadFiles(e.dataTransfer.files)
+              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                void handleUploadFiles(e.dataTransfer.files)
+                return
+              }
+              const droppedUrl =
+                e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+              const cleanUrl = droppedUrl
+                .split('\n')
+                .map((l) => l.trim())
+                .find((l) => l && !l.startsWith('#'))
+              if (cleanUrl) {
+                setDraft((prev) => (prev.trim() ? `${prev.trim()} ${cleanUrl}` : cleanUrl))
+              }
             }}
           >
             <div

@@ -1,6 +1,7 @@
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
 import { sanitizeHttpUrl, sanitizePublicHttpsUrl } from '../sanitize'
+import { extractYouTubeVideo, type YouTubeRef } from './youtube'
 
 export interface MediaAttachment {
   url: string
@@ -74,11 +75,14 @@ export function classifyMediaUrl(
 export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
   segments: ContentSegment[]
   media: MediaAttachment[]
+  youtube: YouTubeRef[]
   quotes: string[]
 } {
   const imeta = extractImetaMap(event.tags)
   const media: MediaAttachment[] = []
   const mediaSeen = new Set<string>()
+  const youtube: YouTubeRef[] = []
+  const ytSeen = new Set<string>()
   const quotes: string[] = []
   const segments: ContentSegment[] = []
 
@@ -104,7 +108,13 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
         const mediaKind = safePublicMedia
           ? classifyMediaUrl(safePublicMedia, meta?.mime)
           : null
-        if (mediaKind && safePublicMedia) {
+        const ytRef = extractYouTubeVideo(trimmed)
+        if (ytRef) {
+          if (!ytSeen.has(ytRef.videoId) && youtube.length < 4) {
+            ytSeen.add(ytRef.videoId)
+            youtube.push(ytRef)
+          }
+        } else if (mediaKind && safePublicMedia) {
           if (!mediaSeen.has(safePublicMedia)) {
             mediaSeen.add(safePublicMedia)
             media.push({
@@ -184,7 +194,7 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
     }
   }
 
-  return { segments, media, quotes }
+  return { segments, media, youtube, quotes }
 }
 
 /**

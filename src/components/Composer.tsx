@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { Event } from 'nostr-tools/pure'
 import { ImagePlus, Send, Cpu, X, FileText, Loader2 } from 'lucide-react'
 import { buildImetaTag, uploadToBlossom, type BlossomUploadResult } from '../lib/nostr/blossom'
+import { extractYouTubeRefsFromText } from '../lib/nostr/youtube'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
+import { YouTubeCard } from './YouTubeCard'
 
 interface UploadedDraft {
   upload: BlossomUploadResult
@@ -41,6 +43,7 @@ export function Composer({
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const youtubePreviews = useMemo(() => extractYouTubeRefsFromText(text, 2), [text])
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -122,7 +125,23 @@ export function Composer({
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault()
-        void handleFiles(e.dataTransfer.files)
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          void handleFiles(e.dataTransfer.files)
+          return
+        }
+        const droppedUrl =
+          e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+        const cleanUrl = droppedUrl
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => l && !l.startsWith('#'))
+        if (cleanUrl) {
+          setText((prev) => {
+            if (!prev.trim()) return cleanUrl
+            const sep = prev.endsWith(' ') || prev.endsWith('\n') ? '' : '\n'
+            return `${prev}${sep}${cleanUrl}`
+          })
+        }
       }}
     >
       <div className="flex gap-3">
@@ -146,6 +165,14 @@ export function Composer({
             placeholder={`${placeholder} (Ctrl+Enter to post)`}
             className="w-full bg-transparent resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#6c6a63] focus:outline-none"
           />
+
+          {youtubePreviews.length > 0 && (
+            <div className="mt-2.5 grid gap-2 grid-cols-1 sm:grid-cols-2">
+              {youtubePreviews.map((yt) => (
+                <YouTubeCard key={yt.videoId} video={yt} compact />
+              ))}
+            </div>
+          )}
 
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">

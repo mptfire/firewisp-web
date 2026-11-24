@@ -33,6 +33,7 @@ import {
   encodeLiveNaddr,
   parseLiveActivity,
 } from '../nostr/nip53'
+import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -550,5 +551,51 @@ describe('NIP-53 live streaming parser & security guards', () => {
     const parsedReq = JSON.parse(capturedZapReq) as { tags: string[][] }
     expect(parsedReq.tags).toContainEqual(['a', aTag])
     signer.destroy()
+  })
+})
+
+describe('YouTube preview card parser & security guards (Option 1B)', () => {
+  it('parses youtu.be, watch, shorts, live, and timestamped YouTube URLs', () => {
+    expect(extractYouTubeVideo('https://youtu.be/20t-IZZztOk')).toEqual({
+      videoId: '20t-IZZztOk',
+      url: 'https://youtu.be/20t-IZZztOk',
+      thumbnailUrl: 'https://i.ytimg.com/vi/20t-IZZztOk/hqdefault.jpg',
+      isShort: undefined,
+      startSeconds: undefined,
+    })
+
+    expect(extractYouTubeVideo('https://www.youtube.com/watch?v=20t-IZZztOk&t=1m30s')).toEqual({
+      videoId: '20t-IZZztOk',
+      url: 'https://youtu.be/20t-IZZztOk?t=90',
+      thumbnailUrl: 'https://i.ytimg.com/vi/20t-IZZztOk/hqdefault.jpg',
+      isShort: undefined,
+      startSeconds: 90,
+    })
+
+    const shortRef = extractYouTubeVideo('https://youtube.com/shorts/20t-IZZztOk')
+    expect(shortRef?.isShort).toBe(true)
+    expect(shortRef?.url).toBe('https://www.youtube.com/shorts/20t-IZZztOk')
+    expect(extractYouTubeVideo('https://m.youtube.com/live/20t-IZZztOk')?.videoId).toBe(
+      '20t-IZZztOk',
+    )
+  })
+
+  it('rejects spoofed hostnames, embedded credentials, and malformed video IDs', () => {
+    expect(extractYouTubeVideo('https://evil-youtube.com/watch?v=20t-IZZztOk')).toBeNull()
+    expect(extractYouTubeVideo('https://youtu.be.attacker.example/20t-IZZztOk')).toBeNull()
+    expect(extractYouTubeVideo('https://user:pass@youtu.be/20t-IZZztOk')).toBeNull()
+    expect(extractYouTubeVideo('https://youtu.be/short')).toBeNull()
+    expect(extractYouTubeVideo('javascript:alert(1)')).toBeNull()
+  })
+
+  it('extracts deduplicated YouTube previews in parseNoteContent without duplicating raw URL links', () => {
+    const parsed = parseNoteContent({
+      content: 'Great track https://youtu.be/20t-IZZztOk and again https://www.youtube.com/watch?v=20t-IZZztOk',
+      tags: [],
+    })
+    expect(parsed.youtube).toHaveLength(1)
+    expect(parsed.youtube[0].videoId).toBe('20t-IZZztOk')
+    expect(parsed.segments.some((s) => s.type === 'link')).toBe(false)
+    expect(extractYouTubeRefsFromText('Check https://youtu.be/20t-IZZztOk!')).toHaveLength(1)
   })
 })

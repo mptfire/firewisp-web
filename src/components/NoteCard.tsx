@@ -24,6 +24,7 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { MediaLightbox } from './MediaLightbox'
+import { YouTubeCard } from './YouTubeCard'
 import { ZapModal } from './ZapModal'
 
 const requestedQuotes = new Set<string>()
@@ -78,6 +79,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   )
   const parsedQuote = useMemo(() => (quoted ? parseNoteContent(quoted) : null), [quoted])
   const firstImage = parsedQuote?.media.find((m) => m.kind === 'image')
+  const firstYoutube = parsedQuote?.youtube[0]
 
   return (
     <Link
@@ -116,6 +118,11 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
               referrerPolicy="no-referrer"
               className="mt-2 rounded-lg max-h-52 w-full object-cover border border-[#242734]"
             />
+          )}
+          {!firstImage && firstYoutube && (
+            <div className="mt-2">
+              <YouTubeCard video={firstYoutube} compact />
+            </div>
           )}
         </>
       ) : (
@@ -202,6 +209,11 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
     profile?.display_name || profile?.name || `${npub.slice(0, 12)}…`
   const powBits = useMemo(() => verifyEventPow(event.id, event.tags), [event.id, event.tags])
   const parsed = useMemo(() => parseNoteContent(event), [event])
+
+  const hasVisibleBody = useMemo(
+    () => parsed.segments.some((seg) => seg.type !== 'text' || seg.text.trim().length > 0),
+    [parsed.segments],
+  )
 
   const isLongNote = useMemo(() => {
     const textLen = (event.content || '').length
@@ -383,87 +395,89 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
           <ReplyContextLine event={event} />
 
           {/* Body segments (collapses long walls of text cleanly like Jumble) */}
-          <div className="relative">
-            <div
-              className={`mt-1.5 text-[15px] leading-relaxed text-[#ece9e1] whitespace-pre-wrap break-words ${
-                isLongNote && !expanded ? 'max-h-72 overflow-hidden' : ''
-              }`}
-            >
-              {parsed.segments.map((seg, i) => {
-                if (seg.type === 'text') return <span key={i}>{seg.text}</span>
-                if (seg.type === 'link') {
-                  return (
-                    <a
-                      key={i}
-                      href={seg.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#ff8a3d] hover:underline break-all"
-                    >
-                      {seg.display}
-                    </a>
-                  )
-                }
-                if (seg.type === 'hashtag') {
-                  return (
-                    <span key={i} className="inline-flex items-center group">
+          {hasVisibleBody && (
+            <div className="relative">
+              <div
+                className={`mt-1.5 text-[15px] leading-relaxed text-[#ece9e1] whitespace-pre-wrap break-words ${
+                  isLongNote && !expanded ? 'max-h-72 overflow-hidden' : ''
+                }`}
+              >
+                {parsed.segments.map((seg, i) => {
+                  if (seg.type === 'text') return <span key={i}>{seg.text}</span>
+                  if (seg.type === 'link') {
+                    return (
+                      <a
+                        key={i}
+                        href={seg.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#ff8a3d] hover:underline break-all"
+                      >
+                        {seg.display}
+                      </a>
+                    )
+                  }
+                  if (seg.type === 'hashtag') {
+                    return (
+                      <span key={i} className="inline-flex items-center group">
+                        <Link
+                          to={`/search?q=${encodeURIComponent('#' + seg.tag)}`}
+                          className="text-[#f59f00] hover:underline"
+                        >
+                          #{seg.tag}
+                        </Link>
+                        <button
+                          onClick={() => muteHashtag(seg.tag)}
+                          title={`Mute #${seg.tag}`}
+                          className="ml-0.5 opacity-0 group-hover:opacity-100 text-[#8a8880] hover:text-red-400 transition cursor-pointer"
+                        >
+                          <VolumeX className="w-3 h-3" />
+                        </button>
+                      </span>
+                    )
+                  }
+                  if (seg.type === 'mention') {
+                    return <MentionChip key={i} pubkey={seg.pubkey} bech32={seg.bech32} />
+                  }
+                  if (seg.type === 'quote' && seg.eventId) {
+                    return <QuotedNoteCard key={i} eventId={seg.eventId} bech32={seg.bech32} />
+                  }
+                  if (seg.type === 'live') {
+                    return (
                       <Link
-                        to={`/search?q=${encodeURIComponent('#' + seg.tag)}`}
-                        className="text-[#f59f00] hover:underline"
+                        key={i}
+                        to={`/live/${seg.bech32}`}
+                        className="mt-2 p-3 rounded-xl bg-[#161820] border border-[#e8590c]/35 hover:border-[#e8590c] flex items-center justify-between gap-2 transition"
                       >
-                        #{seg.tag}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold uppercase flex items-center gap-1 shrink-0">
+                            <Radio className="w-2.5 h-2.5 animate-pulse" />
+                            LIVE
+                          </span>
+                          <span className="text-xs font-semibold text-white truncate">
+                            Open Live Stream ({seg.dTag})
+                          </span>
+                        </div>
+                        <span className="text-xs text-[#ff8a3d] font-medium shrink-0">Watch →</span>
                       </Link>
-                      <button
-                        onClick={() => muteHashtag(seg.tag)}
-                        title={`Mute #${seg.tag}`}
-                        className="ml-0.5 opacity-0 group-hover:opacity-100 text-[#8a8880] hover:text-red-400 transition cursor-pointer"
-                      >
-                        <VolumeX className="w-3 h-3" />
-                      </button>
-                    </span>
-                  )
-                }
-                if (seg.type === 'mention') {
-                  return <MentionChip key={i} pubkey={seg.pubkey} bech32={seg.bech32} />
-                }
-                if (seg.type === 'quote' && seg.eventId) {
-                  return <QuotedNoteCard key={i} eventId={seg.eventId} bech32={seg.bech32} />
-                }
-                if (seg.type === 'live') {
-                  return (
-                    <Link
-                      key={i}
-                      to={`/live/${seg.bech32}`}
-                      className="mt-2 p-3 rounded-xl bg-[#161820] border border-[#e8590c]/35 hover:border-[#e8590c] flex items-center justify-between gap-2 transition"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold uppercase flex items-center gap-1 shrink-0">
-                          <Radio className="w-2.5 h-2.5 animate-pulse" />
-                          LIVE
-                        </span>
-                        <span className="text-xs font-semibold text-white truncate">
-                          Open Live Stream ({seg.dTag})
-                        </span>
-                      </div>
-                      <span className="text-xs text-[#ff8a3d] font-medium shrink-0">Watch →</span>
-                    </Link>
-                  )
-                }
-                return null
-              })}
-            </div>
-            {isLongNote && !expanded && (
-              <div className="pt-4 -mt-10 relative bg-gradient-to-t from-[#0e0e11] via-[#0e0e11]/90 to-transparent">
-                <button
-                  type="button"
-                  onClick={() => setExpanded(true)}
-                  className="text-xs font-semibold text-[#ff8a3d] hover:underline cursor-pointer"
-                >
-                  Show more
-                </button>
+                    )
+                  }
+                  return null
+                })}
               </div>
-            )}
-          </div>
+              {isLongNote && !expanded && (
+                <div className="pt-4 -mt-10 relative bg-gradient-to-t from-[#0e0e11] via-[#0e0e11]/90 to-transparent">
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(true)}
+                    className="text-xs font-semibold text-[#ff8a3d] hover:underline cursor-pointer"
+                  >
+                    Show more
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Media gallery with NIP-92 ALT badges */}
           {parsed.media.length > 0 && (
@@ -514,6 +528,19 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                     </button>
                   )}
                 </div>
+              ))}
+            </div>
+          )}
+
+          {/* YouTube preview cards (Option 1B — privacy-first thumbnail & title card, zero iframes) */}
+          {parsed.youtube.length > 0 && (
+            <div
+              className={`mt-2.5 grid gap-2 ${
+                parsed.youtube.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
+              }`}
+            >
+              {parsed.youtube.map((yt) => (
+                <YouTubeCard key={yt.videoId} video={yt} />
               ))}
             </div>
           )}
