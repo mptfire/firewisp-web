@@ -130,7 +130,7 @@ export function SettingsPage() {
           <div>
             <div className="font-medium text-white">Play streams &amp; YouTube inline</div>
             <div className="text-[#8c8a82]">
-              Plays streams and YouTube embeds right inside notes when clicked (OutsidePlayer opens the full player / new tab).
+              Plays streams and YouTube embeds right inside notes when clicked (Out opens the full player / new tab).
             </div>
           </div>
           <input

@@ -228,26 +228,47 @@ export function Layout({ children }: { children: ReactNode }) {
                     </select>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setInlineMediaPlayback(!inlineMediaPlayback)}
-                    className="w-full flex items-center justify-between gap-2 pt-0.5 text-[10px] text-[#c2bfb7] hover:text-white cursor-pointer"
-                    title="Choose whether streams & YouTube videos play inline inside notes or jump straight to the full player"
+                  <div
+                    className="w-full flex items-center justify-between gap-1.5 pt-0.5 text-[10px] text-[#c2bfb7]"
+                    title="Choose whether streams & YouTube videos play inline inside notes or open in the full player"
                   >
-                    <span className="flex items-center gap-1 truncate">
+                    <span className="flex items-center gap-1 min-w-0">
                       <Play className="w-3 h-3 text-[#f59f00] shrink-0" />
-                      <span className="truncate">Play streams & YT</span>
+                      <span className="truncate">Play streams &amp; YT</span>
                     </span>
-                    <span
-                      className={`px-2 py-0.5 text-[10px] font-semibold shrink-0 transition ${
-                        inlineMediaPlayback
-                          ? 'rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300'
-                          : 'fw-edge-btn fw-edge-sm fw-edge-block text-red-300'
-                      }`}
+                    <div
+                      role="group"
+                      aria-label="Stream and YouTube playback mode"
+                      className="inline-flex items-center rounded-lg bg-[#0e0e11] border border-[#262938] p-0.5 gap-0.5 shrink-0"
                     >
-                      {inlineMediaPlayback ? 'Inline' : 'OutsidePlayer'}
-                    </span>
-                  </button>
+                      <button
+                        type="button"
+                        aria-pressed={inlineMediaPlayback}
+                        onClick={() => setInlineMediaPlayback(true)}
+                        title="Play streams & YouTube inline inside notes"
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          inlineMediaPlayback
+                            ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
+                            : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
+                        }`}
+                      >
+                        Inline
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={!inlineMediaPlayback}
+                        onClick={() => setInlineMediaPlayback(false)}
+                        title="Open streams & YouTube in full player / new tab"
+                        className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          !inlineMediaPlayback
+                            ? 'bg-red-600/25 border-red-500/50 text-red-300'
+                            : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
+                        }`}
+                      >
+                        Out
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
