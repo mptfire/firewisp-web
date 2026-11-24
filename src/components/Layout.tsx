@@ -58,6 +58,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const setPrimaryBlossomServer = useSettingsStore((s) => s.setPrimaryBlossomServer)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
+  const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -238,13 +239,13 @@ export function Layout({ children }: { children: ReactNode }) {
                       <span className="truncate">Play streams & YT</span>
                     </span>
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 border transition ${
+                      className={`px-2 py-0.5 text-[10px] font-semibold shrink-0 transition ${
                         inlineMediaPlayback
-                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                          : 'bg-[#1d1f29] border-[#2e3242] text-[#9a9890]'
+                          ? 'rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300'
+                          : 'fw-edge-btn fw-edge-sm fw-edge-block text-red-300'
                       }`}
                     >
-                      {inlineMediaPlayback ? 'Inline' : 'Player'}
+                      {inlineMediaPlayback ? 'Inline' : 'OutsidePlayer'}
                     </span>
                   </button>
                 </div>
@@ -291,7 +292,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <div className="mt-3">
                 <StreamTopZappersCard />
               </div>
-            ) : isDesktopMd && isFeedPage ? (
+            ) : isDesktopMd && isFeedPage && showLiveZaps ? (
               <div className="mt-3">
                 <LiveZapsCard />
               </div>

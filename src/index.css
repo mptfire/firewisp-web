@@ -161,8 +161,70 @@
   --fw-edge-speed: 3.1s;
 }
 
+.fw-edge-ember {
+  --fw-edge-base: rgba(232, 89, 12, 0.35);
+  --fw-edge-mid: #ff922b;
+  --fw-edge-hot: #ffe066;
+  --fw-edge-bg: #1a1c26;
+  --fw-edge-bg-hover: #d9480f;
+  --fw-edge-speed: 2.8s;
+  box-shadow: 0 0 12px -4px rgba(232, 89, 12, 0.45);
+}
+
+/* Yellow lightning circuit pulse around Live Zaps card when a new zap lands */
+.fw-zap-circuit {
+  --fw-circuit-radius: 1rem;
+  --fw-circuit-thickness: 2px;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--fw-circuit-radius);
+  background: rgba(245, 159, 0, 0.25);
+  padding: var(--fw-circuit-thickness);
+  transition: box-shadow 300ms ease;
+}
+
+.fw-zap-circuit::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(220%, 560px);
+  aspect-ratio: 1 / 1;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(
+    from 0deg,
+    rgba(245, 159, 0, 0.22) 0deg 175deg,
+    #f59f00 245deg,
+    #ffe066 315deg,
+    #fff9db 346deg,
+    rgba(245, 159, 0, 0.22) 360deg
+  );
+  transform: translate(-50%, -50%) rotate(0deg);
+  transition: opacity 250ms ease;
+}
+
+.fw-zap-circuit.fw-zap-circuit-active {
+  box-shadow: 0 0 18px -2px rgba(255, 212, 59, 0.6);
+}
+
+.fw-zap-circuit.fw-zap-circuit-active::before {
+  opacity: 1;
+  animation: fw-edge-spin 1.5s linear infinite;
+}
+
+.fw-zap-circuit-inner {
+  position: relative;
+  z-index: 1;
+  border-radius: calc(var(--fw-circuit-radius) - var(--fw-circuit-thickness));
+  background: #15161c;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .fw-edge-btn::before {
+  .fw-edge-btn::before,
+  .fw-zap-circuit.fw-zap-circuit-active::before {
     animation: none;
   }
 }

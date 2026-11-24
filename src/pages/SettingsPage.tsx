@@ -98,6 +98,21 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Show Live Zaps feed</div>
+            <div className="text-[#8c8a82]">
+              Displays the live NIP-57 zap scoreboard on the main feed page (swaps with stream Top Zappers on live streams).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showLiveZaps}
+            onChange={(e) => settings.setShowLiveZaps(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Hover to preview live streams</div>
             <div className="text-[#8c8a82]">
               Plays a muted live preview when hovering over stream cards (connects directly to the stream host on hover).
@@ -115,7 +130,7 @@ export function SettingsPage() {
           <div>
             <div className="font-medium text-white">Play streams &amp; YouTube inline</div>
             <div className="text-[#8c8a82]">
-              Plays streams and YouTube embeds right inside notes when clicked (off opens full player / new tab).
+              Plays streams and YouTube embeds right inside notes when clicked (OutsidePlayer opens the full player / new tab).
             </div>
           </div>
           <input

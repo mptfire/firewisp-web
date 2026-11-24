@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Radio, Zap } from 'lucide-react'
 import { LIVE_DISCOVERY_RELAYS } from '../lib/nostr/nip53'
@@ -36,6 +36,9 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
   const [rawZaps, setRawZaps] = useState<LiveZapItem[]>([])
   const [loading, setLoading] = useState(true)
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
+  const [circuitActive, setCircuitActive] = useState(false)
+  const [latestPulsedId, setLatestPulsedId] = useState<string | null>(null)
+  const circuitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 30_000)
@@ -54,7 +57,20 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
     const seenIds = new Set<string>()
     const profileQueue = new Set<string>()
     let profileTimer: ReturnType<typeof setTimeout> | null = null
+    let eoseReached = false
     let active = true
+
+    const triggerYellowCircuit = (zapId: string) => {
+      if (!active) return
+      setCircuitActive(true)
+      setLatestPulsedId(zapId)
+      if (circuitTimerRef.current) clearTimeout(circuitTimerRef.current)
+      circuitTimerRef.current = setTimeout(() => {
+        circuitTimerRef.current = null
+        setCircuitActive(false)
+        setLatestPulsedId(null)
+      }, 2800)
+    }
 
     const queueProfiles = (pks: string[]) => {
       const existing = useNostrStore.getState().profiles
@@ -72,7 +88,10 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
     }
 
     const fallbackDone = setTimeout(() => {
-      if (active) setLoading(false)
+      if (active) {
+        eoseReached = true
+        setLoading(false)
+      }
     }, 3500)
 
     const sub = nostrPool.subscribe(
@@ -86,6 +105,9 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
           if (!parsed) return
           queueProfiles([parsed.senderPubkey, parsed.recipientPubkey])
           setLoading(false)
+          if (eoseReached || parsed.createdAt >= startSec - 5) {
+            triggerYellowCircuit(parsed.id)
+          }
           setRawZaps((prev) => {
             if (prev.some((z) => z.id === parsed.id)) return prev
             return [parsed, ...prev]
@@ -94,7 +116,10 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
           })
         },
         oneose: () => {
-          if (active) setLoading(false)
+          if (active) {
+            eoseReached = true
+            setLoading(false)
+          }
         },
       },
     )
@@ -103,6 +128,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
       active = false
       clearTimeout(fallbackDone)
       if (profileTimer) clearTimeout(profileTimer)
+      if (circuitTimerRef.current) clearTimeout(circuitTimerRef.current)
       sub.close()
     }
   }, [])
@@ -121,18 +147,35 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
   )
 
   return (
-    <div className="p-3 rounded-2xl bg-[#15161c] border border-[#f59f00]/25 space-y-2">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[#f59f00] flex items-center gap-1.5">
-          <Zap className="w-3.5 h-3.5 text-[#f59f00] fill-[#f59f00]/40 shrink-0" />
-          Live Zaps
-        </span>
-        <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          LIVE
-        </span>
-      </div>
+    <div className={`fw-zap-circuit ${circuitActive ? 'fw-zap-circuit-active' : ''}`}>
+      <div className="fw-zap-circuit-inner p-3 space-y-2">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#f59f00] flex items-center gap-1.5">
+            <Zap
+              className={`w-3.5 h-3.5 shrink-0 transition ${
+                circuitActive
+                  ? 'text-[#ffe066] fill-[#ffe066] scale-110'
+                  : 'text-[#f59f00] fill-[#f59f00]/40'
+              }`}
+            />
+            Live Zaps
+          </span>
+          <span
+            className={`px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0 transition ${
+              circuitActive
+                ? 'bg-[#ffe066]/20 border-[#ffe066]/60 text-[#ffe066]'
+                : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full animate-pulse ${
+                circuitActive ? 'bg-[#ffe066]' : 'bg-emerald-400'
+              }`}
+            />
+            {circuitActive ? 'ZAP!' : 'LIVE'}
+          </span>
+        </div>
 
       {/* Compact Scoreboard Strip */}
       {stats.zapCount > 0 && (
@@ -185,14 +228,17 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
               recipientProf?.name ||
               `${z.recipientPubkey.slice(0, 7)}…`
             const isBigZap = z.sats >= 1000
+            const isFreshHit = latestPulsedId === z.id
 
             return (
               <div
                 key={z.id}
                 className={`px-2 py-1.5 rounded-xl border transition space-y-1 ${
-                  isBigZap
-                    ? 'bg-[#f59f00]/10 border-[#f59f00]/35'
-                    : 'bg-[#111219] border-[#222532] hover:border-[#2e3245]'
+                  isFreshHit
+                    ? 'bg-[#ffe066]/15 border-[#ffe066]/65'
+                    : isBigZap
+                      ? 'bg-[#f59f00]/10 border-[#f59f00]/35'
+                      : 'bg-[#111219] border-[#222532] hover:border-[#2e3245]'
                 }`}
               >
                 {/* Row 1: Sender + Sats + Time */}
@@ -270,9 +316,10 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
         </div>
       )}
 
-      <div className="text-[9px] text-[#6f6d66] flex items-center justify-between px-0.5">
-        <span>Past hour · NIP-57 receipts</span>
-        <span>Relay direct</span>
+        <div className="text-[9px] text-[#6f6d66] flex items-center justify-between px-0.5">
+          <span>Past hour · NIP-57 receipts</span>
+          <span>Relay direct</span>
+        </div>
       </div>
     </div>
   )

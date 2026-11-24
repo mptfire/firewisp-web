@@ -71,6 +71,7 @@ export interface SettingsState {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  showLiveZaps: boolean
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   nwcUri: string
@@ -109,6 +110,7 @@ export interface SettingsState {
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
+  setShowLiveZaps: (enabled: boolean) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
   setNwcUri: (uri: string, remember?: boolean) => void
@@ -138,6 +140,7 @@ interface PersistedSettings {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  showLiveZaps: boolean
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
@@ -180,6 +183,7 @@ function loadInitial(): PersistedSettings & {
     showExtendedTab: false,
     showExploreTab: false,
     showLiveNowBar: true,
+    showLiveZaps: true,
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
     nwcUri: storedNwc.nwcUri,
@@ -274,6 +278,7 @@ function persist(state: SettingsState) {
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
     showLiveNowBar: state.showLiveNowBar,
+    showLiveZaps: state.showLiveZaps,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
   }
@@ -517,6 +522,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowLiveNowBar: (showLiveNowBar) => {
     set({ showLiveNowBar })
+    persist(get())
+  },
+  setShowLiveZaps: (showLiveZaps) => {
+    set({ showLiveZaps })
     persist(get())
   },
   setHoverStreamPreview: (hoverStreamPreview) => {

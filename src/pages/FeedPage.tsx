@@ -82,6 +82,7 @@ export function FeedPage() {
   const showFireWispTab = useSettingsStore((s) => s.showFireWispTab)
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
+  const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
@@ -430,28 +431,30 @@ export function FeedPage() {
       <LiveNowRow />
 
       {/* Mobile collapsible Live Zaps feed (desktop shows Live Zaps in the left sidebar column) */}
-      <div className="md:hidden border-b border-[#20222c] bg-[#111218]/90 px-3 py-2 space-y-2">
-        <button
-          type="button"
-          onClick={() => setMobileLiveZapsOpen((v) => !v)}
-          aria-expanded={mobileLiveZapsOpen}
-          className="w-full flex items-center justify-between gap-2 text-xs font-semibold text-[#ece9e1] cursor-pointer"
-        >
-          <span className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-[#f59f00] fill-[#f59f00]/40" />
-            <span>Live Zaps</span>
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[9px] font-bold uppercase">
-              LIVE
+      {showLiveZaps && (
+        <div className="md:hidden border-b border-[#20222c] bg-[#111218]/90 px-3 py-2 space-y-2">
+          <button
+            type="button"
+            onClick={() => setMobileLiveZapsOpen((v) => !v)}
+            aria-expanded={mobileLiveZapsOpen}
+            className="w-full flex items-center justify-between gap-2 text-xs font-semibold text-[#ece9e1] cursor-pointer"
+          >
+            <span className="flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-[#f59f00] fill-[#f59f00]/40" />
+              <span>Live Zaps</span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[9px] font-bold uppercase">
+                LIVE
+              </span>
             </span>
-          </span>
-          {mobileLiveZapsOpen ? (
-            <ChevronUp className="w-4 h-4 text-[#8c8a82]" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-[#8c8a82]" />
-          )}
-        </button>
-        {mobileLiveZapsOpen && <LiveZapsCard compact />}
-      </div>
+            {mobileLiveZapsOpen ? (
+              <ChevronUp className="w-4 h-4 text-[#8c8a82]" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-[#8c8a82]" />
+            )}
+          </button>
+          {mobileLiveZapsOpen && <LiveZapsCard compact />}
+        </div>
+      )}
 
       <Composer />
 

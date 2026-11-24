@@ -778,7 +778,7 @@ export function LiveStreamPage() {
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="px-3 py-2 rounded-xl bg-[#1a1c26] hover:bg-[#e8590c] border border-[#32364a] hover:border-[#e8590c] text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 transition shadow-sm shrink-0 cursor-pointer"
+            className="fw-edge-btn fw-edge-ember px-3.5 py-2 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 transition shrink-0 cursor-pointer"
             aria-label="Back to Feed"
             title="Return to main feed"
           >
