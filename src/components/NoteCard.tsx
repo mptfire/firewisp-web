@@ -27,6 +27,7 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
+import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
 import { YouTubeCard } from './YouTubeCard'
 import { ZapModal } from './ZapModal'
@@ -117,14 +118,24 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const entry = useLiveStore((s) => s.liveStreams[aTag])
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
+  const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
   const profile = useNostrStore((s) => s.profiles[displayPk])
   const [thumbFailed, setThumbFailed] = useState(false)
   const [playingInline, setPlayingInline] = useState(false)
+  const [hoverActive, setHoverActive] = useState(false)
+  const [previewStatus, setPreviewStatus] = useState<HoverPreviewStatus | null>(null)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!inlineMediaPlayback) setPlayingInline(false)
   }, [inlineMediaPlayback])
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    }
+  }, [])
 
   const hostName = profile?.display_name || profile?.name || `${displayPk.slice(0, 10)}…`
   const title = entry?.activity.title || `Live Stream (${dTag.slice(0, 24)})`
@@ -132,6 +143,27 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const streamUrl = entry?.activity.streamingUrl || entry?.activity.recordingUrl
   const isLive = entry?.activity.status === 'live'
   const viewers = entry?.activity.currentParticipants
+
+  const startHoverPreview = () => {
+    if (!hoverStreamPreview || !streamUrl || playingInline) return
+    if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
+      return
+    }
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null
+      setHoverActive(true)
+    }, 350)
+  }
+
+  const stopHoverPreview = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+    setHoverActive(false)
+    setPreviewStatus(null)
+  }
 
   return (
     <div
@@ -148,13 +180,25 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           onStreamOffline={() => markStreamOffline(aTag)}
         />
       ) : streamUrl ? (
-        <button
-          type="button"
+        <div
+          role="button"
+          tabIndex={0}
+          onMouseEnter={startHoverPreview}
+          onMouseLeave={stopHoverPreview}
           onClick={() => {
+            stopHoverPreview()
             if (inlineMediaPlayback) {
               setPlayingInline(true)
             } else {
               navigate(`/live/${bech32}`)
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              stopHoverPreview()
+              if (inlineMediaPlayback) setPlayingInline(true)
+              else navigate(`/live/${bech32}`)
             }
           }}
           className="relative block aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden cursor-pointer text-left"
@@ -174,21 +218,26 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               <Avatar src={profile?.picture} pubkey={displayPk} name={hostName} size="lg" />
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center">
-            <span className="w-12 h-12 rounded-full bg-[#e8590c]/95 group-hover:scale-105 transition shadow-xl flex items-center justify-center text-white">
-              <Play className="w-5 h-5 fill-white ml-0.5" />
-            </span>
+          {hoverActive && (
+            <LiveHoverPreview streamUrl={streamUrl} onStatusChange={setPreviewStatus} />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center pointer-events-none">
+            {previewStatus !== 'playing' && (
+              <span className="w-12 h-12 rounded-full bg-[#e8590c]/95 group-hover:scale-105 transition shadow-xl flex items-center justify-center text-white">
+                <Play className="w-5 h-5 fill-white ml-0.5" />
+              </span>
+            )}
           </div>
-          <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow">
+          <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow pointer-events-none">
             <Radio className="w-2.5 h-2.5 animate-pulse" />
             {isLive ? 'LIVE' : 'STREAM'}
           </span>
           {viewers !== undefined && viewers > 0 && (
-            <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-[11px] font-medium text-[#ece9e1]">
+            <span className="absolute bottom-2 right-2 z-10 px-2 py-0.5 rounded bg-black/80 text-[11px] font-medium text-[#ece9e1] pointer-events-none">
               {viewers.toLocaleString()} watching
             </span>
           )}
-        </button>
+        </div>
       ) : null}
 
       <Link

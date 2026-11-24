@@ -84,6 +84,21 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Hover to preview live streams</div>
+            <div className="text-[#8c8a82]">
+              Plays a muted live preview when hovering over stream cards (connects directly to the stream host on hover).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.hoverStreamPreview}
+            onChange={(e) => settings.setHoverStreamPreview(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Show Fire Wisp relay tab</div>
             <div className="text-[#8c8a82]">
               Dedicated feed for wss://firewisp.relay.rtard.de (12-bit PoW community relay).

@@ -12,6 +12,9 @@ import { useLiveStore, type LiveStreamEntry } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
+import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
+
+const HOVER_PREVIEW_DELAY_MS = 350
 
 function formatCompactCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -30,11 +33,16 @@ function LiveStreamPreviewCard({
 }) {
   const displayPubkey = getStreamPrimaryPubkey(stream.activity)
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
+  const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
   const [imgFailed, setImgFailed] = useState(false)
+  const [hoverActive, setHoverActive] = useState(false)
+  const [previewStatus, setPreviewStatus] = useState<HoverPreviewStatus | null>(null)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const hostName = profile?.display_name || profile?.name || `${displayPubkey.slice(0, 8)}…`
   const title = stream.activity.title || `${hostName}'s stream`
   const thumb = stream.activity.image
+  const previewUrl = stream.activity.streamingUrl || stream.activity.recordingUrl
   const naddr = useMemo(
     () =>
       encodeLiveNaddr(
@@ -49,6 +57,33 @@ function LiveStreamPreviewCard({
     setImgFailed(false)
   }, [thumb])
 
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    }
+  }, [])
+
+  const handleMouseEnter = () => {
+    if (!hoverStreamPreview || !previewUrl) return
+    if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
+      return
+    }
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = setTimeout(() => {
+      hoverTimerRef.current = null
+      setHoverActive(true)
+    }, HOVER_PREVIEW_DELAY_MS)
+  }
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+    setHoverActive(false)
+    setPreviewStatus(null)
+  }
+
   const viewers = stream.activity.currentParticipants
   const chatters = stream.chatters.length
   const statLabel =
@@ -61,6 +96,8 @@ function LiveStreamPreviewCard({
   return (
     <Link
       to={`/live/${naddr}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       className={`w-48 sm:w-52 rounded-xl bg-[#161820] hover:bg-[#1c1f2b] border overflow-hidden transition shrink-0 group flex flex-col ${
         isFollowed
           ? 'border-emerald-500/45 hover:border-emerald-400'
@@ -84,10 +121,14 @@ function LiveStreamPreviewCard({
           </div>
         )}
 
+        {hoverActive && previewUrl && (
+          <LiveHoverPreview streamUrl={previewUrl} onStatusChange={setPreviewStatus} />
+        )}
+
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25 pointer-events-none" />
 
         {/* Top-left LIVE + Following badges */}
-        <div className="absolute top-2 left-2 flex items-center gap-1">
+        <div className="absolute top-2 left-2 z-10 flex items-center gap-1 pointer-events-none">
           <span className="px-1.5 py-0.5 rounded bg-red-600/95 text-white text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shadow">
             <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
             LIVE
@@ -99,16 +140,18 @@ function LiveStreamPreviewCard({
           )}
         </div>
 
-        {/* Hover play icon */}
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
-          <div className="w-10 h-10 rounded-full bg-[#e8590c]/90 text-white flex items-center justify-center shadow-lg">
-            <Play className="w-4 h-4 fill-white ml-0.5" />
+        {/* Hover play icon (hidden once live video preview is rendering so stream is unobstructed) */}
+        {previewStatus !== 'playing' && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
+            <div className="w-10 h-10 rounded-full bg-[#e8590c]/90 text-white flex items-center justify-center shadow-lg">
+              <Play className="w-4 h-4 fill-white ml-0.5" />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Bottom-right viewer/chatter pill */}
         {statLabel && (
-          <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] font-medium text-[#ece9e1]">
+          <span className="absolute bottom-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[10px] font-medium text-[#ece9e1] pointer-events-none">
             {statLabel}
           </span>
         )}

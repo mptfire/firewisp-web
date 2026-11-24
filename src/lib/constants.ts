@@ -16,7 +16,7 @@ export const DEFAULT_BLOSSOM_PRIMARY = 'https://blossom.nostr.build'
 export const DEFAULT_BLOSSOM_FALLBACK = 'https://blossom.primal.net'
 
 export const ANDROID_APP_URL = 'https://app.firewisp.rtard.de/'
-export const ZAPSTORE_URL = 'https://zapstore.dev/'
+export const ZAPSTORE_URL = 'https://zapstore.dev/apps/de.rtard.wisp'
 export const SOURCE_REPO_URL = 'https://github.com/mptfire/wisp'
 
 export const DEFAULT_RELAYS: RelayEntry[] = [
