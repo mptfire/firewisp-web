@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Event } from 'nostr-tools/pure'
 import { ImagePlus, Send, Cpu, X, FileText, Loader2 } from 'lucide-react'
 import { buildImetaTag, uploadToBlossom, type BlossomUploadResult } from '../lib/nostr/blossom'
@@ -32,6 +32,8 @@ export function Composer({
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const profile = useNostrStore((s) => (pubkey ? s.profiles[pubkey] : undefined))
   const publishNote = useNostrStore((s) => s.publishNote)
+  const pendingShareText = useNostrStore((s) => s.pendingShareText)
+  const setPendingShareText = useNostrStore((s) => s.setPendingShareText)
   const notePowEnabled = useSettingsStore((s) => s.notePowEnabled)
   const notePowBits = useSettingsStore((s) => s.notePowBits)
   const blossomServers = useSettingsStore((s) => s.blossomServers)
@@ -43,7 +45,20 @@ export function Composer({
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const youtubePreviews = useMemo(() => extractYouTubeRefsFromText(text, 2), [text])
+
+  // Consume incoming Android / OS Web Share Target content once signed in (only top-level composer)
+  useEffect(() => {
+    if (replyTo || !pendingShareText || !signer?.canSign) return
+    setText((prev) => {
+      if (!prev.trim()) return pendingShareText
+      const sep = prev.endsWith('\n') ? '' : '\n'
+      return `${prev}${sep}${pendingShareText}`
+    })
+    setPendingShareText(null)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [replyTo, pendingShareText, signer?.canSign, setPendingShareText])
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -105,9 +120,11 @@ export function Composer({
     return (
       <div className="border-b border-[#22242e] p-4 flex items-center justify-between gap-3 bg-[#121319]">
         <p className="text-sm text-[#9a9890]">
-          {signer
-            ? 'Watch-only mode active. Sign in with NIP-07, Bunker, or your key to post.'
-            : 'Browsing Fire Wisp read-only. Sign in to post, like, or upload media.'}
+          {pendingShareText && !replyTo
+            ? 'Shared link ready — sign in to post it to Fire Wisp.'
+            : signer
+              ? 'Watch-only mode active. Sign in with NIP-07, Bunker, or your key to post.'
+              : 'Browsing Fire Wisp read-only. Sign in to post, like, or upload media.'}
         </p>
         <button
           onClick={openAuthModal}
@@ -153,6 +170,7 @@ export function Composer({
         />
         <div className="flex-1 min-w-0">
           <textarea
+            ref={textareaRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

@@ -34,6 +34,7 @@ import {
   parseLiveActivity,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
+import { parseSharedQueryParams } from '../shareTarget'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -597,5 +598,21 @@ describe('YouTube preview card parser & security guards (Option 1B)', () => {
     expect(parsed.youtube[0].videoId).toBe('20t-IZZztOk')
     expect(parsed.segments.some((s) => s.type === 'link')).toBe(false)
     expect(extractYouTubeRefsFromText('Check https://youtu.be/20t-IZZztOk!')).toHaveLength(1)
+  })
+
+  it('parses and deduplicates Android Web Share Target params cleanly', () => {
+    expect(
+      parseSharedQueryParams(
+        '?title=Ali+Campbell+-+I+Want+You&text=https%3A%2F%2Fyoutu.be%2F20t-IZZztOk',
+      ),
+    ).toBe('Ali Campbell - I Want You\nhttps://youtu.be/20t-IZZztOk')
+
+    expect(
+      parseSharedQueryParams(
+        '?title=Same&text=Same+https%3A%2F%2Fyoutu.be%2F20t-IZZztOk&url=https%3A%2F%2Fyoutu.be%2F20t-IZZztOk',
+      ),
+    ).toBe('Same https://youtu.be/20t-IZZztOk')
+
+    expect(parseSharedQueryParams('')).toBeNull()
   })
 })

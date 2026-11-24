@@ -1,5 +1,6 @@
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { parseSharedQueryParams } from './lib/shareTarget'
 import { useAuthStore } from './lib/store/useAuthStore'
 import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
@@ -46,6 +47,20 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
   }
 }
 
+function ShareTargetRoute() {
+  const location = useLocation()
+  const setPendingShareText = useNostrStore((s) => s.setPendingShareText)
+
+  useEffect(() => {
+    const shared = parseSharedQueryParams(location.search)
+    if (shared) {
+      setPendingShareText(shared)
+    }
+  }, [location.search, setPendingShareText])
+
+  return <Navigate to="/" replace />
+}
+
 export function App() {
   const restoreSession = useAuthStore((s) => s.restoreSession)
   const pubkey = useAuthStore((s) => s.pubkey)
@@ -83,6 +98,7 @@ export function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<FeedPage />} />
+            <Route path="/share" element={<ShareTargetRoute />} />
             <Route path="/e/:eventId" element={<ThreadPage />} />
             <Route path="/p/:pubkey" element={<ProfilePage />} />
             <Route path="/notifications" element={<NotificationsPage />} />

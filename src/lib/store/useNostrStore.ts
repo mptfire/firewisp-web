@@ -118,8 +118,10 @@ export interface NostrState {
   loadingFeed: boolean
   powBusyMessage: string | null
   toastMessage: string | null
+  pendingShareText: string | null
 
   setToast: (msg: string | null) => void
+  setPendingShareText: (text: string | null) => void
   setActiveFeedTab: (tab: FeedTab) => void
   setShowRepliesInFollows: (show: boolean) => void
   flushPendingFeed: (tab: FeedTab) => void
@@ -287,8 +289,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadingFeed: false,
   powBusyMessage: null,
   toastMessage: null,
+  pendingShareText: null,
 
   setToast: (toastMessage) => set({ toastMessage }),
+  setPendingShareText: (pendingShareText) => set({ pendingShareText }),
   setActiveFeedTab: (activeFeedTab) => set({ activeFeedTab }),
   setShowRepliesInFollows: (showRepliesInFollows) => set({ showRepliesInFollows }),
 
