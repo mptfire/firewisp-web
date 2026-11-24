@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Event } from 'nostr-tools/pure'
-import { ImagePlus, Send, Cpu, X, FileText, Loader2 } from 'lucide-react'
-import { buildImetaTag, uploadToBlossom, type BlossomUploadResult } from '../lib/nostr/blossom'
+import { ImagePlus, Send, Cpu, X, FileText, Loader2, UploadCloud } from 'lucide-react'
+import {
+  buildCandidateServers,
+  buildImetaTag,
+  formatBlossomHost,
+  uploadToBlossom,
+  type BlossomUploadResult,
+} from '../lib/nostr/blossom'
 import { extractYouTubeRefsFromText } from '../lib/nostr/youtube'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -42,11 +48,23 @@ export function Composer({
   const [attachments, setAttachments] = useState<UploadedDraft[]>([])
   const [editingAltIdx, setEditingAltIdx] = useState<number | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadingHost, setUploadingHost] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const youtubePreviews = useMemo(() => extractYouTubeRefsFromText(text, 2), [text])
+  const candidateServers = useMemo(
+    () => buildCandidateServers(blossomServers),
+    [blossomServers],
+  )
+  const [selectedServer, setSelectedServer] = useState<string>(candidateServers[0] || '')
+
+  useEffect(() => {
+    if (!candidateServers.includes(selectedServer)) {
+      setSelectedServer(candidateServers[0] || '')
+    }
+  }, [candidateServers, selectedServer])
 
   // Consume incoming Android / OS Web Share Target content once signed in (only top-level composer)
   useEffect(() => {
@@ -68,20 +86,28 @@ export function Composer({
     }
     setError(null)
     setUploading(true)
+    const orderedServers = selectedServer
+      ? [selectedServer, ...candidateServers.filter((s) => s !== selectedServer)]
+      : candidateServers
+    setUploadingHost(orderedServers[0] ? formatBlossomHost(orderedServers[0]) : null)
     try {
       for (const file of Array.from(files)) {
         const res = await uploadToBlossom(
           file,
           file.type || 'application/octet-stream',
           signer,
-          blossomServers,
+          orderedServers,
+          fetch,
+          ({ host }) => setUploadingHost(host),
         )
         setAttachments((prev) => [...prev, { upload: res, alt: '' }])
+        useNostrStore.getState().setToast(`Uploaded to ${formatBlossomHost(res.server)}`)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setUploading(false)
+      setUploadingHost(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
@@ -213,43 +239,52 @@ export function Composer({
 
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
-              {attachments.map((att, idx) => (
-                <div
-                  key={att.upload.url}
-                  className="relative group rounded-xl overflow-hidden border border-[#2a2d3a] bg-[#0e0e11]"
-                >
-                  {att.upload.type.startsWith('image/') ? (
-                    <img
-                      src={att.upload.url}
-                      alt={att.alt || 'Upload preview'}
-                      referrerPolicy="no-referrer"
-                      className="w-24 h-24 object-cover"
-                    />
-                  ) : (
-                    <div className="w-24 h-24 flex items-center justify-center text-xs text-[#9a9890] p-2 text-center">
-                      {att.upload.type}
+              {attachments.map((att, idx) => {
+                const host = formatBlossomHost(att.upload.server)
+                return (
+                  <div
+                    key={att.upload.url}
+                    className="flex flex-col gap-1"
+                    title={`Hosted on ${host}`}
+                  >
+                    <div className="relative group rounded-xl overflow-hidden border border-[#2a2d3a] bg-[#0e0e11]">
+                      {att.upload.type.startsWith('image/') ? (
+                        <img
+                          src={att.upload.url}
+                          alt={att.alt || 'Upload preview'}
+                          referrerPolicy="no-referrer"
+                          className="w-24 h-24 object-cover"
+                        />
+                      ) : (
+                        <div className="w-24 h-24 flex items-center justify-center text-xs text-[#9a9890] p-2 text-center">
+                          {att.upload.type}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
+                        className="absolute top-1 right-1 p-1 rounded-full bg-black/75 text-white hover:bg-red-600 cursor-pointer"
+                        aria-label="Remove attachment"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => setEditingAltIdx(idx)}
+                        className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer ${
+                          att.alt
+                            ? 'bg-emerald-600/90 text-white'
+                            : 'bg-black/75 text-[#d4d2cb] hover:bg-[#e8590c]'
+                        }`}
+                      >
+                        <FileText className="w-2.5 h-2.5" />
+                        {att.alt ? 'ALT ✓' : '+ ALT'}
+                      </button>
                     </div>
-                  )}
-                  <button
-                    onClick={() => setAttachments((p) => p.filter((_, i) => i !== idx))}
-                    className="absolute top-1 right-1 p-1 rounded-full bg-black/75 text-white hover:bg-red-600 cursor-pointer"
-                    aria-label="Remove attachment"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => setEditingAltIdx(idx)}
-                    className={`absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-0.5 cursor-pointer ${
-                      att.alt
-                        ? 'bg-emerald-600/90 text-white'
-                        : 'bg-black/75 text-[#d4d2cb] hover:bg-[#e8590c]'
-                    }`}
-                  >
-                    <FileText className="w-2.5 h-2.5" />
-                    {att.alt ? 'ALT ✓' : '+ ALT'}
-                  </button>
-                </div>
-              ))}
+                    <span className="text-[10px] text-[#8c8a82] font-mono truncate max-w-24 text-center">
+                      {host}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -283,8 +318,8 @@ export function Composer({
             </p>
           )}
 
-          <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-[#1f212b]">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-[#1f212b] flex-wrap">
+            <div className="flex items-center gap-2 min-w-0 flex-wrap">
               <input
                 ref={fileRef}
                 type="file"
@@ -297,7 +332,7 @@ export function Composer({
                 type="button"
                 disabled={uploading}
                 onClick={() => fileRef.current?.click()}
-                className="p-2 rounded-lg text-[#9a9890] hover:text-[#ff922b] hover:bg-white/5 transition flex items-center gap-1.5 text-xs cursor-pointer"
+                className="p-2 rounded-lg text-[#9a9890] hover:text-[#ff922b] hover:bg-white/5 transition flex items-center gap-1.5 text-xs cursor-pointer shrink-0"
                 title="Upload media via Blossom (EXIF stripped client-side)"
               >
                 {uploading ? (
@@ -305,8 +340,41 @@ export function Composer({
                 ) : (
                   <ImagePlus className="w-4 h-4" />
                 )}
-                <span className="hidden sm:inline">{uploading ? 'Uploading…' : 'Media'}</span>
+                <span className="hidden sm:inline">
+                  {uploading
+                    ? uploadingHost
+                      ? `Uploading to ${uploadingHost}…`
+                      : 'Uploading…'
+                    : 'Media'}
+                </span>
               </button>
+
+              {!uploading && candidateServers.length > 0 && (
+                <label
+                  className="inline-flex items-center gap-1 text-[11px] text-[#9a9890] bg-[#161822] border border-[#252836] rounded-lg px-2 py-1 max-w-[190px]"
+                  title="Blossom server used for uploads (falls back to others automatically)"
+                >
+                  <UploadCloud className="w-3 h-3 text-[#f59f00] shrink-0" />
+                  <select
+                    aria-label="Blossom upload server"
+                    value={selectedServer}
+                    onChange={(e) => setSelectedServer(e.target.value)}
+                    className="bg-transparent text-[11px] font-mono text-[#d4d2cb] focus:outline-none truncate cursor-pointer max-w-[155px]"
+                  >
+                    {candidateServers.map((srv) => (
+                      <option key={srv} value={srv} className="bg-[#14151e] text-white">
+                        {formatBlossomHost(srv)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {uploading && uploadingHost && (
+                <span className="sm:hidden text-[11px] font-mono text-[#ff922b] truncate max-w-[180px]">
+                  → {uploadingHost}
+                </span>
+              )}
 
               {notePowEnabled && (
                 <span

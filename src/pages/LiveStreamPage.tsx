@@ -16,7 +16,13 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { buildImetaTag, uploadToBlossom, type BlossomUploadResult } from '../lib/nostr/blossom'
+import {
+  buildCandidateServers,
+  buildImetaTag,
+  formatBlossomHost,
+  uploadToBlossom,
+  type BlossomUploadResult,
+} from '../lib/nostr/blossom'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr } from '../lib/nostr/nip53'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
@@ -403,7 +409,12 @@ export function LiveStreamPage() {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<BlossomUploadResult[]>([])
   const [uploading, setUploading] = useState(false)
+  const [uploadingHost, setUploadingHost] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  const primaryBlossomHost = useMemo(() => {
+    const first = buildCandidateServers(blossomServers)[0]
+    return first ? formatBlossomHost(first) : 'Blossom'
+  }, [blossomServers])
   const [sending, setSending] = useState(false)
   const [replyTarget, setReplyTarget] = useState<LiveChatMessage | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
@@ -478,6 +489,7 @@ export function LiveStreamPage() {
       return
     }
     setUploading(true)
+    setUploadingHost(primaryBlossomHost)
     try {
       for (const file of list.slice(0, 3)) {
         const res = await uploadToBlossom(
@@ -485,8 +497,11 @@ export function LiveStreamPage() {
           file.type || 'application/octet-stream',
           signer,
           blossomServers,
+          fetch,
+          ({ host }) => setUploadingHost(host),
         )
         setAttachments((prev) => [...prev, res])
+        useNostrStore.getState().setToast(`Uploaded to ${formatBlossomHost(res.server)}`)
       }
     } catch (err) {
       useNostrStore
@@ -494,6 +509,7 @@ export function LiveStreamPage() {
         .setToast(err instanceof Error ? err.message : 'Blossom upload failed')
     } finally {
       setUploading(false)
+      setUploadingHost(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
@@ -657,7 +673,7 @@ export function LiveStreamPage() {
                 <div className="absolute inset-0 z-20 bg-[#0e0e11]/90 backdrop-blur-sm flex flex-col items-center justify-center gap-2 p-4 text-center pointer-events-none">
                   <ImagePlus className="w-8 h-8 text-[#ff8a3d]" />
                   <p className="text-xs font-semibold text-white">
-                    Drop image to upload via Blossom
+                    Drop image to upload → {primaryBlossomHost}
                   </p>
                   <p className="text-[11px] text-[#9a9890]">EXIF metadata stripped client-side</p>
                 </div>
@@ -693,12 +709,20 @@ export function LiveStreamPage() {
                 )}
               </div>
 
+              {uploading && uploadingHost && (
+                <div className="px-2.5 py-1 bg-[#161822] border-t border-[#232530] flex items-center gap-1.5 text-[11px] text-[#ff922b] shrink-0">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  <span className="truncate font-mono">Uploading to {uploadingHost}…</span>
+                </div>
+              )}
+
               {/* Uploaded Blossom attachment previews */}
               {attachments.length > 0 && (
                 <div className="px-2 py-1.5 bg-[#161822] border-t border-[#232530] flex flex-wrap gap-1.5 shrink-0">
                   {attachments.map((att, idx) => (
                     <div
                       key={att.url}
+                      title={`Hosted on ${formatBlossomHost(att.server)}`}
                       className="relative w-12 h-12 rounded-lg overflow-hidden border border-[#2d3042] bg-[#0e0e11]"
                     >
                       {att.type.startsWith('image/') ? (
@@ -796,7 +820,13 @@ export function LiveStreamPage() {
                           void handleUploadFiles(files)
                         }
                       }}
-                      placeholder={uploading ? 'Uploading to Blossom…' : 'Send or drop image…'}
+                      placeholder={
+                        uploading
+                          ? uploadingHost
+                            ? `Uploading to ${uploadingHost}…`
+                            : 'Uploading to Blossom…'
+                          : 'Send or drop image…'
+                      }
                       maxLength={500}
                       className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-[#0e0e11] border border-[#262834] text-xs text-white focus:outline-none focus:border-[#e8590c]"
                     />

@@ -18,6 +18,20 @@ export interface BlossomUploadResult {
   server: string
 }
 
+export interface BlossomUploadProgress {
+  server: string
+  host: string
+  endpoint: '/media' | '/upload'
+}
+
+export function formatBlossomHost(serverUrl: string): string {
+  try {
+    return new URL(serverUrl).hostname
+  } catch {
+    return serverUrl.replace(/^https?:\/\//i, '').replace(/\/.*$/, '')
+  }
+}
+
 export async function sha256Hex(data: ArrayBuffer | Uint8Array): Promise<string> {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
   // Pass an ArrayBuffer copy so WebCrypto accepts it across strict TS DOM/Node types.
@@ -120,6 +134,7 @@ export async function uploadToBlossom(
   signer: FireWispSigner,
   userServers: string[] = [],
   fetchImpl: typeof fetch = fetch,
+  onProgress?: (info: BlossomUploadProgress) => void,
 ): Promise<BlossomUploadResult> {
   if (file.size === 0) throw new Error('File is empty')
   if (file.size > MAX_BLOSSOM_UPLOAD_BYTES) {
@@ -149,6 +164,11 @@ export async function uploadToBlossom(
 
     for (const ep of endpoints) {
       try {
+        onProgress?.({
+          server,
+          host: formatBlossomHost(server),
+          endpoint: ep.path,
+        })
         const auth = await buildBlossomAuthHeader(signer, ep.action, hash)
         const resp = await fetchImpl(`${server}${ep.path}`, {
           method: 'PUT',
