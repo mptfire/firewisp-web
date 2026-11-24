@@ -74,17 +74,6 @@ function scheduleSaveProfiles() {
   }, 1500)
 }
 
-export interface TrendingKeyword {
-  tag: string
-  accounts: number
-  uses: number
-}
-
-export interface TrendingUser {
-  pubkey: string
-  posts: number
-}
-
 export interface NostrState {
   relayStatuses: Record<string, RelayStatus>
   events: Record<string, Event>
@@ -122,8 +111,6 @@ export interface NostrState {
   loadingExtendedGraph: boolean
   loadingMore: boolean
   trendingSidebarIds: string[]
-  trendingHashtags: TrendingKeyword[]
-  trendingUsers: TrendingUser[]
   loadingTrends: boolean
   notificationIds: string[]
   dms: DecryptedDm[]
@@ -289,8 +276,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadingExtendedGraph: false,
   loadingMore: false,
   trendingSidebarIds: [],
-  trendingHashtags: [],
-  trendingUsers: [],
   loadingTrends: false,
   notificationIds: [],
   dms: [],
@@ -725,82 +710,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (!force && get().trendingSidebarIds.length > 0) return
     set({ loadingTrends: true })
     try {
-      const nowSec = Math.floor(Date.now() / 1000)
-      const since24h = nowSec - 86400
-      const [trendingRaw, curatedRaw] = await Promise.all([
-        nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 150 }, 4500),
-        nostrPool.query(['wss://nostr.wine', FIREWISP_RELAY], { kinds: [1], since: since24h, limit: 120 }, 4000),
-      ])
+      const trendingRaw = await nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 120 }, 4500)
+      if (trendingRaw.length === 0) return
 
-      const dedupById = new Map<string, Event>()
-      for (const ev of [...trendingRaw, ...curatedRaw]) {
-        if (!dedupById.has(ev.id)) dedupById.set(ev.id, ev)
-      }
-      if (dedupById.size === 0) return
-
-      const seenContentAuthors = new Map<string, Set<string>>()
-      const authorCounts = new Map<string, number>()
-      const cleanAll: Event[] = []
-      for (const ev of dedupById.values()) {
-        if (!isTopLevelNote(ev)) continue
-        if (get().isEventMuted(ev)) continue
-        const verdict = evaluateNoteSpam(ev, {
-          seenContentAuthors,
-          authorCounts,
-          maxPerAuthor: 3,
-        })
-        if (!verdict.isSpam) cleanAll.push(ev)
-      }
-
-      // Compute Trending #keywords: unique people + post counts
-      const tagStats = new Map<string, { authors: Set<string>; uses: number }>()
-
-      for (const ev of cleanAll) {
-        const tags = extractEventHashtags(ev)
-        if (tags.length === 0 || tags.length > 6) continue // ignore hashtag stuffers
-        const pk = ev.pubkey.toLowerCase()
-        for (const t of tags) {
-          if (t.length < 2 || t.length > 24 || /^\d+$/.test(t)) continue
-          let stat = tagStats.get(t)
-          if (!stat) {
-            stat = { authors: new Set<string>(), uses: 0 }
-            tagStats.set(t, stat)
-          }
-          stat.authors.add(pk)
-          stat.uses += 1
-        }
-      }
-
-      const rankedTags: TrendingKeyword[] = [...tagStats.entries()]
-        .map(([tag, st]) => ({
-          tag,
-          accounts: st.authors.size,
-          uses: st.uses,
-        }))
-        .sort((a, b) => b.accounts * 3 + b.uses - (a.accounts * 3 + a.uses))
-
-      const popularTags = rankedTags.filter((x) => x.accounts >= 2).slice(0, 6)
-      const trendingHashtags = popularTags.length >= 4 ? popularTags : rankedTags.slice(0, 6)
-
-      // Compute Trending Users from curated trending relay (distinct top authors, excluding self)
-      const myPk = useAuthStore.getState().pubkey?.toLowerCase()
-      const userPostCounts = new Map<string, number>()
-      const userFirstOrder: string[] = []
-      for (const ev of trendingRaw) {
-        if (!isTopLevelNote(ev) || get().isEventMuted(ev)) continue
-        const pk = ev.pubkey.toLowerCase()
-        if (pk === myPk) continue
-        const verdict = evaluateNoteSpam(ev, { maxPerAuthor: 5 })
-        if (verdict.isSpam) continue
-        if (!userPostCounts.has(pk)) userFirstOrder.push(pk)
-        userPostCounts.set(pk, (userPostCounts.get(pk) || 0) + 1)
-      }
-      const trendingUsers: TrendingUser[] = userFirstOrder
-        .map((pubkey) => ({ pubkey, posts: userPostCounts.get(pubkey) || 1 }))
-        .sort((a, b) => b.posts - a.posts)
-        .slice(0, 5)
-
-      // Pick top 5 Hot Posts from trending relay (distinct authors, readable text or media)
+      // Pick top 6 Trending Posts (distinct authors, non-spam, readable text or media)
       const hotSeenContent = new Map<string, Set<string>>()
       const hotAuthors = new Set<string>()
       const hotPosts: Event[] = []
@@ -818,17 +731,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         if (textOnly.length < 20 && !hasMedia) continue
         hotAuthors.add(pk)
         hotPosts.push(ev)
-        if (hotPosts.length >= 5) break
+        if (hotPosts.length >= 6) break
       }
 
       for (const ev of hotPosts) get().ingestEvent(ev)
-      const profilesToFetch = [
-        ...new Set([...hotPosts.map((e) => e.pubkey), ...trendingUsers.map((u) => u.pubkey)]),
-      ]
-      if (profilesToFetch.length > 0) {
-        void get().fetchProfiles(profilesToFetch)
-      }
       if (hotPosts.length > 0) {
+        void get().fetchProfiles(hotPosts.map((e) => e.pubkey))
         const hotIds = hotPosts.map((e) => e.id)
         const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), TRENDING_RELAY])].slice(0, 6)
         void nostrPool
@@ -844,8 +752,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return {
           events: eventsMap,
           trendingSidebarIds: hotPosts.map((e) => e.id),
-          trendingHashtags,
-          trendingUsers,
         }
       })
     } finally {

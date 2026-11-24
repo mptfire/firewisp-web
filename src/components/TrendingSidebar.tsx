@@ -7,10 +7,6 @@ import {
   Play,
   RefreshCw,
   Repeat2,
-  TrendingUp,
-  UserCheck,
-  UserPlus,
-  Users,
   Zap,
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
@@ -39,52 +35,7 @@ function stripPreviewText(raw: string): string {
     .trim()
 }
 
-function TrendingUserRow({ pubkey }: { pubkey: string }) {
-  const profile = useNostrStore((s) => s.profiles[pubkey])
-  const isFollowing = useNostrStore((s) => s.follows.includes(pubkey))
-  const toggleFollow = useNostrStore((s) => s.toggleFollow)
-
-  const name = profile?.display_name || profile?.name || `${pubkey.slice(0, 10)}…`
-  const handle = profile?.nip05 ? profile.nip05.replace(/^_@/, '') : null
-
-  return (
-    <div className="flex items-center justify-between gap-2 px-2 py-2 rounded-xl hover:bg-white/[0.04] transition">
-      <Link to={`/p/${pubkey}`} className="flex items-center gap-2 min-w-0 flex-1 group">
-        <Avatar src={profile?.picture} pubkey={pubkey} name={name} size="sm" />
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-white truncate group-hover:text-[#ff922b] transition leading-tight">
-            {name}
-          </div>
-          {handle && (
-            <div className="text-[10px] text-[#7c7a72] truncate leading-tight">{handle}</div>
-          )}
-        </div>
-      </Link>
-      <button
-        onClick={() => void toggleFollow(pubkey)}
-        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 shrink-0 transition cursor-pointer ${
-          isFollowing
-            ? 'bg-[#1d1f29] border border-[#2e3242] text-[#c2bfb7] hover:border-red-500/40'
-            : 'bg-[#e8590c]/15 hover:bg-[#e8590c] border border-[#e8590c]/40 text-[#ff922b] hover:text-white'
-        }`}
-      >
-        {isFollowing ? (
-          <>
-            <UserCheck className="w-3 h-3" />
-            <span>Following</span>
-          </>
-        ) : (
-          <>
-            <UserPlus className="w-3 h-3" />
-            <span>Follow</span>
-          </>
-        )}
-      </button>
-    </div>
-  )
-}
-
-function HotPostCard({ eventId }: { eventId: string }) {
+function TrendingPostCard({ eventId }: { eventId: string }) {
   const ev = useNostrStore((s) => s.events[eventId])
   const profile = useNostrStore((s) => (ev ? s.profiles[ev.pubkey] : undefined))
   const likes = useNostrStore((s) => s.reactionCounts[eventId] || 0)
@@ -132,7 +83,7 @@ function HotPostCard({ eventId }: { eventId: string }) {
         </p>
       )}
 
-      {/* Rich Ditto-style media preview */}
+      {/* Rich media preview */}
       {firstImg && (
         <div className="mt-2 rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#111218]">
           <img
@@ -186,8 +137,6 @@ function HotPostCard({ eventId }: { eventId: string }) {
 
 export function TrendingSidebar() {
   const navigate = useNavigate()
-  const trendingHashtags = useNostrStore((s) => s.trendingHashtags)
-  const trendingUsers = useNostrStore((s) => s.trendingUsers)
   const trendingSidebarIds = useNostrStore((s) => s.trendingSidebarIds)
   const loadingTrends = useNostrStore((s) => s.loadingTrends)
   const loadTrendingSidebar = useNostrStore((s) => s.loadTrendingSidebar)
@@ -200,92 +149,23 @@ export function TrendingSidebar() {
   }, [trendingSidebarIds.length, loadingTrends, loadTrendingSidebar])
 
   return (
-    <>
-      {/* Trending: #Keywords + Trending Users */}
-      <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-3">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
-              <TrendingUp className="w-3.5 h-3.5 text-[#f59f00]" />
-              Trending
-            </span>
-            <button
-              onClick={() => void loadTrendingSidebar(true)}
-              disabled={loadingTrends}
-              title="Refresh trends"
-              className="p-1 rounded-lg text-[#8c8a82] hover:text-white hover:bg-white/5 cursor-pointer disabled:opacity-40"
-            >
-              <RefreshCw
-                className={`w-3 h-3 ${loadingTrends ? 'animate-spin text-[#e8590c]' : ''}`}
-              />
-            </button>
-          </div>
-
-          {loadingTrends && trendingHashtags.length === 0 ? (
-            <div className="space-y-2 animate-pulse pt-1">
-              {[0, 1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center justify-between gap-2">
-                  <div className="h-3.5 w-24 rounded bg-[#1f212b]" />
-                  <div className="h-3 w-16 rounded bg-[#1b1d26]" />
-                </div>
-              ))}
-            </div>
-          ) : trendingHashtags.length === 0 ? (
-            <p className="text-xs text-[#6f6d66]">No trending tags yet.</p>
-          ) : (
-            <div className="divide-y divide-[#1f212b] -mx-1">
-              {trendingHashtags.map(({ tag, accounts, uses }) => (
-                <Link
-                  key={tag}
-                  to={`/search?q=%23${encodeURIComponent(tag)}`}
-                  className="flex items-center justify-between gap-2 px-2 py-2 rounded-xl hover:bg-white/[0.04] transition group"
-                >
-                  <span className="text-sm font-semibold text-white group-hover:text-[#ff922b] truncate transition">
-                    #{tag}
-                  </span>
-                  <span className="text-[11px] text-[#8c8a82] shrink-0">
-                    {accounts} {accounts === 1 ? 'person' : 'people'} · {uses}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Trending Users */}
-        <div className="pt-3 border-t border-[#20222c]">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#9a9890] mb-1.5">
-            <Users className="w-3.5 h-3.5 text-[#f59f00]" />
-            Trending Users
-          </div>
-          {loadingTrends && trendingUsers.length === 0 ? (
-            <div className="space-y-2 animate-pulse pt-1">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-[#1f212b]" />
-                  <div className="h-3 w-24 rounded bg-[#1f212b]" />
-                </div>
-              ))}
-            </div>
-          ) : trendingUsers.length === 0 ? (
-            <p className="text-xs text-[#6f6d66]">No trending users yet.</p>
-          ) : (
-            <div className="space-y-0.5 -mx-1">
-              {trendingUsers.map(({ pubkey }) => (
-                <TrendingUserRow key={pubkey} pubkey={pubkey} />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Hot Posts (Ditto-style rich cards) */}
-      <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
-        <div className="flex items-center justify-between mb-2.5">
-          <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
-            <Flame className="w-3.5 h-3.5 text-[#e8590c]" />
-            Hot Posts
-          </span>
+    <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
+      <div className="flex items-center justify-between mb-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
+          <Flame className="w-3.5 h-3.5 text-[#e8590c]" />
+          Trending Posts
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void loadTrendingSidebar(true)}
+            disabled={loadingTrends}
+            title="Refresh trending posts"
+            className="p-1 rounded-lg text-[#8c8a82] hover:text-white hover:bg-white/5 cursor-pointer disabled:opacity-40"
+          >
+            <RefreshCw
+              className={`w-3 h-3 ${loadingTrends ? 'animate-spin text-[#e8590c]' : ''}`}
+            />
+          </button>
           <button
             onClick={() => {
               setActiveFeedTab('trending')
@@ -296,30 +176,30 @@ export function TrendingSidebar() {
             See all
           </button>
         </div>
-
-        {loadingTrends && trendingSidebarIds.length === 0 ? (
-          <div className="space-y-2.5 animate-pulse">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="p-3 rounded-xl bg-[#1a1c24]/70 space-y-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-[#252836]" />
-                  <div className="h-3 w-24 rounded bg-[#252836]" />
-                </div>
-                <div className="h-3 w-full rounded bg-[#222533]" />
-                <div className="h-3 w-4/5 rounded bg-[#222533]" />
-              </div>
-            ))}
-          </div>
-        ) : trendingSidebarIds.length === 0 ? (
-          <p className="text-xs text-[#6f6d66]">No hot posts loaded yet.</p>
-        ) : (
-          <div className="space-y-2.5">
-            {trendingSidebarIds.map((id) => (
-              <HotPostCard key={id} eventId={id} />
-            ))}
-          </div>
-        )}
       </div>
-    </>
+
+      {loadingTrends && trendingSidebarIds.length === 0 ? (
+        <div className="space-y-2.5 animate-pulse">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="p-3 rounded-xl bg-[#1a1c24]/70 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-[#252836]" />
+                <div className="h-3 w-24 rounded bg-[#252836]" />
+              </div>
+              <div className="h-3 w-full rounded bg-[#222533]" />
+              <div className="h-3 w-4/5 rounded bg-[#222533]" />
+            </div>
+          ))}
+        </div>
+      ) : trendingSidebarIds.length === 0 ? (
+        <p className="text-xs text-[#6f6d66]">No trending posts loaded yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {trendingSidebarIds.map((id) => (
+            <TrendingPostCard key={id} eventId={id} />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
