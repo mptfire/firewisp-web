@@ -79,13 +79,19 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   dTag: string
   bech32: string
 }) {
+  const navigate = useNavigate()
   const aTag = buildLiveATag(hostPubkey, dTag)
   const entry = useLiveStore((s) => s.liveStreams[aTag])
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
+  const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
   const profile = useNostrStore((s) => s.profiles[displayPk])
   const [thumbFailed, setThumbFailed] = useState(false)
   const [playingInline, setPlayingInline] = useState(false)
+
+  useEffect(() => {
+    if (!inlineMediaPlayback) setPlayingInline(false)
+  }, [inlineMediaPlayback])
 
   const hostName = profile?.display_name || profile?.name || `${displayPk.slice(0, 10)}…`
   const title = entry?.activity.title || `Live Stream (${dTag.slice(0, 24)})`
@@ -99,7 +105,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
       onClick={(e) => e.stopPropagation()}
       className="group mt-2.5 rounded-xl overflow-hidden border border-[#e8590c]/40 hover:border-[#e8590c] bg-[#14151e] transition"
     >
-      {playingInline && streamUrl ? (
+      {playingInline && inlineMediaPlayback && streamUrl ? (
         <HlsVideoPlayer
           streamUrl={streamUrl}
           posterUrl={thumb}
@@ -111,9 +117,15 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
       ) : streamUrl ? (
         <button
           type="button"
-          onClick={() => setPlayingInline(true)}
+          onClick={() => {
+            if (inlineMediaPlayback) {
+              setPlayingInline(true)
+            } else {
+              navigate(`/live/${bech32}`)
+            }
+          }}
           className="relative block aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden cursor-pointer text-left"
-          aria-label={`Play ${title} inline`}
+          aria-label={inlineMediaPlayback ? `Play ${title} inline` : `Open ${title} in player`}
         >
           {thumb && !thumbFailed ? (
             <img
@@ -166,7 +178,11 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             </div>
             <div className="text-[11px] text-[#8c8a82] truncate">
               {hostName}
-              {streamUrl && !playingInline ? ' · Click video to play inline' : ''}
+              {streamUrl && !playingInline
+                ? inlineMediaPlayback
+                  ? ' · Click video to play inline'
+                  : ' · Click to open player'
+                : ''}
             </div>
           </div>
         </div>

@@ -15,6 +15,8 @@ import {
   Radio,
   ChevronDown,
   ChevronUp,
+  UploadCloud,
+  Play,
 } from 'lucide-react'
 import {
   ANDROID_APP_URL,
@@ -22,7 +24,7 @@ import {
   FIREWISP_RELAY,
   ZAPSTORE_URL,
 } from '../lib/constants'
-import { formatBlossomHost } from '../lib/nostr/blossom'
+import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -41,6 +43,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const blossomServers = useSettingsStore((s) => s.blossomServers)
+  const setPrimaryBlossomServer = useSettingsStore((s) => s.setPrimaryBlossomServer)
+  const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
+  const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -49,7 +54,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
   const totalCount = Math.max(Object.keys(relayStatuses).length, 1)
   const firewispRelayUp = relayStatuses[FIREWISP_RELAY] === 'connected'
-  const primaryBlossomHost = formatBlossomHost(blossomServers[0] || DEFAULT_BLOSSOM_PRIMARY)
+  const candidateBlossomServers = buildCandidateServers(blossomServers)
+  const activeBlossomServer = blossomServers[0] || candidateBlossomServers[0] || DEFAULT_BLOSSOM_PRIMARY
   const sortedRelayEntries = Object.entries(relayStatuses).sort((a, b) => {
     if (a[1] === 'connected' && b[1] !== 'connected') return -1
     if (b[1] === 'connected' && a[1] !== 'connected') return 1
@@ -184,10 +190,51 @@ export function Layout({ children }: { children: ReactNode }) {
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-[#8c8a82] leading-relaxed">
-                  Media via{' '}
-                  <span className="font-mono text-[#c2bfb7] break-all">{primaryBlossomHost}</span>.
-                </p>
+                <div className="pt-1.5 mt-1.5 border-t border-[#222532] space-y-2">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="sidebar-blossom-select"
+                      className="text-[10px] text-[#8c8a82] flex items-center gap-1"
+                    >
+                      <UploadCloud className="w-3 h-3 text-[#f59f00] shrink-0" />
+                      Blossom media server
+                    </label>
+                    <select
+                      id="sidebar-blossom-select"
+                      value={activeBlossomServer}
+                      onChange={(e) => setPrimaryBlossomServer(e.target.value)}
+                      className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#262938] hover:border-[#3b4057] text-[11px] font-mono text-[#e4e1d8] focus:outline-none focus:border-[#e8590c] truncate cursor-pointer"
+                      title="Primary Blossom server for uploads (automatically falls back if unavailable)"
+                    >
+                      {candidateBlossomServers.map((srv) => (
+                        <option key={srv} value={srv} className="bg-[#14151e] text-white">
+                          {formatBlossomHost(srv)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setInlineMediaPlayback(!inlineMediaPlayback)}
+                    className="w-full flex items-center justify-between gap-2 pt-0.5 text-[10px] text-[#c2bfb7] hover:text-white cursor-pointer"
+                    title="Choose whether streams & YouTube videos play inline inside notes or jump straight to the full player"
+                  >
+                    <span className="flex items-center gap-1 truncate">
+                      <Play className="w-3 h-3 text-[#f59f00] shrink-0" />
+                      <span className="truncate">Play streams & YT</span>
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 border transition ${
+                        inlineMediaPlayback
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                          : 'bg-[#1d1f29] border-[#2e3242] text-[#9a9890]'
+                      }`}
+                    >
+                      {inlineMediaPlayback ? 'Inline' : 'Player'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
 

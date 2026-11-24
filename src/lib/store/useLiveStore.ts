@@ -435,6 +435,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
               queueProfile(msg.senderPubkey)
               set((s) => {
                 if (s.activeATag !== aTag) return s
+                if (s.currentChatMessages.some((m) => m.id === msg.id)) return s
                 const next = [...s.currentChatMessages, msg]
                   .sort((a, b) => a.createdAt - b.createdAt)
                   .slice(-300)
@@ -466,6 +467,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
               }
               set((s) => {
                 if (s.activeATag !== aTag) return s
+                if (s.currentChatMessages.some((m) => m.id === msg.id)) return s
                 const next = [...s.currentChatMessages, msg]
                   .sort((a, b) => a.createdAt - b.createdAt)
                   .slice(-300)

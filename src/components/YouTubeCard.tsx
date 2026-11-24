@@ -6,6 +6,7 @@ import {
   type YouTubeMeta,
   type YouTubeRef,
 } from '../lib/nostr/youtube'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 
 interface YouTubeCardProps {
   video: YouTubeRef
@@ -15,15 +16,16 @@ interface YouTubeCardProps {
 
 /**
  * Click-to-play privacy YouTube card:
- * Zero Google player scripts loaded while scrolling. Clicking Play embeds
- * `youtube-nocookie.com` directly inline inside the note (never jumping out of the feed);
- * clicking the footer link opens YouTube in a new tab.
+ * Respects the sidebar `inlineMediaPlayback` toggle:
+ * - Inline: clicking Play embeds `youtube-nocookie.com` directly inside the note.
+ * - Player: clicking jumps straight to YouTube in a new tab (zero Google iframe).
  */
 export const YouTubeCard = memo(function YouTubeCard({
   video,
   compact = false,
   previewOnly = false,
 }: YouTubeCardProps) {
+  const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const [meta, setMeta] = useState<YouTubeMeta | null>(null)
   const [thumbSrc, setThumbSrc] = useState(video.thumbnailUrl)
   const [thumbFailed, setThumbFailed] = useState(false)
@@ -42,6 +44,12 @@ export const YouTubeCard = memo(function YouTubeCard({
     }
   }, [video.videoId, video.thumbnailUrl])
 
+  useEffect(() => {
+    if (!inlineMediaPlayback) setPlaying(false)
+  }, [inlineMediaPlayback])
+
+  const canPlayInline = inlineMediaPlayback && !previewOnly
+
   const embedUrl = video.startSeconds
     ? `https://www.youtube-nocookie.com/embed/${video.videoId}?autoplay=1&rel=0&start=${video.startSeconds}`
     : `https://www.youtube-nocookie.com/embed/${video.videoId}?autoplay=1&rel=0`
@@ -51,7 +59,7 @@ export const YouTubeCard = memo(function YouTubeCard({
       onClick={(e) => e.stopPropagation()}
       className="group rounded-xl overflow-hidden border border-[#262834] hover:border-red-500/60 bg-[#12131a] transition"
     >
-      {playing && !previewOnly ? (
+      {playing && canPlayInline ? (
         <div
           className={`relative w-full aspect-video bg-black ${
             compact ? 'max-h-52' : 'max-h-[420px]'
@@ -70,7 +78,7 @@ export const YouTubeCard = memo(function YouTubeCard({
         <button
           type="button"
           onClick={() => {
-            if (previewOnly) {
+            if (!canPlayInline) {
               window.open(video.url, '_blank', 'noopener,noreferrer')
             } else {
               setPlaying(true)
@@ -79,7 +87,11 @@ export const YouTubeCard = memo(function YouTubeCard({
           className={`relative block w-full aspect-video bg-[#0b0b0e] overflow-hidden cursor-pointer text-left ${
             compact ? 'max-h-36' : 'max-h-[340px]'
           }`}
-          aria-label={`Play ${meta?.title || 'YouTube video'} inline`}
+          aria-label={
+            canPlayInline
+              ? `Play ${meta?.title || 'YouTube video'} inline`
+              : `Open ${meta?.title || 'YouTube video'} on YouTube`
+          }
         >
           {!thumbFailed ? (
             <img

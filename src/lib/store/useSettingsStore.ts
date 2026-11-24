@@ -29,6 +29,7 @@ export interface SettingsState {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  inlineMediaPlayback: boolean
   nwcUri: string
 
   addRelay: (url: string) => boolean
@@ -38,6 +39,7 @@ export interface SettingsState {
 
   addBlossomServer: (url: string) => boolean
   removeBlossomServer: (url: string) => void
+  setPrimaryBlossomServer: (url: string) => void
   mergeRemoteBlossomServers: (servers: string[]) => void
 
   setNotePowEnabled: (enabled: boolean) => void
@@ -60,6 +62,7 @@ export interface SettingsState {
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
+  setInlineMediaPlayback: (enabled: boolean) => void
   setNwcUri: (uri: string) => void
 
   getReadRelays: () => string[]
@@ -85,6 +88,7 @@ interface PersistedSettings {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  inlineMediaPlayback: boolean
   // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
@@ -108,6 +112,7 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     showExtendedTab: false,
     showExploreTab: false,
     showLiveNowBar: true,
+    inlineMediaPlayback: true,
     nwcUri: '',
   }
   if (typeof localStorage === 'undefined') return defaults
@@ -172,6 +177,7 @@ function persist(state: SettingsState) {
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
     showLiveNowBar: state.showLiveNowBar,
+    inlineMediaPlayback: state.inlineMediaPlayback,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -227,14 +233,28 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist(get())
   },
 
+  setPrimaryBlossomServer: (rawUrl) => {
+    const url = sanitizeBlossomUrl(rawUrl)
+    if (!url) return
+    set((s) => ({
+      blossomServers: [url, ...s.blossomServers.filter((u) => u !== url)],
+    }))
+    persist(get())
+  },
+
   mergeRemoteBlossomServers: (servers) => {
     const cleaned = servers
       .map((u) => sanitizeBlossomUrl(u))
       .filter((u): u is string => Boolean(u))
     if (cleaned.length === 0) return
-    set((s) => ({
-      blossomServers: [...new Set([...cleaned, ...s.blossomServers])],
-    }))
+    set((s) => {
+      // Prepend newly discovered remote servers without overriding an existing user-selected primary
+      const unseen = cleaned.filter((u) => !s.blossomServers.includes(u))
+      if (unseen.length === 0) return s
+      return {
+        blossomServers: [...unseen, ...s.blossomServers],
+      }
+    })
     persist(get())
   },
 
@@ -340,6 +360,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowLiveNowBar: (showLiveNowBar) => {
     set({ showLiveNowBar })
+    persist(get())
+  },
+  setInlineMediaPlayback: (inlineMediaPlayback) => {
+    set({ inlineMediaPlayback })
     persist(get())
   },
   setNwcUri: (nwcUri) => {
