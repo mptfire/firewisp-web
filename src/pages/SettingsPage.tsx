@@ -6,6 +6,7 @@ import {
   VolumeX,
   Wallet,
   Shield,
+  LayoutGrid,
   Plus,
   Trash2,
   RotateCcw,
@@ -48,6 +49,62 @@ export function SettingsPage() {
           All preferences stay strictly in your browser. Zero telemetry.
         </p>
       </div>
+
+      {/* Optional Feed Tabs */}
+      <section className="p-4 space-y-3">
+        <h2 className="font-semibold text-sm flex items-center gap-2">
+          <LayoutGrid className="w-4 h-4 text-[#f59f00]" />
+          Feed Tabs
+        </h2>
+        <p className="text-xs text-[#8c8a82]">
+          For You, Follows, and Trending are always shown. Enable extra tabs below if needed.
+        </p>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Show Fire Wisp relay tab</div>
+            <div className="text-[#8c8a82]">
+              Dedicated feed for wss://firewisp.relay.rtard.de (12-bit PoW community relay).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showFireWispTab}
+            onChange={(e) => settings.setShowFireWispTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Show Extended (2-hop WoT) tab</div>
+            <div className="text-[#8c8a82]">
+              Posts from accounts endorsed by your follows (friends-of-friends).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showExtendedTab}
+            onChange={(e) => settings.setShowExtendedTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Show Explore tab</div>
+            <div className="text-[#8c8a82]">
+              Curated global Nostr discovery feed with anti-spam filtering.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showExploreTab}
+            onChange={(e) => settings.setShowExploreTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+      </section>
 
       {/* Relays */}
       <section className="p-4 space-y-3">

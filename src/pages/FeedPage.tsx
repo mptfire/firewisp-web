@@ -71,10 +71,32 @@ export function FeedPage() {
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
+  const showFireWispTab = useSettingsStore((s) => s.showFireWispTab)
+  const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
+  const showExploreTab = useSettingsStore((s) => s.showExploreTab)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
+
+  const visibleTabs = useMemo(() => {
+    const list: [FeedTab, string, typeof Flame][] = [
+      ['foryou', 'For You', Sparkles],
+      ['following', 'Follows', Users],
+      ['trending', 'Trending', TrendingUp],
+    ]
+    if (showFireWispTab) list.push(['firewisp', 'Fire Wisp', Flame])
+    if (showExtendedTab) list.push(['extended', 'Extended', Network])
+    if (showExploreTab) list.push(['global', 'Explore', Globe])
+    return list
+  }, [showFireWispTab, showExtendedTab, showExploreTab])
+
+  // If the active tab gets hidden in Settings, fall back cleanly to For You
+  useEffect(() => {
+    if (!visibleTabs.some(([id]) => id === tab)) {
+      setTab('foryou')
+    }
+  }, [visibleTabs, tab, setTab])
 
   const PAGE_SIZE = 40
   const [refreshTick, setRefreshTick] = useState(0)
@@ -243,16 +265,7 @@ export function FeedPage() {
     <div>
       {/* Sticky Feed Tabs */}
       <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] flex overflow-x-auto text-xs sm:text-sm font-medium">
-        {(
-          [
-            ['foryou', 'For You', Sparkles],
-            ['following', 'Follows', Users],
-            ['trending', 'Trending', TrendingUp],
-            ['firewisp', 'Fire Wisp', Flame],
-            ['extended', 'Extended', Network],
-            ['global', 'Explore', Globe],
-          ] as [FeedTab, string, typeof Flame][]
-        ).map(([id, label, Icon]) => (
+        {visibleTabs.map(([id, label, Icon]) => (
           <button
             key={id}
             onClick={() => setTab(id)}

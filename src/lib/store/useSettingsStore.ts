@@ -25,6 +25,9 @@ export interface SettingsState {
   spamFilterEnabled: boolean
   hideRepliesInExplore: boolean
   requirePowInExplore: boolean
+  showFireWispTab: boolean
+  showExtendedTab: boolean
+  showExploreTab: boolean
   nwcUri: string
 
   addRelay: (url: string) => boolean
@@ -51,6 +54,9 @@ export interface SettingsState {
   setSpamFilterEnabled: (enabled: boolean) => void
   setHideRepliesInExplore: (enabled: boolean) => void
   setRequirePowInExplore: (enabled: boolean) => void
+  setShowFireWispTab: (enabled: boolean) => void
+  setShowExtendedTab: (enabled: boolean) => void
+  setShowExploreTab: (enabled: boolean) => void
   setNwcUri: (uri: string) => void
 
   getReadRelays: () => string[]
@@ -72,6 +78,9 @@ interface PersistedSettings {
   spamFilterEnabled: boolean
   hideRepliesInExplore: boolean
   requirePowInExplore: boolean
+  showFireWispTab: boolean
+  showExtendedTab: boolean
+  showExploreTab: boolean
   // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
@@ -91,6 +100,9 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     spamFilterEnabled: true,
     hideRepliesInExplore: true,
     requirePowInExplore: false,
+    showFireWispTab: false,
+    showExtendedTab: false,
+    showExploreTab: false,
     nwcUri: '',
   }
   if (typeof localStorage === 'undefined') return defaults
@@ -151,6 +163,9 @@ function persist(state: SettingsState) {
     spamFilterEnabled: state.spamFilterEnabled,
     hideRepliesInExplore: state.hideRepliesInExplore,
     requirePowInExplore: state.requirePowInExplore,
+    showFireWispTab: state.showFireWispTab,
+    showExtendedTab: state.showExtendedTab,
+    showExploreTab: state.showExploreTab,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -292,6 +307,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setRequirePowInExplore: (requirePowInExplore) => {
     set({ requirePowInExplore })
+    persist(get())
+  },
+  setShowFireWispTab: (showFireWispTab) => {
+    set({ showFireWispTab })
+    persist(get())
+  },
+  setShowExtendedTab: (showExtendedTab) => {
+    set({ showExtendedTab })
+    persist(get())
+  },
+  setShowExploreTab: (showExploreTab) => {
+    set({ showExploreTab })
     persist(get())
   },
   setNwcUri: (nwcUri) => {
