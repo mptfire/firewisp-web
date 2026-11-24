@@ -229,9 +229,9 @@ export function LiveStreamPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-52px)] md:h-screen">
+    <div className="flex flex-col min-h-[calc(100vh-52px)] md:min-h-screen">
       {/* Top Bar */}
-      <div className="shrink-0 bg-[#0e0e11]/95 backdrop-blur-md border-b border-[#20222c] px-4 py-2.5 flex items-center justify-between gap-3">
+      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/95 backdrop-blur-md border-b border-[#20222c] px-4 py-2.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <button
             onClick={() => navigate(-1)}
@@ -284,199 +284,203 @@ export function LiveStreamPage() {
         </button>
       </div>
 
-      {/* Theater Split Layout: Video + Info (left) | Live Chat (right on lg+, stacked below on mobile) */}
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-        {/* Video + Stream Info Pane */}
-        <div className="lg:flex-1 lg:overflow-y-auto p-3 sm:p-4 space-y-3 shrink-0 lg:shrink">
-          {loadingStream && !activeActivity ? (
-            <div className="w-full aspect-video rounded-xl bg-[#15161c] border border-[#232530] flex items-center justify-center">
-              <Loader2 className="w-7 h-7 animate-spin text-[#e8590c]" />
-            </div>
-          ) : playableUrl ? (
-            <HlsVideoPlayer
-              streamUrl={playableUrl}
-              posterUrl={activeActivity?.image}
-              title={activeActivity?.title}
-              isLive={isLive}
-            />
-          ) : (
-            <div className="w-full aspect-video rounded-xl bg-[#15161c] border border-[#232530] flex flex-col items-center justify-center p-6 text-center gap-2">
-              {activeActivity?.image && (
-                <img
-                  src={activeActivity.image}
-                  alt={activeActivity.title || 'Stream'}
-                  referrerPolicy="no-referrer"
-                  className="max-h-40 rounded-lg object-contain mb-2"
-                />
-              )}
-              <p className="text-sm font-medium text-[#d4d2cb]">
-                {activeActivity?.status === 'ended'
-                  ? 'This live stream has ended.'
-                  : 'No playable HTTPS stream URL was published for this event.'}
-              </p>
-            </div>
-          )}
-
-          {/* Stream Info & Actions */}
-          <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2.5">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 group">
-                <Avatar src={hostProfile?.picture} pubkey={hostPubkey} name={hostName} size="md" />
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm text-white group-hover:text-[#ff922b] truncate">
-                    {hostName}
-                  </div>
-                  <div className="text-xs text-[#8c8a82] flex items-center gap-2">
-                    {activeActivity?.currentParticipants !== undefined && (
-                      <span>{activeActivity.currentParticipants.toLocaleString()} watching</span>
-                    )}
-                    {streamZapTotal > 0 && (
-                      <span className="text-[#f59f00] font-medium flex items-center gap-0.5">
-                        <Zap className="w-3 h-3 fill-[#f59f00]" />
-                        {streamZapTotal.toLocaleString()} sats
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </Link>
-
-              <div className="flex items-center gap-2">
-                {hostProfile?.lud16 && (
-                  <button
-                    onClick={() => setZapOpen(true)}
-                    className="px-3.5 py-2 rounded-xl bg-[#f59f00]/15 hover:bg-[#f59f00]/25 border border-[#f59f00]/40 text-[#f59f00] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Zap className="w-3.5 h-3.5 fill-[#f59f00]/40" />
-                    Zap Stream
-                  </button>
+      {/* Main Stage: Video + Live Chat aligned to exact video height, with Stream Info below */}
+      <div className="p-3 sm:p-4 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-stretch gap-3">
+          {/* 16:9 Video Screen */}
+          <div className="flex-1 min-w-0">
+            {loadingStream && !activeActivity ? (
+              <div className="w-full aspect-video rounded-xl bg-[#15161c] border border-[#232530] flex items-center justify-center">
+                <Loader2 className="w-7 h-7 animate-spin text-[#e8590c]" />
+              </div>
+            ) : playableUrl ? (
+              <HlsVideoPlayer
+                streamUrl={playableUrl}
+                posterUrl={activeActivity?.image}
+                title={activeActivity?.title}
+                isLive={isLive}
+              />
+            ) : (
+              <div className="w-full aspect-video rounded-xl bg-[#15161c] border border-[#232530] flex flex-col items-center justify-center p-6 text-center gap-2">
+                {activeActivity?.image && (
+                  <img
+                    src={activeActivity.image}
+                    alt={activeActivity.title || 'Stream'}
+                    referrerPolicy="no-referrer"
+                    className="max-h-40 rounded-lg object-contain mb-2"
+                  />
                 )}
-                {!isMe && hostPubkey && (
+                <p className="text-sm font-medium text-[#d4d2cb]">
+                  {activeActivity?.status === 'ended'
+                    ? 'This live stream has ended.'
+                    : 'No playable HTTPS stream URL was published for this event.'}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Live Chat Box — matches exact height of the 16:9 video screen on desktop */}
+          <div className="relative lg:w-72 xl:w-80 shrink-0 h-[360px] lg:h-auto">
+            <div className="h-full lg:absolute lg:inset-0 rounded-xl border border-[#232530] flex flex-col overflow-hidden bg-[#12131a]">
+              <div className="px-3 py-2 border-b border-[#20222c] flex items-center justify-between text-xs font-semibold text-[#d4d2cb] shrink-0">
+                <span className="flex items-center gap-1.5">
+                  <MessageCircle className="w-3.5 h-3.5 text-[#f59f00]" />
+                  Live Chat
+                </span>
+                <span className="text-[11px] font-normal text-[#8c8a82]">
+                  {messages.length}
+                </span>
+              </div>
+
+              <div
+                ref={chatScrollRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget
+                  stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+                }}
+                className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0"
+              >
+                {messages.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-xs text-[#6f6d66] text-center px-4">
+                    No live chat messages yet. Say hello!
+                  </div>
+                ) : (
+                  messages.map((m) => (
+                    <ChatBubble
+                      key={m.id}
+                      msg={m}
+                      replyParent={m.replyToId ? messageById.get(m.replyToId) : undefined}
+                      myPubkey={myPubkey}
+                      onReply={setReplyTarget}
+                      onBlock={(pk, name) => {
+                        mutePubkey(pk)
+                        useNostrStore.getState().setToast(`Blocked ${name} (undo in Settings)`)
+                      }}
+                    />
+                  ))
+                )}
+              </div>
+
+              {/* Reply quote strip */}
+              {replyTarget && (
+                <div className="px-2.5 py-1 bg-[#181a22] border-t border-[#232530] flex items-center justify-between gap-2 text-[11px] text-[#c2bfb7]">
+                  <span className="truncate">
+                    Replying to: <span className="text-[#8c8a82]">{replyTarget.content}</span>
+                  </span>
                   <button
-                    onClick={() => void toggleFollow(hostPubkey)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
-                      isFollowing
-                        ? 'bg-[#1d1f29] border border-[#2e3242] text-white'
-                        : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
-                    }`}
+                    onClick={() => setReplyTarget(null)}
+                    className="p-0.5 text-[#8c8a82] hover:text-white cursor-pointer"
                   >
-                    {isFollowing ? (
-                      <>
-                        <UserCheck className="w-3.5 h-3.5" /> Following
-                      </>
-                    ) : (
-                      <>
-                        <UserPlus className="w-3.5 h-3.5" /> Follow
-                      </>
-                    )}
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Chat Composer */}
+              <div className="p-2 border-t border-[#20222c] bg-[#14151e] shrink-0">
+                {signer?.canSign ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      void handleSend()
+                    }}
+                    className="flex gap-1.5"
+                  >
+                    <input
+                      type="text"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Send a message…"
+                      maxLength={500}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg bg-[#0e0e11] border border-[#262834] text-xs text-white focus:outline-none focus:border-[#e8590c]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={sending || !draft.trim()}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-40 text-white cursor-pointer"
+                      aria-label="Send message"
+                    >
+                      {sending ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Send className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    onClick={openAuthModal}
+                    className="w-full py-1.5 rounded-lg bg-[#1d1f29] hover:bg-[#262936] text-xs font-medium text-[#ff922b] cursor-pointer"
+                  >
+                    Sign in to join live chat
                   </button>
                 )}
               </div>
             </div>
-
-            {activeActivity?.summary && (
-              <p className="text-xs text-[#c2bfb7] leading-relaxed whitespace-pre-wrap">
-                {activeActivity.summary}
-              </p>
-            )}
           </div>
         </div>
 
-        {/* Live Chat Column */}
-        <div className="flex-1 lg:flex-none lg:w-80 xl:w-96 border-t lg:border-t-0 lg:border-l border-[#20222c] flex flex-col min-h-0 bg-[#111218]">
-          <div className="px-3.5 py-2.5 border-b border-[#20222c] flex items-center justify-between text-xs font-semibold text-[#d4d2cb] shrink-0">
-            <span className="flex items-center gap-1.5">
-              <MessageCircle className="w-3.5 h-3.5 text-[#f59f00]" />
-              Live Chat
-            </span>
-            <span className="text-[11px] font-normal text-[#8c8a82]">
-              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-            </span>
-          </div>
-
-          <div
-            ref={chatScrollRef}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-            }}
-            className="flex-1 overflow-y-auto p-2.5 space-y-1.5 min-h-0"
-          >
-            {messages.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-xs text-[#6f6d66] text-center px-4">
-                No live chat messages yet. Say hello!
+        {/* Stream Info & Actions */}
+        <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2.5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 group">
+              <Avatar src={hostProfile?.picture} pubkey={hostPubkey} name={hostName} size="md" />
+              <div className="min-w-0">
+                <div className="font-semibold text-sm text-white group-hover:text-[#ff922b] truncate">
+                  {hostName}
+                </div>
+                <div className="text-xs text-[#8c8a82] flex items-center gap-2">
+                  {activeActivity?.currentParticipants !== undefined && (
+                    <span>{activeActivity.currentParticipants.toLocaleString()} watching</span>
+                  )}
+                  {streamZapTotal > 0 && (
+                    <span className="text-[#f59f00] font-medium flex items-center gap-0.5">
+                      <Zap className="w-3 h-3 fill-[#f59f00]" />
+                      {streamZapTotal.toLocaleString()} sats
+                    </span>
+                  )}
+                </div>
               </div>
-            ) : (
-              messages.map((m) => (
-                <ChatBubble
-                  key={m.id}
-                  msg={m}
-                  replyParent={m.replyToId ? messageById.get(m.replyToId) : undefined}
-                  myPubkey={myPubkey}
-                  onReply={setReplyTarget}
-                  onBlock={(pk, name) => {
-                    mutePubkey(pk)
-                    useNostrStore.getState().setToast(`Blocked ${name} (undo in Settings)`)
-                  }}
-                />
-              ))
-            )}
-          </div>
+            </Link>
 
-          {/* Reply quote strip */}
-          {replyTarget && (
-            <div className="px-3 py-1.5 bg-[#181a22] border-t border-[#232530] flex items-center justify-between gap-2 text-[11px] text-[#c2bfb7]">
-              <span className="truncate">
-                Replying to: <span className="text-[#8c8a82]">{replyTarget.content}</span>
-              </span>
-              <button
-                onClick={() => setReplyTarget(null)}
-                className="p-0.5 text-[#8c8a82] hover:text-white cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-
-          {/* Chat Composer */}
-          <div className="p-2.5 border-t border-[#20222c] bg-[#13141c] shrink-0">
-            {signer?.canSign ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  void handleSend()
-                }}
-                className="flex gap-2"
-              >
-                <input
-                  type="text"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="Send a live chat message…"
-                  maxLength={500}
-                  className="flex-1 px-3 py-2 rounded-xl bg-[#0e0e11] border border-[#262834] text-xs text-white focus:outline-none focus:border-[#e8590c]"
-                />
+            <div className="flex items-center gap-2">
+              {hostProfile?.lud16 && (
                 <button
-                  type="submit"
-                  disabled={sending || !draft.trim()}
-                  className="px-3 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-40 text-white cursor-pointer"
-                  aria-label="Send message"
+                  onClick={() => setZapOpen(true)}
+                  className="px-3.5 py-2 rounded-xl bg-[#f59f00]/15 hover:bg-[#f59f00]/25 border border-[#f59f00]/40 text-[#f59f00] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
-                  {sending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  <Zap className="w-3.5 h-3.5 fill-[#f59f00]/40" />
+                  Zap Stream
+                </button>
+              )}
+              {!isMe && hostPubkey && (
+                <button
+                  onClick={() => void toggleFollow(hostPubkey)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+                    isFollowing
+                      ? 'bg-[#1d1f29] border border-[#2e3242] text-white'
+                      : 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
+                  }`}
+                >
+                  {isFollowing ? (
+                    <>
+                      <UserCheck className="w-3.5 h-3.5" /> Following
+                    </>
                   ) : (
-                    <Send className="w-4 h-4" />
+                    <>
+                      <UserPlus className="w-3.5 h-3.5" /> Follow
+                    </>
                   )}
                 </button>
-              </form>
-            ) : (
-              <button
-                onClick={openAuthModal}
-                className="w-full py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-xs font-medium text-[#ff922b] cursor-pointer"
-              >
-                Sign in to join live chat
-              </button>
-            )}
+              )}
+            </div>
           </div>
+
+          {activeActivity?.summary && (
+            <p className="text-xs text-[#c2bfb7] leading-relaxed whitespace-pre-wrap">
+              {activeActivity.summary}
+            </p>
+          )}
         </div>
       </div>
 
