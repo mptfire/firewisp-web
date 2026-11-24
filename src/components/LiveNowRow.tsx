@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Play, Radio } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PictureInPicture2, Play, Radio } from 'lucide-react'
 import {
   encodeLiveNaddr,
   getStreamPrimaryPubkey,
@@ -34,6 +34,7 @@ function LiveStreamPreviewCard({
   const displayPubkey = getStreamPrimaryPubkey(stream.activity)
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
+  const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const [imgFailed, setImgFailed] = useState(false)
   const [hoverActive, setHoverActive] = useState(false)
   const [previewStatus, setPreviewStatus] = useState<HoverPreviewStatus | null>(null)
@@ -122,7 +123,11 @@ function LiveStreamPreviewCard({
         )}
 
         {hoverActive && previewUrl && (
-          <LiveHoverPreview streamUrl={previewUrl} onStatusChange={setPreviewStatus} />
+          <LiveHoverPreview
+            streamUrl={previewUrl}
+            rightOffset
+            onStatusChange={setPreviewStatus}
+          />
         )}
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/25 pointer-events-none" />
@@ -139,6 +144,32 @@ function LiveStreamPreviewCard({
             </span>
           )}
         </div>
+
+        {/* Top-right Pop-out mini-player button (stays on feed while stream plays) */}
+        {previewUrl && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleMouseLeave()
+              openMiniPlayer({
+                aTag: stream.aTagValue,
+                naddr,
+                streamUrl: previewUrl,
+                posterUrl: thumb,
+                title,
+                hostName,
+                isLive: stream.activity.status === 'live',
+              })
+            }}
+            title="Pop out mini-player and keep browsing"
+            aria-label={`Pop out ${title} in mini-player`}
+            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+          >
+            <PictureInPicture2 className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         {/* Hover play icon (hidden once live video preview is rendering so stream is unobstructed) */}
         {previewStatus !== 'playing' && (

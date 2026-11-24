@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Cpu,
   CornerDownRight,
+  PictureInPicture2,
   Play,
   Radio,
 } from 'lucide-react'
@@ -232,7 +233,11 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             </div>
           )}
           {hoverActive && (
-            <LiveHoverPreview streamUrl={streamUrl} onStatusChange={setPreviewStatus} />
+            <LiveHoverPreview
+              streamUrl={streamUrl}
+              rightOffset
+              onStatusChange={setPreviewStatus}
+            />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center pointer-events-none">
             {previewStatus !== 'playing' && (
@@ -245,6 +250,28 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             <Radio className="w-2.5 h-2.5 animate-pulse" />
             {isLive ? 'LIVE' : 'STREAM'}
           </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              stopHoverPreview()
+              openMiniPlayer({
+                aTag,
+                naddr: bech32,
+                streamUrl,
+                posterUrl: thumb,
+                title,
+                hostName,
+                isLive,
+              })
+            }}
+            title="Pop out mini-player and keep browsing"
+            aria-label={`Pop out ${title} in mini-player`}
+            className="absolute top-2 right-2 z-20 p-1 rounded-md bg-black/75 hover:bg-[#e8590c] border border-white/15 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 transition shadow cursor-pointer"
+          >
+            <PictureInPicture2 className="w-3.5 h-3.5" />
+          </button>
           {viewers !== undefined && viewers > 0 && (
             <span className="absolute bottom-2 right-2 z-10 px-2 py-0.5 rounded bg-black/80 text-[11px] font-medium text-[#ece9e1] pointer-events-none">
               {viewers.toLocaleString()} watching

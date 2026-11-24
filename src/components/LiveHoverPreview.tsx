@@ -5,6 +5,7 @@ export type HoverPreviewStatus = 'connecting' | 'playing' | 'audio-only' | 'erro
 
 interface LiveHoverPreviewProps {
   streamUrl: string
+  rightOffset?: boolean
   onStatusChange?: (status: HoverPreviewStatus) => void
 }
 
@@ -13,7 +14,11 @@ interface LiveHoverPreviewProps {
  * Uses lowest starting HLS bitrate capped to the preview box and tears down
  * immediately on mouse leave so zero background streams linger.
  */
-export function LiveHoverPreview({ streamUrl, onStatusChange }: LiveHoverPreviewProps) {
+export function LiveHoverPreview({
+  streamUrl,
+  rightOffset = false,
+  onStatusChange,
+}: LiveHoverPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [status, setStatus] = useState<HoverPreviewStatus>('connecting')
   const [muted, setMuted] = useState(true)
@@ -170,7 +175,9 @@ export function LiveHoverPreview({ streamUrl, onStatusChange }: LiveHoverPreview
           onClick={toggleMute}
           title={muted ? 'Unmute preview' : 'Mute preview'}
           aria-label={muted ? 'Unmute preview' : 'Mute preview'}
-          className="absolute top-2 right-2 z-10 p-1 rounded-md bg-black/75 hover:bg-black/95 border border-white/15 text-white transition cursor-pointer"
+          className={`absolute top-2 ${
+            rightOffset ? 'right-9' : 'right-2'
+          } z-20 p-1 rounded-md bg-black/75 hover:bg-black/95 border border-white/15 text-white transition cursor-pointer`}
         >
           {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#ff922b]" />}
         </button>
