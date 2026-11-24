@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import QRCode from 'qrcode'
 import { Zap, X, Copy, Check, Wallet } from 'lucide-react'
 import {
@@ -28,7 +28,11 @@ export function ZapModal({
 }: ZapModalProps) {
   const signer = useAuthStore((s) => s.signer)
   const nwcUri = useSettingsStore((s) => s.nwcUri)
-  const readRelays = useSettingsStore((s) => s.getReadRelays())
+  const relays = useSettingsStore((s) => s.relays)
+  const readRelays = useMemo(
+    () => relays.filter((r) => r.read).map((r) => r.url),
+    [relays],
+  )
 
   const [amount, setAmount] = useState(21)
   const [comment, setComment] = useState('')

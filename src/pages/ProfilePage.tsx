@@ -34,7 +34,11 @@ export function ProfilePage() {
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
-  const readRelays = useSettingsStore((s) => s.getReadRelays())
+  const relays = useSettingsStore((s) => s.relays)
+  const readRelays = useMemo(
+    () => relays.filter((r) => r.read).map((r) => r.url),
+    [relays],
+  )
 
   const hexPubkey = useMemo(() => {
     if (!rawId) return ''

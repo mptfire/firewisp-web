@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Bookmark } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -10,7 +10,11 @@ export function BookmarksPage() {
   const events = useNostrStore((s) => s.events)
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
-  const readRelays = useSettingsStore((s) => s.getReadRelays())
+  const relays = useSettingsStore((s) => s.relays)
+  const readRelays = useMemo(
+    () => relays.filter((r) => r.read).map((r) => r.url),
+    [relays],
+  )
 
   useEffect(() => {
     const missing = bookmarks.filter((id) => !events[id])

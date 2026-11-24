@@ -26,6 +26,7 @@ import {
 } from '../sanitize'
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
 import { parseBolt11AmountSats, parseNwcUri, requestZapInvoice, resolveLud16ToUrl } from '../nostr/nip57'
+import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -343,5 +344,66 @@ describe('Sanitization, SSRF guards, NIP-92 imeta, and NWC/LNURL parsing', () =>
         fetchImpl: evilFetch,
       }),
     ).rejects.toThrow(/Invoice amount mismatch/)
+  })
+})
+
+describe('Explore anti-spam filter (matching Android NSpam heuristics)', () => {
+  it('blocks invisible-char spam, hashtag stuffing, mention floods, scam links, and cross-account duplicates', () => {
+    const base = { id: 'f'.repeat(64), pubkey: '1'.repeat(64), kind: 1, tags: [] as string[][] }
+
+    expect(
+      evaluateNoteSpam({ ...base, content: 'Hello\u200B\u200C\u200D\u200B\uFEFF spam' }).isSpam,
+    ).toBe(true)
+
+    expect(
+      evaluateNoteSpam({
+        ...base,
+        content: 'Claim your free btc airdrop now https://t.me/scam',
+      }).isSpam,
+    ).toBe(true)
+
+    expect(
+      evaluateNoteSpam({
+        ...base,
+        content: 'Buy now #a #b #c #d #e #f #g #h #i #j',
+      }).isSpam,
+    ).toBe(true)
+
+    expect(
+      evaluateNoteSpam({
+        ...base,
+        content: 'Hey everyone!',
+        tags: Array.from({ length: 13 }, (_, i) => ['p', `${i}`.padStart(64, 'a')]),
+      }).isSpam,
+    ).toBe(true)
+
+    // Cross-account copy-paste duplicate flood
+    const seen = new Map<string, Set<string>>()
+    const floodText = 'This is an identical automated bot message repeated across accounts'
+    expect(evaluateNoteSpam({ ...base, pubkey: 'a'.repeat(64), content: floodText }, { seenContentAuthors: seen }).isSpam).toBe(false)
+    expect(evaluateNoteSpam({ ...base, pubkey: 'b'.repeat(64), content: floodText }, { seenContentAuthors: seen }).isSpam).toBe(true)
+  })
+
+  it('never filters normal notes, followed users, or top-level checks', () => {
+    const normal = {
+      id: '0000' + 'a'.repeat(60),
+      pubkey: '2'.repeat(64),
+      kind: 1,
+      content: 'Good morning Nostr! Testing Fire Wisp today.',
+      tags: [['nonce', '42', '16']],
+    }
+    expect(evaluateNoteSpam(normal).isSpam).toBe(false)
+    expect(isTopLevelNote(normal)).toBe(true)
+    expect(
+      isTopLevelNote({ tags: [['e', '1'.repeat(64), '', 'reply']] }),
+    ).toBe(false)
+
+    // Followed accounts are always exempt
+    expect(
+      evaluateNoteSpam(
+        { id: 'f'.repeat(64), pubkey: '9'.repeat(64), kind: 1, content: 'free btc', tags: [] },
+        { follows: new Set(['9'.repeat(64)]) },
+      ).isSpam,
+    ).toBe(false)
   })
 })

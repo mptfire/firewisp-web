@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
@@ -14,7 +14,11 @@ export function SearchPage() {
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
-  const readRelays = useSettingsStore((s) => s.getReadRelays())
+  const relays = useSettingsStore((s) => s.relays)
+  const readRelays = useMemo(
+    () => relays.filter((r) => r.read).map((r) => r.url),
+    [relays],
+  )
 
   const initialQ = params.get('q') || ''
   const [query, setQuery] = useState(initialQ)

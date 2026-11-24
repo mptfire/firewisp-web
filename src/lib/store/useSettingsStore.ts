@@ -21,6 +21,9 @@ export interface SettingsState {
   mutedHashtags: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
+  spamFilterEnabled: boolean
+  hideRepliesInExplore: boolean
+  requirePowInExplore: boolean
   nwcUri: string
 
   addRelay: (url: string) => boolean
@@ -43,6 +46,9 @@ export interface SettingsState {
 
   setDmAutoLoadMedia: (enabled: boolean) => void
   setClientTagEnabled: (enabled: boolean) => void
+  setSpamFilterEnabled: (enabled: boolean) => void
+  setHideRepliesInExplore: (enabled: boolean) => void
+  setRequirePowInExplore: (enabled: boolean) => void
   setNwcUri: (uri: string) => void
 
   getReadRelays: () => string[]
@@ -60,6 +66,9 @@ interface PersistedSettings {
   mutedHashtags: string[]
   dmAutoLoadMedia: boolean
   clientTagEnabled: boolean
+  spamFilterEnabled: boolean
+  hideRepliesInExplore: boolean
+  requirePowInExplore: boolean
   // SECURITY: nwcUri is intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
@@ -75,6 +84,9 @@ function loadInitial(): PersistedSettings & { nwcUri: string } {
     mutedHashtags: [],
     dmAutoLoadMedia: false,
     clientTagEnabled: true,
+    spamFilterEnabled: true,
+    hideRepliesInExplore: true,
+    requirePowInExplore: false,
     nwcUri: '',
   }
   if (typeof localStorage === 'undefined') return defaults
@@ -131,6 +143,9 @@ function persist(state: SettingsState) {
     mutedHashtags: state.mutedHashtags,
     dmAutoLoadMedia: state.dmAutoLoadMedia,
     clientTagEnabled: state.clientTagEnabled,
+    spamFilterEnabled: state.spamFilterEnabled,
+    hideRepliesInExplore: state.hideRepliesInExplore,
+    requirePowInExplore: state.requirePowInExplore,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -240,6 +255,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setClientTagEnabled: (clientTagEnabled) => {
     set({ clientTagEnabled })
+    persist(get())
+  },
+  setSpamFilterEnabled: (spamFilterEnabled) => {
+    set({ spamFilterEnabled })
+    persist(get())
+  },
+  setHideRepliesInExplore: (hideRepliesInExplore) => {
+    set({ hideRepliesInExplore })
+    persist(get())
+  },
+  setRequirePowInExplore: (requirePowInExplore) => {
+    set({ requirePowInExplore })
     persist(get())
   },
   setNwcUri: (nwcUri) => {

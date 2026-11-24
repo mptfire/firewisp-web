@@ -343,6 +343,51 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Anti-spam filter in Explore</div>
+            <div className="text-[#8c8a82]">
+              Filters bot floods, invisible-char spam, hashtag/mention stuffing, and scam links.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.spamFilterEnabled}
+            onChange={(e) => settings.setSpamFilterEnabled(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Hide stray replies in Explore</div>
+            <div className="text-[#8c8a82]">
+              Show top-level notes in Explore instead of out-of-context reply spam.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.hideRepliesInExplore}
+            onChange={(e) => settings.setHideRepliesInExplore(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Strict PoW-only Explore (12+ bits)</div>
+            <div className="text-[#8c8a82]">
+              Only show notes in Explore with verified NIP-13 Proof-of-Work (zero bot spam).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.requirePowInExplore}
+            onChange={(e) => settings.setRequirePowInExplore(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Auto-load external images in DMs</div>
             <div className="text-[#8c8a82]">
               Keep OFF to prevent strangers from learning your IP address in DMs.
