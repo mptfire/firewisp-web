@@ -116,7 +116,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
               alt={firstImage.alt || 'Quoted image'}
               loading="lazy"
               referrerPolicy="no-referrer"
-              className="mt-2 rounded-lg max-h-52 w-full object-cover border border-[#242734]"
+              className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734]"
             />
           )}
           {!firstImage && firstYoutube && (
@@ -489,7 +489,7 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
               {parsed.media.map((m) => (
                 <div
                   key={m.url}
-                  className="relative rounded-xl overflow-hidden border border-[#262834] bg-[#0b0b0e]"
+                  className="relative rounded-xl overflow-hidden border border-[#262834] bg-[#0b0b0e] flex items-center justify-center"
                 >
                   {m.kind === 'image' && (
                     <img
@@ -498,7 +498,11 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                       loading="lazy"
                       referrerPolicy="no-referrer"
                       onClick={() => setLightboxMedia(m)}
-                      className="w-full max-h-[460px] object-cover cursor-zoom-in"
+                      className={`${
+                        parsed.media.length === 1
+                          ? 'max-h-[620px] max-w-full w-auto h-auto'
+                          : 'max-h-80 w-full'
+                      } object-contain cursor-zoom-in`}
                     />
                   )}
                   {m.kind === 'video' && (
@@ -508,7 +512,7 @@ export const NoteCard = memo(function NoteCard({ event, repostedByPubkey }: Note
                       controls
                       playsInline
                       preload="metadata"
-                      className="w-full max-h-[460px] bg-black"
+                      className="w-full max-h-[560px] bg-black"
                     />
                   )}
                   {m.kind === 'audio' && (

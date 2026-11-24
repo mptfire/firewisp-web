@@ -48,7 +48,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
       </div>
 
       <div
-        className="max-w-4xl max-h-[82vh] flex flex-col items-center gap-3"
+        className="max-w-[92vw] max-h-[92vh] flex flex-col items-center gap-3"
         onClick={(e) => e.stopPropagation()}
       >
         {media.kind === 'video' ? (
@@ -56,14 +56,14 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
             src={media.url}
             controls
             autoPlay
-            className="max-h-[75vh] max-w-full rounded-xl"
+            className="max-h-[85vh] max-w-full rounded-xl"
           />
         ) : (
           <img
             src={media.url}
             alt={media.alt || 'Attached image'}
             referrerPolicy="no-referrer"
-            className="max-h-[75vh] max-w-full rounded-xl object-contain"
+            className="max-h-[88vh] max-w-full rounded-xl object-contain"
           />
         )}
         {media.alt && (
