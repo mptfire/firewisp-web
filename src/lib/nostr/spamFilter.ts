@@ -13,11 +13,25 @@ const SPAM_PHRASE_RE =
 
 const URL_RE = /https?:\/\/[^\s]+/gi
 
+// Machine/telemetry t-tags abused on public kind-1 feeds
+const MACHINE_T_TAG_RE = /^(?:relay-selftest|xvd-stat|zambo-receipt|sp_[0-9a-f]{6,}|heartbeat|nostr-test|bot-ping)$/i
+
+// Clock / ASCII divider bots (e.g. "--------20:30--------", "✄--- 20:30 ---✄")
+const CLOCK_DIVIDER_RE = /^[\s\-_=~*✄✂─═•·:|—–]+\d{1,2}:\d{2}(?::\d{2})?[\s\-_=~*✄✂─═•·:|—–]*$/
+
+// Pure hex, base64, or long machine-encoded blobs without URLs
+const PURE_HEX_RE = /^[0-9a-f]{32,}$/i
+const BASE64_BLOB_RE = /^[A-Za-z0-9+/=_-]{60,}$/
+const LONG_ENCODED_TOKEN_RE = /[A-Za-z0-9+/=._-]{48,}/
+
 export interface SpamCheckContext {
   myPubkey?: string | null
   follows?: Set<string> | string[]
   /** Optional shared content-hash tracker to catch cross-account copy-paste floods */
   seenContentAuthors?: Map<string, Set<string>>
+  /** Optional per-author counter to cap automated RSS/bot bursts in Explore */
+  authorCounts?: Map<string, number>
+  maxPerAuthor?: number
   requirePowBits?: number
 }
 
@@ -132,7 +146,49 @@ export function evaluateNoteSpam(
     reasons.push('empty note')
   }
 
-  // 8. Cross-account duplicate copy-paste spam flood
+  // 8. Machine telemetry / protocol junk posted as kind 1 (relay-selftest, xvd-stat, zambo-receipt, drift.gits.net, raw JSON, hex/base64 blobs, clock dividers)
+  if (hashtags.some((t) => MACHINE_T_TAG_RE.test(t))) {
+    score += 90
+    reasons.push('machine/telemetry tag')
+  }
+
+  if (CLOCK_DIVIDER_RE.test(stripped)) {
+    score += 80
+    reasons.push('clock divider bot')
+  }
+
+  if (
+    (stripped.startsWith('{') && stripped.endsWith('}')) ||
+    (stripped.startsWith('[') && stripped.endsWith(']'))
+  ) {
+    try {
+      const parsed = JSON.parse(stripped)
+      if (parsed && typeof parsed === 'object') {
+        score += 85
+        reasons.push('raw JSON machine payload')
+      }
+    } catch {
+      // not valid JSON
+    }
+  }
+
+  // Strip valid URLs and nostr: entities before checking for raw encoded blobs
+  const textWithoutUrls = stripped
+    .replace(URL_RE, ' ')
+    .replace(/nostr:[0-9a-z]+/gi, ' ')
+    .trim()
+
+  if (textWithoutUrls.length > 0) {
+    if (PURE_HEX_RE.test(textWithoutUrls) || BASE64_BLOB_RE.test(textWithoutUrls)) {
+      score += 90
+      reasons.push('encoded machine blob')
+    } else if (!textWithoutUrls.includes(' ') && LONG_ENCODED_TOKEN_RE.test(textWithoutUrls)) {
+      score += 80
+      reasons.push('encoded machine token')
+    }
+  }
+
+  // 9. Cross-account duplicate copy-paste spam flood
   if (ctx.seenContentAuthors && stripped.length >= 24) {
     const key = normalizeForDuplicateCheck(stripped).slice(0, 160)
     if (key.length >= 20) {
@@ -149,6 +205,17 @@ export function evaluateNoteSpam(
         score += 75
         reasons.push('duplicate copy-paste flood')
       }
+    }
+  }
+
+  // 10. Per-author burst cap in Explore (stops RSS/job/news/bot firehoses flooding the screen)
+  if (ctx.authorCounts && (ctx.maxPerAuthor ?? 2) > 0 && score < 60) {
+    const prev = ctx.authorCounts.get(pk) || 0
+    if (prev >= (ctx.maxPerAuthor ?? 2)) {
+      score += 70
+      reasons.push('author burst cap')
+    } else {
+      ctx.authorCounts.set(pk, prev + 1)
     }
   }
 

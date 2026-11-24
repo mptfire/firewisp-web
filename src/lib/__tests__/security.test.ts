@@ -382,6 +382,19 @@ describe('Explore anti-spam filter (matching Android NSpam heuristics)', () => {
     const floodText = 'This is an identical automated bot message repeated across accounts'
     expect(evaluateNoteSpam({ ...base, pubkey: 'a'.repeat(64), content: floodText }, { seenContentAuthors: seen }).isSpam).toBe(false)
     expect(evaluateNoteSpam({ ...base, pubkey: 'b'.repeat(64), content: floodText }, { seenContentAuthors: seen }).isSpam).toBe(true)
+
+    // Machine/telemetry kind-1 junk observed live on public relays
+    expect(evaluateNoteSpam({ ...base, content: 'cc1f6b6d54f03126208a7e97b0964d16cee43c51e2042ad6', tags: [['t', 'relay-selftest']] }).isSpam).toBe(true)
+    expect(evaluateNoteSpam({ ...base, content: 'sp_4c43bd1d.bce451f9fe531d8c71c28c1f.12.ZU3WOSMGVWZZKB3QFNIKFZIPQNFE3TF.drift.gits.net', tags: [['t', 'sp_4c43bd1d']] }).isSpam).toBe(true)
+    expect(evaluateNoteSpam({ ...base, content: '{"anchored_at":"2026-11-24T11:30:11.301Z"}', tags: [['t', 'zambo-receipt']] }).isSpam).toBe(true)
+    expect(evaluateNoteSpam({ ...base, content: 'yWMRZStZcloNBXOYf4M9xuWRhVwfSPSM2i3PaidZA7OFjFKO7hEPFv6Ei2yd+2O13PQ1FYaVNvkD2', tags: [['t', 'xvd-stat']] }).isSpam).toBe(true)
+    expect(evaluateNoteSpam({ ...base, content: '✄------------ 20:30 ------------✄', tags: [] }).isSpam).toBe(true)
+
+    // Author burst cap
+    const counts = new Map<string, number>()
+    expect(evaluateNoteSpam({ ...base, content: 'First post from bot' }, { authorCounts: counts, maxPerAuthor: 2 }).isSpam).toBe(false)
+    expect(evaluateNoteSpam({ ...base, content: 'Second post from bot' }, { authorCounts: counts, maxPerAuthor: 2 }).isSpam).toBe(false)
+    expect(evaluateNoteSpam({ ...base, content: 'Third burst post from bot' }, { authorCounts: counts, maxPerAuthor: 2 }).isSpam).toBe(true)
   })
 
   it('never filters normal notes, followed users, or top-level checks', () => {

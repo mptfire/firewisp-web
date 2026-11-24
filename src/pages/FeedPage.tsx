@@ -43,6 +43,7 @@ export function FeedPage() {
     const out: Array<{ event: Event; repostedBy?: string }> = []
     const seen = new Set<string>()
     const seenContentAuthors = new Map<string, Set<string>>()
+    const authorCounts = new Map<string, number>()
     const followSet = new Set(follows)
     let blocked = 0
 
@@ -75,6 +76,8 @@ export function FeedPage() {
           myPubkey: pubkey,
           follows: followSet,
           seenContentAuthors,
+          authorCounts,
+          maxPerAuthor: 2,
           requirePowBits: requirePowInExplore ? 12 : 0,
         })
         if (verdict.isSpam) {
