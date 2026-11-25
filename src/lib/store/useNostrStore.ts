@@ -118,6 +118,7 @@ export interface NostrState {
   // Feed UI state (persisted across route transitions so Back never resets tab!)
   activeFeedTab: FeedTab
   showRepliesInFollows: boolean
+  feedRefreshTick: number
 
   // Feeds
   forYouFeedIds: string[]
@@ -152,6 +153,7 @@ export interface NostrState {
   setPendingShareText: (text: string | null) => void
   setActiveFeedTab: (tab: FeedTab) => void
   setShowRepliesInFollows: (show: boolean) => void
+  bumpFeedRefresh: () => void
   flushPendingFeed: (tab: FeedTab) => void
   loadOlderFeed: (tab: FeedTab) => Promise<number>
   loadTrendingSidebar: (force?: boolean) => Promise<void>
@@ -642,6 +644,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   activeFeedTab: 'foryou',
   showRepliesInFollows: false,
+  feedRefreshTick: 0,
 
   forYouFeedIds: [],
   forYouSuppIds: {},
@@ -692,6 +695,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   setPendingShareText: (pendingShareText) => set({ pendingShareText }),
   setActiveFeedTab: (activeFeedTab) => set({ activeFeedTab }),
   setShowRepliesInFollows: (showRepliesInFollows) => set({ showRepliesInFollows }),
+  bumpFeedRefresh: () => set((s) => ({ feedRefreshTick: s.feedRefreshTick + 1 })),
 
   flushPendingFeed: (tab) => {
     set((s) => {

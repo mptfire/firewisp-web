@@ -64,11 +64,19 @@ function ShareTargetRoute() {
 
 export function App() {
   const restoreSession = useAuthStore((s) => s.restoreSession)
+  const sessionRestored = useAuthStore((s) => s.sessionRestored)
   const pubkey = useAuthStore((s) => s.pubkey)
   const initPoolListener = useNostrStore((s) => s.initPoolListener)
   const subscribeLiveDiscovery = useLiveStore((s) => s.subscribeLiveDiscovery)
   const loadUserGraph = useNostrStore((s) => s.loadUserGraph)
   const subscribeNotifications = useNostrStore((s) => s.subscribeNotifications)
+  const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
+  const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
+  const followsLoaded = useNostrStore((s) => s.followsLoaded)
+  const follows = useNostrStore((s) => s.follows)
+  const followedHashtags = useNostrStore((s) => s.followedHashtags)
+  const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
+  const feedRefreshTick = useNostrStore((s) => s.feedRefreshTick)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -88,6 +96,23 @@ export function App() {
       void loadUserGraph(pubkey)
     }
   }, [pubkey, loadUserGraph])
+
+  // Keep active feed subscribed globally so new-note counts update live while browsing Live/Notifications/Settings
+  useEffect(() => {
+    if (!sessionRestored) return
+    return subscribeFeed(activeFeedTab)
+  }, [
+    sessionRestored,
+    activeFeedTab,
+    pubkey,
+    followsLoaded,
+    follows,
+    followedHashtags,
+    userReadRelays,
+    extendedAuthors,
+    feedRefreshTick,
+    subscribeFeed,
+  ])
 
   // Keep notifications subscribed globally while signed in so unread badge updates live on every page
   useEffect(() => {

@@ -103,8 +103,8 @@ export function HlsVideoPlayer({
 
   const ios = useMemo(() => isIosDevice(), [])
   const effectiveMuted = forceMuted === true ? true : mediaMuted
-  // Never attach Web Audio to iOS native HLS (WebKit native AVPlayer HLS outputs silence through MediaElementSource)
-  const webAudioCapable = isWebAudioAvailable() && (isMseStream || (nativeCorsOk && !ios))
+  // Never attach Web Audio on iOS Safari (WebKit MediaElementSource outputs silence on native/MMS HLS)
+  const webAudioCapable = isWebAudioAvailable() && !ios && (isMseStream || nativeCorsOk)
 
   const streamHost = useMemo(() => {
     if (!safeStreamUrl) return 'external stream'
@@ -193,12 +193,63 @@ export function HlsVideoPlayer({
 
     const isHls = /\.m3u8(\?.*)?$/i.test(safeStreamUrl) || safeStreamUrl.includes('/hls/')
 
+    const attachNativePlayback = () => {
+      // Safari native HLS (when MSE/ManagedMediaSource isn't supported) or direct MP4/WebM recording.
+      // On iOS Safari, setting crossOrigin="anonymous" breaks native AVPlayer fMP4 HLS streams (e.g. streamstr.net),
+      // and we already skip Web Audio on iOS anyway — so skip crossOrigin cleanly on iOS!
+      let triedWithoutCors = ios
+      if (ios) {
+        video.removeAttribute('crossorigin')
+      } else {
+        video.crossOrigin = 'anonymous'
+      }
+      video.src = safeStreamUrl
+      nativeCanPlay = () => {
+        if (!destroyed) {
+          setNativeCorsOk(!triedWithoutCors)
+          setBuffering(false)
+          onPlaybackReadyRef.current?.()
+          void video.play().catch(() => {})
+        }
+      }
+      nativeErr = () => {
+        if (destroyed) return
+        if (!triedWithoutCors) {
+          triedWithoutCors = true
+          setNativeCorsOk(false)
+          video.removeAttribute('crossorigin')
+          video.src = safeStreamUrl
+          video.load()
+          return
+        }
+        const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
+        setError(
+          isLiveRef.current && onStreamOfflineRef.current
+            ? 'Stream could not be loaded — it may be offline. Hidden from Live Now; click Retry to reconnect.'
+            : 'Stream could not be loaded. It may be offline.',
+        )
+        setBuffering(false)
+        if (isLiveRef.current && isOnline) {
+          onStreamOfflineRef.current?.()
+        }
+      }
+      video.addEventListener('canplay', nativeCanPlay)
+      video.addEventListener('error', nativeErr)
+    }
+
     void (async () => {
-      if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
+      if (isHls) {
         try {
+          // ALWAYS prefer hls.js whenever MSE / ManagedMediaSource is supported!
+          // Modern Chromium/Chrome reports canPlayType('application/vnd.apple.mpegurl') === 'maybe'
+          // and sends Range: bytes=... requests that trigger 206 ERR_CONTENT_LENGTH_MISMATCH on servers like streamstr.net.
           const { default: HlsCtor } = await import('hls.js')
           if (destroyed) return
           if (!HlsCtor.isSupported()) {
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              attachNativePlayback()
+              return
+            }
             setError('Your browser does not support HLS live playback.')
             setBuffering(false)
             return
@@ -313,47 +364,7 @@ export function HlsVideoPlayer({
           }
         }
       } else {
-        // Safari native HLS or direct MP4/WebM recording.
-        // On iOS Safari, setting crossOrigin="anonymous" breaks native AVPlayer fMP4 HLS streams (e.g. streamstr.net),
-        // and we already skip Web Audio on iOS native HLS anyway — so skip crossOrigin cleanly on iOS!
-        let triedWithoutCors = ios
-        if (ios) {
-          video.removeAttribute('crossorigin')
-        } else {
-          video.crossOrigin = 'anonymous'
-        }
-        video.src = safeStreamUrl
-        nativeCanPlay = () => {
-          if (!destroyed) {
-            setNativeCorsOk(!triedWithoutCors)
-            setBuffering(false)
-            onPlaybackReadyRef.current?.()
-            void video.play().catch(() => {})
-          }
-        }
-        nativeErr = () => {
-          if (destroyed) return
-          if (!triedWithoutCors) {
-            triedWithoutCors = true
-            setNativeCorsOk(false)
-            video.removeAttribute('crossorigin')
-            video.src = safeStreamUrl
-            video.load()
-            return
-          }
-          const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false
-          setError(
-            isLiveRef.current && onStreamOfflineRef.current
-              ? 'Stream could not be loaded — it may be offline. Hidden from Live Now; click Retry to reconnect.'
-              : 'Stream could not be loaded. It may be offline.',
-          )
-          setBuffering(false)
-          if (isLiveRef.current && isOnline) {
-            onStreamOfflineRef.current?.()
-          }
-        }
-        video.addEventListener('canplay', nativeCanPlay)
-        video.addEventListener('error', nativeErr)
+        attachNativePlayback()
       }
     })()
 

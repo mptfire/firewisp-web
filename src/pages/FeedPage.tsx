@@ -46,14 +46,12 @@ function FeedSkeleton() {
 
 export function FeedPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
-  const sessionRestored = useAuthStore((s) => s.sessionRestored)
   const tab = useNostrStore((s) => s.activeFeedTab)
   const setTab = useNostrStore((s) => s.setActiveFeedTab)
   const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
   const setShowRepliesInFollows = useNostrStore((s) => s.setShowRepliesInFollows)
   const follows = useNostrStore((s) => s.follows)
   const followedHashtags = useNostrStore((s) => s.followedHashtags)
-  const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
   const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
   const loadingMore = useNostrStore((s) => s.loadingMore)
@@ -68,14 +66,14 @@ export function FeedPage() {
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
   const pendingIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab])
   const loadingFeed = useNostrStore((s) => s.loadingFeed)
-  const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
+  const feedRefreshTick = useNostrStore((s) => s.feedRefreshTick)
+  const bumpFeedRefresh = useNostrStore((s) => s.bumpFeedRefresh)
   const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
   const loadOlderFeed = useNostrStore((s) => s.loadOlderFeed)
   const clearFeedTab = useNostrStore((s) => s.clearFeedTab)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
-  const followsLoaded = useNostrStore((s) => s.followsLoaded)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
   const requirePowInExplore = useSettingsStore((s) => s.requirePowInExplore)
@@ -128,34 +126,20 @@ export function FeedPage() {
   }, [visibleTabs, tab, sidebarFeedMode, setTab])
 
   const PAGE_SIZE = 40
-  const [refreshTick, setRefreshTick] = useState(0)
   const [noMoreOlder, setNoMoreOlder] = useState(false)
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [mobileLiveZapsOpen, setMobileLiveZapsOpen] = useState(false)
 
   useEffect(() => {
-    if (!sessionRestored) return
     setNoMoreOlder(false)
     setVisibleCount(PAGE_SIZE)
-    return subscribeFeed(tab)
-  }, [
-    sessionRestored,
-    tab,
-    pubkey,
-    followsLoaded,
-    follows,
-    followedHashtags,
-    userReadRelays,
-    extendedAuthors,
-    refreshTick,
-    subscribeFeed,
-  ])
+  }, [tab, pubkey, feedRefreshTick])
 
   const handleRefresh = () => {
     setNoMoreOlder(false)
     setVisibleCount(PAGE_SIZE)
     clearFeedTab(tab)
-    setRefreshTick((n) => n + 1)
+    bumpFeedRefresh()
   }
 
   const handleShowNew = () => {

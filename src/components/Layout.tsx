@@ -27,6 +27,7 @@ import {
 import { isIosDevice } from '../lib/mediaAudio'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { getStreamPrimaryPubkey, isLiveStreamFresh } from '../lib/nostr/nip53'
+import { isTopLevelNote } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
@@ -108,6 +109,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const showGlobalAudio = useSettingsStore((s) => s.showGlobalAudio)
   const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
+  const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
@@ -115,6 +117,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
+  const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
   const pendingFeedIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab])
   const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
   const notificationIds = useNostrStore((s) => s.notificationIds)
@@ -127,15 +130,47 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const pendingFeedCount = useMemo(() => {
     if (!pendingFeedIds || pendingFeedIds.length === 0) return 0
+    const seen = new Set<string>()
     let count = 0
     for (const id of pendingFeedIds) {
       const ev = events[id]
       if (!ev || isEventDeleted(ev) || isEventMuted(ev)) continue
+      let targetEv = ev
+      if (ev.kind === 6) {
+        const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
+        const inner = targetId ? events[targetId] : undefined
+        if (!inner || isEventDeleted(inner) || isEventMuted(inner)) continue
+        targetEv = inner
+      }
+      if (seen.has(targetEv.id)) continue
+      if (
+        (activeFeedTab === 'following' ||
+          activeFeedTab === 'foryou' ||
+          activeFeedTab === 'extended' ||
+          activeFeedTab === 'firewisp') &&
+        !showRepliesInFollows &&
+        targetEv.kind === 1 &&
+        !isTopLevelNote(targetEv)
+      ) {
+        continue
+      }
+      if (
+        (activeFeedTab === 'global' || activeFeedTab === 'trending') &&
+        hideRepliesInExplore &&
+        targetEv.kind === 1 &&
+        !isTopLevelNote(targetEv)
+      ) {
+        continue
+      }
+      seen.add(targetEv.id)
       count++
     }
     return count
   }, [
     pendingFeedIds,
+    activeFeedTab,
+    showRepliesInFollows,
+    hideRepliesInExplore,
     events,
     deletedByAuthor,
     isEventDeleted,
@@ -148,13 +183,13 @@ export function Layout({ children }: { children: ReactNode }) {
     privateMutedWords,
   ])
 
-  // Clicking the nav item (or logo) for the page you're already on flushes pending feed posts and scrolls to the top
+  // Clicking Feed flushes any queued new posts; clicking the nav item (or logo) for the page you're already on scrolls to top
   const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
+    if (to === '/' && pendingFeedCount > 0) {
+      flushPendingFeed(activeFeedTab)
+    }
     if (location.pathname === to && !location.search && !location.hash) {
       e.preventDefault()
-      if (to === '/' && pendingFeedCount > 0) {
-        flushPendingFeed(activeFeedTab)
-      }
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }
@@ -371,6 +406,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <nav className="space-y-1">
               {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => {
                 const hasNotifFlame = to === '/notifications' && badge !== undefined
+                const hasFeedNew = to === '/' && badge !== undefined
                 return (
                   <NavLink
                     key={to}
@@ -380,10 +416,14 @@ export function Layout({ children }: { children: ReactNode }) {
                     className={({ isActive }) =>
                       `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
                         isActive
-                          ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
+                          ? hasFeedNew
+                            ? 'bg-[#e8590c]/22 text-[#ff922b] border border-[#ff922b]/55 font-semibold'
+                            : 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
                           : hasNotifFlame
                             ? 'fw-notif-flame text-white hover:bg-white/5'
-                            : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
+                            : hasFeedNew
+                              ? 'text-[#ff922b] font-semibold hover:bg-[#e8590c]/10'
+                              : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
                       }`
                     }
                   >
@@ -404,12 +444,14 @@ export function Layout({ children }: { children: ReactNode }) {
                             ? 'text-red-500'
                             : badge && badgeTone === 'green'
                               ? 'text-emerald-400'
-                              : badge && badgeTone === 'orange'
-                                ? 'text-[#ff922b]'
+                              : hasFeedNew
+                                ? 'text-[#ff922b] fill-[#ff922b]/35'
                                 : ''
                         }`}
                       />
-                      <span className="truncate">{label}</span>
+                      <span className={`truncate ${hasFeedNew ? 'text-[#ff922b]' : ''}`}>
+                        {label}
+                      </span>
                     </span>
                     {badge !== undefined && (
                       <span
@@ -417,7 +459,7 @@ export function Layout({ children }: { children: ReactNode }) {
                           badgeTone === 'green'
                             ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
                             : badgeTone === 'orange'
-                              ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-[#ff922b]'
+                              ? 'bg-[#e8590c]/25 border-[#ff922b]/60 text-[#ff922b]'
                               : 'bg-red-600/20 border-red-500/40 text-red-400'
                         }`}
                       >
@@ -713,37 +755,50 @@ export function Layout({ children }: { children: ReactNode }) {
           },
           ...(showBookmarksNav ? [{ to: '/bookmarks', icon: Bookmark, label: 'Bookmarks' }] : []),
           { to: '/settings', icon: Settings, label: 'Settings' },
-        ].map(({ to, icon: Icon, label, end, badge, tone }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={(e) => scrollTopIfCurrent(e, to)}
-            className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 text-[10px] px-1.5 py-0.5 min-w-0 ${
-                isActive ? 'text-[#ff8a3d]' : 'text-[#8c8a82]'
-              }`
-            }
-          >
-            <span className="relative inline-flex">
-              <Icon className="w-5 h-5" />
-              {badge !== undefined && (
-                <span
-                  className={`absolute -top-1.5 -right-2.5 px-1 min-w-[16px] h-4 rounded-full text-[9px] font-bold flex items-center justify-center tabular-nums leading-none ${
-                    tone === 'green'
-                      ? 'bg-emerald-500 text-black'
-                      : tone === 'orange'
-                        ? 'bg-[#e8590c] text-white'
-                        : 'bg-red-600 text-white'
+        ].map(({ to, icon: Icon, label, end, badge, tone }) => {
+          const hasFeedNew = to === '/' && badge !== undefined
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              onClick={(e) => scrollTopIfCurrent(e, to)}
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-0.5 text-[10px] px-1.5 py-0.5 min-w-0 ${
+                  hasFeedNew
+                    ? 'text-[#ff922b] font-semibold'
+                    : isActive
+                      ? 'text-[#ff8a3d]'
+                      : 'text-[#8c8a82]'
+                }`
+              }
+            >
+              <span className="relative inline-flex">
+                <Icon
+                  className={`w-5 h-5 ${
+                    hasFeedNew ? 'text-[#ff922b] fill-[#ff922b]/35' : ''
                   }`}
-                >
-                  {badge}
-                </span>
-              )}
-            </span>
-            <span className="truncate max-w-[68px]">{label}</span>
-          </NavLink>
-        ))}
+                />
+                {badge !== undefined && (
+                  <span
+                    className={`absolute -top-1.5 -right-2.5 px-1 min-w-[16px] h-4 rounded-full text-[9px] font-bold flex items-center justify-center tabular-nums leading-none ${
+                      tone === 'green'
+                        ? 'bg-emerald-500 text-black'
+                        : tone === 'orange'
+                          ? 'bg-[#e8590c] text-white'
+                          : 'bg-red-600 text-white'
+                    }`}
+                  >
+                    {badge}
+                  </span>
+                )}
+              </span>
+              <span className={`truncate max-w-[68px] ${hasFeedNew ? 'text-[#ff922b]' : ''}`}>
+                {label}
+              </span>
+            </NavLink>
+          )
+        })}
       </nav>
 
       {/* PoW Mining Status Pill */}

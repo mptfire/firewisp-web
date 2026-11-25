@@ -63,6 +63,7 @@ export function LiveHoverPreview({
     let destroyed = false
     let hlsInstance: { destroy: () => void } | null = null
     let mediaRecoveryAttempts = 0
+    let networkRecoveryAttempts = 0
     let nativeCanPlay: (() => void) | null = null
     let nativeErr: (() => void) | null = null
 
@@ -122,19 +123,40 @@ export function LiveHoverPreview({
         teardown()
         updateStatus('error')
       }
-    }, 8000)
+    }, 10000)
 
     const isHls = /\.m3u8(\?.*)?$/i.test(safeUrl) || safeUrl.includes('/hls/')
 
+    const attachNativePreview = () => {
+      video.removeAttribute('crossorigin')
+      video.src = safeUrl
+      nativeCanPlay = () => {
+        if (destroyed) return
+        safePlay()
+      }
+      nativeErr = () => {
+        if (destroyed) return
+        teardown()
+        updateStatus('error')
+      }
+      video.addEventListener('canplay', nativeCanPlay, { once: true })
+      video.addEventListener('error', nativeErr, { once: true })
+    }
+
     void (async () => {
-      if (isHls && !video.canPlayType('application/vnd.apple.mpegurl')) {
+      if (isHls) {
         try {
+          // ALWAYS prefer hls.js whenever MSE / ManagedMediaSource is supported so Chromium's
+          // native HLS engine never hits Range 206 ERR_CONTENT_LENGTH_MISMATCH on hosts like streamstr.net.
           const { default: Hls } = await import('hls.js')
-          if (destroyed || !Hls.isSupported()) {
-            if (!destroyed) {
-              teardown()
-              updateStatus('error')
+          if (destroyed) return
+          if (!Hls.isSupported()) {
+            if (video.canPlayType('application/vnd.apple.mpegurl')) {
+              attachNativePreview()
+              return
             }
+            teardown()
+            updateStatus('error')
             return
           }
           const hls = new Hls(
@@ -162,6 +184,19 @@ export function LiveHoverPreview({
               hls.recoverMediaError()
               return
             }
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              const statusCode = data.response?.code
+              const definitiveOffline = statusCode === 404 || statusCode === 410
+              if (!definitiveOffline && networkRecoveryAttempts < 2) {
+                networkRecoveryAttempts++
+                if (networkRecoveryAttempts === 1) {
+                  hls.startLoad()
+                } else {
+                  hls.loadSource(safeUrl)
+                }
+                return
+              }
+            }
             teardown()
             updateStatus('error')
           })
@@ -172,18 +207,7 @@ export function LiveHoverPreview({
           }
         }
       } else {
-        video.src = safeUrl
-        nativeCanPlay = () => {
-          if (destroyed) return
-          safePlay()
-        }
-        nativeErr = () => {
-          if (destroyed) return
-          teardown()
-          updateStatus('error')
-        }
-        video.addEventListener('canplay', nativeCanPlay, { once: true })
-        video.addEventListener('error', nativeErr, { once: true })
+        attachNativePreview()
       }
     })()
 

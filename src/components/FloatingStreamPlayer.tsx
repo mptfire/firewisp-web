@@ -29,7 +29,69 @@ interface DragPosition {
   y: number
 }
 
+interface MiniPlayerSize {
+  width: number
+  chatHeight: number
+}
+
 const EDGE_MARGIN = 8
+const MINI_SIZE_STORAGE_KEY = 'firewisp_mini_player_size_v1'
+const MIN_MINI_WIDTH = 260
+const MAX_MINI_WIDTH = 760
+const MIN_CHAT_HEIGHT = 96
+const MAX_CHAT_HEIGHT = 480
+
+const SIZE_PRESETS: Array<{ label: 'S' | 'M' | 'L'; width: number; chatHeight: number }> = [
+  { label: 'S', width: 300, chatHeight: 160 },
+  { label: 'M', width: 420, chatHeight: 224 },
+  { label: 'L', width: 560, chatHeight: 280 },
+]
+
+function clampSize(width: number, chatHeight: number): MiniPlayerSize {
+  const maxW =
+    typeof window !== 'undefined'
+      ? Math.max(MIN_MINI_WIDTH, Math.min(MAX_MINI_WIDTH, window.innerWidth - EDGE_MARGIN * 2))
+      : MAX_MINI_WIDTH
+  const maxH =
+    typeof window !== 'undefined'
+      ? Math.max(MIN_CHAT_HEIGHT, Math.min(MAX_CHAT_HEIGHT, window.innerHeight - 260))
+      : MAX_CHAT_HEIGHT
+  return {
+    width: Math.round(Math.min(Math.max(MIN_MINI_WIDTH, width), maxW)),
+    chatHeight: Math.round(Math.min(Math.max(MIN_CHAT_HEIGHT, chatHeight), maxH)),
+  }
+}
+
+function loadSavedMiniSize(): MiniPlayerSize {
+  const defaultWidth = typeof window !== 'undefined' && window.innerWidth < 640 ? 300 : 350
+  const fallback = clampSize(defaultWidth, 176)
+  if (typeof localStorage === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(MINI_SIZE_STORAGE_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<MiniPlayerSize>
+    if (
+      typeof parsed.width === 'number' &&
+      Number.isFinite(parsed.width) &&
+      typeof parsed.chatHeight === 'number' &&
+      Number.isFinite(parsed.chatHeight)
+    ) {
+      return clampSize(parsed.width, parsed.chatHeight)
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return fallback
+}
+
+function saveMiniSize(size: MiniPlayerSize) {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(MINI_SIZE_STORAGE_KEY, JSON.stringify(size))
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function clampPosition(x: number, y: number, width: number, height: number): DragPosition {
   if (typeof window === 'undefined') return { x, y }
@@ -197,7 +259,7 @@ export function FloatingStreamPlayer() {
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
 
-  const [expanded, setExpanded] = useState(false)
+  const [size, setSize] = useState<MiniPlayerSize>(() => loadSavedMiniSize())
   const [chatOpen, setChatOpen] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 640 : true,
   )
@@ -206,6 +268,7 @@ export function FloatingStreamPlayer() {
   const [nativePipSupported, setNativePipSupported] = useState(false)
   const [pos, setPos] = useState<DragPosition | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [resizing, setResizing] = useState(false)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoElRef = useRef<HTMLVideoElement | null>(null)
@@ -221,6 +284,20 @@ export function FloatingStreamPlayer() {
     width: number
     height: number
     moved: boolean
+  } | null>(null)
+  const resizeStateRef = useRef<{
+    pointerId: number
+    corner: 'tl' | 'br'
+    startPointerX: number
+    startPointerY: number
+    startWidth: number
+    startChatHeight: number
+    startLeft: number
+    startTop: number
+    startRight: number
+    startBottom: number
+    wasPositioned: boolean
+    chatWasOpen: boolean
   } | null>(null)
   const suppressNextLinkClickRef = useRef(false)
 
@@ -287,7 +364,21 @@ export function FloatingStreamPlayer() {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages.length, lastMessageId, chatOpen])
 
-  // Continuously keep dragged mini-player clamped inside the viewport across resizes, reopen, expand, or chat toggle
+  // Keep custom size clamped to viewport across window resizes
+  useEffect(() => {
+    const onResize = () => {
+      setSize((prev) => {
+        const clamped = clampSize(prev.width, prev.chatHeight)
+        return clamped.width === prev.width && clamped.chatHeight === prev.chatHeight
+          ? prev
+          : clamped
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Continuously keep dragged mini-player clamped inside the viewport across resizes, reopen, size changes, or chat toggle
   useEffect(() => {
     if (!pos || !miniPlayer) return
     const el = containerRef.current
@@ -312,7 +403,62 @@ export function FloatingStreamPlayer() {
       ro?.disconnect()
       window.removeEventListener('resize', reclamp)
     }
-  }, [pos !== null, Boolean(miniPlayer), expanded, chatOpen])
+  }, [pos !== null, Boolean(miniPlayer), size.width, size.chatHeight, chatOpen])
+
+  // Corner drag-to-resize listeners
+  useEffect(() => {
+    if (!resizing) return
+
+    const onPointerMove = (e: PointerEvent) => {
+      const st = resizeStateRef.current
+      if (!st || e.pointerId !== st.pointerId) return
+      const dx = e.clientX - st.startPointerX
+      const dy = e.clientY - st.startPointerY
+
+      const rawWidth = st.corner === 'br' ? st.startWidth + dx : st.startWidth - dx
+      // Scale chat height smoothly when chat is open (dragging corner vertically adjusts chat height)
+      const videoHeightDelta = ((rawWidth - st.startWidth) * 9) / 16
+      const rawChatHeight = st.chatWasOpen
+        ? st.corner === 'br'
+          ? st.startChatHeight + dy - videoHeightDelta
+          : st.startChatHeight - dy - videoHeightDelta
+        : st.startChatHeight
+
+      const next = clampSize(rawWidth, rawChatHeight)
+      setSize(next)
+      saveMiniSize(next)
+
+      if (st.corner === 'tl' && st.wasPositioned) {
+        const nextTotalHeight =
+          st.startBottom - st.startTop + (next.width - st.startWidth) * (9 / 16) +
+          (st.chatWasOpen ? next.chatHeight - st.startChatHeight : 0)
+        setPos(
+          clampPosition(
+            st.startRight - next.width,
+            st.startBottom - nextTotalHeight,
+            next.width,
+            nextTotalHeight,
+          ),
+        )
+      }
+    }
+
+    const onPointerUp = (e: PointerEvent) => {
+      const st = resizeStateRef.current
+      if (st && e.pointerId !== st.pointerId) return
+      resizeStateRef.current = null
+      setResizing(false)
+    }
+
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerUp)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('pointercancel', onPointerUp)
+    }
+  }, [resizing])
 
   // Pointer drag listeners (filtered by pointerId so multi-touch or iframes never corrupt drag)
   useEffect(() => {
@@ -415,25 +561,76 @@ export function FloatingStreamPlayer() {
     }
   }
 
+  const handleResizePointerDown = (
+    corner: 'tl' | 'br',
+    e: React.PointerEvent<HTMLDivElement>,
+  ) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const el = containerRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // ignore if capture unsupported
+    }
+    resizeStateRef.current = {
+      pointerId: e.pointerId,
+      corner,
+      startPointerX: e.clientX,
+      startPointerY: e.clientY,
+      startWidth: rect.width,
+      startChatHeight: size.chatHeight,
+      startLeft: rect.left,
+      startTop: rect.top,
+      startRight: rect.right,
+      startBottom: rect.bottom,
+      wasPositioned: pos !== null,
+      chatWasOpen: chatOpen && Boolean(decoded),
+    }
+    setResizing(true)
+  }
+
+  const currentPresetIdx = size.width <= 355 ? 0 : size.width <= 485 ? 1 : 2
+  const currentPresetLabel = SIZE_PRESETS[currentPresetIdx].label
+  const handleCycleSizePreset = () => {
+    const nextPreset = SIZE_PRESETS[(currentPresetIdx + 1) % SIZE_PRESETS.length]
+    const clamped = clampSize(nextPreset.width, nextPreset.chatHeight)
+    setSize(clamped)
+    saveMiniSize(clamped)
+  }
+
   const hasCompetingPlayer = mainPlayerActive || hasInlineStream
   const miniHasAudio = audioOwner === 'mini'
 
   return (
     <div
       ref={containerRef}
-      style={pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined}
-      className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 max-h-[calc(100dvh-16px)] flex flex-col ${
-        pos ? '' : 'bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-4 right-3 sm:right-4'
+      style={{
+        width: `${size.width}px`,
+        ...(pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : {}),
+      }}
+      className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 max-w-[calc(100vw-16px)] max-h-[calc(100dvh-16px)] flex flex-col ${
+        pos ? '' : 'bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-4 right-2 sm:right-4'
       } ${
-        dragging
+        dragging || resizing
           ? 'border-[#ff922b] select-none'
           : miniHasAudio
             ? 'border-[#e8590c]/60 transition-[width]'
             : 'border-[#2f3344] transition-[width]'
-      } ${
-        expanded ? 'w-[calc(100vw-24px)] sm:w-[440px]' : 'w-[300px] sm:w-[350px]'
       }`}
     >
+      {/* Top-left corner drag-to-resize handle (ideal when docked at bottom-right) */}
+      <div
+        data-no-drag
+        onPointerDown={(e) => handleResizePointerDown('tl', e)}
+        title="Drag corner to resize mini-player"
+        aria-label="Resize mini-player from top-left corner"
+        className="absolute top-0 left-0 w-3.5 h-3.5 z-30 cursor-nwse-resize touch-none"
+      />
+
       {/* Draggable compact control header (double-click to snap back to corner) */}
       <div
         onPointerDown={handleHeaderPointerDown}
@@ -533,12 +730,17 @@ export function FloatingStreamPlayer() {
           )}
           <button
             type="button"
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? 'Smaller mini-player' : 'Larger mini-player'}
-            aria-label={expanded ? 'Smaller mini-player' : 'Larger mini-player'}
-            className="hidden sm:inline-flex p-1 rounded-lg text-[#9a9890] hover:text-white hover:bg-white/5 cursor-pointer"
+            onClick={handleCycleSizePreset}
+            title={`Resize mini-player (Current: ${currentPresetLabel} · Click for S / M / L or drag corners)`}
+            aria-label={`Resize mini-player (current size ${currentPresetLabel})`}
+            className="inline-flex items-center gap-0.5 px-1.5 py-1 rounded-lg text-[10px] font-semibold text-[#9a9890] hover:text-white hover:bg-white/5 cursor-pointer"
           >
-            {expanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            {currentPresetIdx === 2 ? (
+              <Minimize2 className="w-3 h-3" />
+            ) : (
+              <Maximize2 className="w-3 h-3" />
+            )}
+            <span>{currentPresetLabel}</span>
           </button>
           <Link
             to={`/live/${miniPlayer.naddr}`}
@@ -598,9 +800,8 @@ export function FloatingStreamPlayer() {
               if (!el) return
               stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
             }}
-            className={`${
-              expanded ? 'h-56' : 'h-44'
-            } min-h-[96px] overflow-y-auto px-2.5 py-2 space-y-1.5`}
+            style={{ height: `${size.chatHeight}px` }}
+            className="min-h-[96px] overflow-y-auto px-2.5 py-2 space-y-1.5"
           >
             {messages.length === 0 ? (
               <div className="h-full flex items-center justify-center text-[11px] text-[#6f6d66]">
@@ -652,6 +853,19 @@ export function FloatingStreamPlayer() {
           </div>
         </div>
       )}
+
+      {/* Bottom-right corner drag-to-resize handle with subtle visual grip */}
+      <div
+        data-no-drag
+        onPointerDown={(e) => handleResizePointerDown('br', e)}
+        title="Drag corner to resize mini-player"
+        aria-label="Resize mini-player from bottom-right corner"
+        className="absolute bottom-0 right-0 w-4 h-4 z-30 cursor-nwse-resize touch-none flex items-end justify-end p-0.5 opacity-60 hover:opacity-100 transition"
+      >
+        <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 text-[#9a9890] pointer-events-none">
+          <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </svg>
+      </div>
     </div>
   )
 }
