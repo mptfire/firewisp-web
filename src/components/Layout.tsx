@@ -135,15 +135,19 @@ function FireWispFlameSprite({
         d="M23.6 10C23.6 7.5 21.3 6.0 18.3 6.3C15.5 6.6 13.4 8.2 9.2 8.2C12.6 9.4 13.8 10.9 11.2 12.0C14.4 12.2 16.8 13.6 19.6 13.5C22.1 13.4 23.6 12.0 23.6 10Z"
         fill={`url(#${coreId})`}
       />
-      {/* Luminous wisp heart & floating sparks */}
+      {/* Luminous wisp heart, cute wisp eyes & floating sparks */}
       <ellipse
-        cx="20.4"
+        cx="20.5"
         cy="10"
-        rx="2.5"
-        ry="1.9"
+        rx="3.2"
+        ry="2.8"
         fill={palette.heart}
         fillOpacity={palette.heartOp}
       />
+      <circle cx="21.4" cy="8.2" r="1.15" fill="#111218" />
+      <circle cx="21.8" cy="7.85" r="0.35" fill="#ffffff" />
+      <circle cx="21.4" cy="11.8" r="1.15" fill="#111218" />
+      <circle cx="21.8" cy="11.45" r="0.35" fill="#ffffff" />
       <path
         d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z"
         fill={palette.spark}
