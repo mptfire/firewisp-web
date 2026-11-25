@@ -237,6 +237,58 @@ function LiveStreamPreviewCard({
   )
 }
 
+function LiveNowCompactPill({
+  stream,
+  isFollowed,
+}: {
+  stream: LiveStreamEntry
+  isFollowed: boolean
+}) {
+  const displayPubkey = getStreamPrimaryPubkey(stream.activity)
+  const profile = useNostrStore((s) => s.profiles[displayPubkey])
+  const hostName = profile?.display_name || profile?.name || `${displayPubkey.slice(0, 8)}…`
+  const title = stream.activity.title || `${hostName}'s stream`
+  const naddr = useMemo(
+    () =>
+      encodeLiveNaddr(
+        stream.activity.hostPubkey,
+        stream.activity.dTag,
+        stream.activity.relayHints,
+      ),
+    [stream.activity.hostPubkey, stream.activity.dTag, stream.activity.relayHints],
+  )
+  const viewers = stream.activity.currentParticipants
+  const chatters = stream.chatters.length
+  const statLabel =
+    viewers && viewers > 0
+      ? `${viewers.toLocaleString()} watching`
+      : chatters > 0
+        ? `${chatters} chatting`
+        : null
+
+  return (
+    <Link
+      to={`/live/${naddr}`}
+      className={`flex items-center gap-2 pl-1.5 pr-3 py-1 rounded-full border transition shrink-0 group ${
+        isFollowed
+          ? 'bg-emerald-500/12 hover:bg-emerald-500/22 border-emerald-500/40 hover:border-emerald-400'
+          : 'bg-[#e8590c]/12 hover:bg-[#e8590c]/22 border-[#e8590c]/30 hover:border-[#e8590c]/60'
+      }`}
+    >
+      <div className="relative shrink-0">
+        <Avatar src={profile?.picture} pubkey={displayPubkey} name={hostName} size="sm" />
+        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-[#0e0e11]" />
+      </div>
+      <span className="text-xs font-medium text-[#f4f1ea] group-hover:text-white max-w-[160px] truncate">
+        {title}
+      </span>
+      {statLabel && (
+        <span className="text-[11px] text-[#9a9890] shrink-0">{statLabel}</span>
+      )}
+    </Link>
+  )
+}
+
 export function LiveNowRow({
   forceShow = false,
   excludeATag,
@@ -250,7 +302,9 @@ export function LiveNowRow({
   onWatchWith?: (stream: LiveStreamEntry) => void
 } = {}) {
   const showLiveNowBarSetting = useSettingsStore((s) => s.showLiveNowBar)
+  const liveBarExpandedSetting = useSettingsStore((s) => s.liveBarExpanded)
   const showLiveNowBar = forceShow || showLiveNowBarSetting
+  const isExpanded = forceShow || liveBarExpandedSetting
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const follows = useNostrStore((s) => s.follows)
@@ -299,7 +353,7 @@ export function LiveNowRow({
     updateScrollArrows()
     window.addEventListener('resize', updateScrollArrows)
     return () => window.removeEventListener('resize', updateScrollArrows)
-  }, [activeStreams.length, showLiveNowBar])
+  }, [activeStreams.length, showLiveNowBar, isExpanded])
 
   // Attach native non-passive wheel listener so horizontal wheel scroll cleanly prevents vertical scroll
   useEffect(() => {
@@ -317,12 +371,62 @@ export function LiveNowRow({
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [activeStreams.length, showLiveNowBar])
+  }, [activeStreams.length, showLiveNowBar, isExpanded])
 
   if (!showLiveNowBar || activeStreams.length === 0) return null
 
   const scrollByAmount = (delta: number) => {
     scrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
+  if (!isExpanded) {
+    return (
+      <div className="border-b border-[#20222c] bg-[#111218]/90 px-3 py-2 flex items-center gap-2">
+        <Link
+          to="/live"
+          title="Browse all live streams"
+          className="px-2 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0 transition"
+        >
+          <Radio className="w-3 h-3 animate-pulse" />
+          LIVE
+        </Link>
+        <div
+          ref={scrollRef}
+          onScroll={updateScrollArrows}
+          className="live-scroll flex-1 min-w-0 flex items-center gap-2 overflow-x-auto pb-0.5"
+        >
+          {activeStreams.map((stream) => (
+            <LiveNowCompactPill
+              key={stream.aTagValue}
+              stream={stream}
+              isFollowed={isStreamFollowed(stream.activity, followSet)}
+            />
+          ))}
+        </div>
+        {(canScrollLeft || canScrollRight) && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              disabled={!canScrollLeft}
+              onClick={() => scrollByAmount(-220)}
+              aria-label="Scroll live streams left"
+              className="p-1 rounded-lg bg-[#1a1c26] hover:bg-[#e8590c] disabled:opacity-30 border border-[#2d3042] text-white transition cursor-pointer disabled:cursor-default"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={!canScrollRight}
+              onClick={() => scrollByAmount(220)}
+              aria-label="Scroll live streams right"
+              className="p-1 rounded-lg bg-[#1a1c26] hover:bg-[#e8590c] disabled:opacity-30 border border-[#2d3042] text-white transition cursor-pointer disabled:cursor-default"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    )
   }
 
   return (

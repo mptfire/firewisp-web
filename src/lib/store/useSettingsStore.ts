@@ -79,6 +79,7 @@ export interface SettingsState {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  liveBarExpanded: boolean
   showLiveZaps: boolean
   showGlobalAudio: boolean
   showBookmarksNav: boolean
@@ -125,6 +126,7 @@ export interface SettingsState {
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
+  setLiveBarExpanded: (expanded: boolean) => void
   setShowLiveZaps: (enabled: boolean) => void
   setShowGlobalAudio: (enabled: boolean) => void
   setShowBookmarksNav: (enabled: boolean) => void
@@ -161,6 +163,7 @@ interface PersistedSettings {
   showExtendedTab: boolean
   showExploreTab: boolean
   showLiveNowBar: boolean
+  liveBarExpanded: boolean
   showLiveZaps: boolean
   showGlobalAudio: boolean
   showBookmarksNav: boolean
@@ -210,6 +213,7 @@ function loadInitial(): PersistedSettings & {
     showExtendedTab: false,
     showExploreTab: false,
     showLiveNowBar: true,
+    liveBarExpanded: true,
     showLiveZaps: true,
     showGlobalAudio: true,
     showBookmarksNav: false,
@@ -326,6 +330,7 @@ function persist(state: SettingsState) {
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
     showLiveNowBar: state.showLiveNowBar,
+    liveBarExpanded: state.liveBarExpanded,
     showLiveZaps: state.showLiveZaps,
     showGlobalAudio: state.showGlobalAudio,
     showBookmarksNav: state.showBookmarksNav,
@@ -596,6 +601,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowLiveNowBar: (showLiveNowBar) => {
     set({ showLiveNowBar })
+    persist(get())
+  },
+  setLiveBarExpanded: (liveBarExpanded) => {
+    set({ liveBarExpanded })
     persist(get())
   },
   setShowLiveZaps: (showLiveZaps) => {
