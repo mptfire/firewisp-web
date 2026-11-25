@@ -127,41 +127,62 @@ export function SidebarAudioDeck() {
         </span>
       </div>
 
-      {/* Live 16-Band Graphic Equalizer (only shown when sound is actively playing) */}
+      {/* Live 16-Band Segmented LED Graphic Equalizer (only shown when sound is actively playing) */}
       {showEq && (
         <div
           aria-label="Live audio graphic equalizer"
-          className="h-11 px-1.5 py-1.5 rounded-xl bg-[#0b0c12] border border-[#222534] flex items-end gap-[3px] overflow-hidden"
+          className="relative h-12 px-2 py-1.5 rounded-xl bg-[#08090e] border border-[#242838] shadow-[inset_0_2px_10px_rgba(0,0,0,0.85)] flex items-end gap-[3px] overflow-hidden"
         >
           {hasSpectrum ? (
-            bars.map((val, idx) => {
-              const barPct = Math.max(6, Math.round(val * 100))
-              const peakPct = Math.max(barPct, Math.round((peaks[idx] || 0) * 100))
-              return (
-                <div
-                  key={idx}
-                  className="relative flex-1 h-full flex items-end justify-center"
-                >
+            <>
+              {bars.map((val, idx) => {
+                const barPct = Math.max(5, Math.round(val * 100))
+                const peakPct = Math.max(barPct, Math.round((peaks[idx] || 0) * 100))
+                const peakColorClass =
+                  peakPct >= 82
+                    ? 'bg-[#ff6b6b] shadow-[0_0_6px_rgba(239,68,68,0.95)]'
+                    : peakPct >= 58
+                      ? 'bg-[#ffe066] shadow-[0_0_5px_rgba(255,212,59,0.9)]'
+                      : 'bg-[#6ee7b7] shadow-[0_0_5px_rgba(52,211,153,0.8)]'
+                return (
                   <div
-                    style={{ height: `${barPct}%` }}
-                    className={`w-full rounded-t-[2px] transition-[height] duration-75 ${
-                      isBoosted
-                        ? 'bg-gradient-to-t from-[#e8590c] via-[#f59f00] to-[#fff3bf]'
-                        : 'bg-gradient-to-t from-[#b91c1c] via-[#e8590c] to-[#ffd43b]'
-                    }`}
-                  />
-                  {peakPct > 12 && (
-                    <span
-                      style={{ bottom: `calc(${Math.min(96, peakPct)}% - 1.5px)` }}
-                      className="absolute inset-x-0 h-[2px] rounded-full bg-[#fff9db]/90"
+                    key={idx}
+                    className="relative flex-1 h-full rounded-[1.5px] bg-[#141724]/80 overflow-hidden"
+                  >
+                    {/* Level-accurate vertical spectrum fixed to full meter height, revealed via clip-path */}
+                    <div
+                      style={{
+                        clipPath: `inset(${100 - barPct}% 0 0 0)`,
+                        backgroundImage: isBoosted
+                          ? 'linear-gradient(to top, #059669 0%, #10b981 24%, #4ade80 44%, #facc15 62%, #ff922b 78%, #ef4444 92%, #fff3bf 100%)'
+                          : 'linear-gradient(to top, #059669 0%, #10b981 28%, #4ade80 52%, #facc15 70%, #ff922b 85%, #ef4444 100%)',
+                        transition: 'clip-path 65ms linear',
+                      }}
+                      className="absolute inset-0"
                     />
-                  )}
-                </div>
-              )
-            })
+                    {/* Color-matched decaying peak-hold LED cap */}
+                    {peakPct > 10 && (
+                      <span
+                        style={{ bottom: `calc(${Math.min(95, peakPct)}% - 1.5px)` }}
+                        className={`absolute inset-x-0 h-[2px] rounded-full z-20 ${peakColorClass}`}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+              {/* Crisp horizontal LED segment dividers across all 16 bands */}
+              <div
+                aria-hidden="true"
+                style={{
+                  backgroundImage:
+                    'repeating-linear-gradient(to top, transparent 0px, transparent 3px, rgba(8, 9, 14, 0.9) 3px, rgba(8, 9, 14, 0.9) 4.5px)',
+                }}
+                className="pointer-events-none absolute inset-x-2 inset-y-1.5 z-10"
+              />
+            </>
           ) : (
             <div className="w-full h-full flex items-center justify-center gap-1.5 text-[10px] text-[#9a9890]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#ff922b] animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.85)]" />
               <span>Playing audio</span>
             </div>
           )}
