@@ -83,6 +83,8 @@ export function FeedPage() {
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
+  const showLiveNowBar = useSettingsStore((s) => s.showLiveNowBar)
+  const setShowLiveNowBar = useSettingsStore((s) => s.setShowLiveNowBar)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -407,7 +409,7 @@ export function FeedPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {(tab === 'following' || tab === 'foryou' || tab === 'extended' || tab === 'firewisp') && (
             <button
               type="button"
@@ -422,6 +424,23 @@ export function FeedPage() {
               {showRepliesInFollows ? 'Replies: On' : 'Replies: Off'}
             </button>
           )}
+          <button
+            type="button"
+            aria-pressed={showLiveNowBar}
+            onClick={() => setShowLiveNowBar(!showLiveNowBar)}
+            className={`px-2 py-0.5 rounded-md text-[11px] font-medium border transition cursor-pointer ${
+              showLiveNowBar
+                ? 'bg-red-600/15 border-red-500/40 text-red-400'
+                : 'bg-[#181a24] border-[#282b3a] text-[#9a9890] hover:text-white'
+            }`}
+            title={
+              showLiveNowBar
+                ? 'Click to hide Live Now streams bar on the feed'
+                : 'Click to show Live Now streams bar on the feed'
+            }
+          >
+            {showLiveNowBar ? 'Live: On' : 'Live: Off'}
+          </button>
           {tab === 'global' && (
             <button
               onClick={() => setSpamFilterEnabled(!spamFilterEnabled)}
