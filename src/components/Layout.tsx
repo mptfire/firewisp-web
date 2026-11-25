@@ -93,13 +93,6 @@ function FireWispFlameSprite({ idPrefix }: { idPrefix: string }) {
 
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
-  // Clicking the nav item (or logo) for the page you're already on scrolls back to the top without pushing duplicate history entries
-  const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
-    if (location.pathname === to && !location.search && !location.hash) {
-      e.preventDefault()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }
   const isTheaterMode = location.pathname.startsWith('/live/')
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
@@ -121,6 +114,9 @@ export function Layout({ children }: { children: ReactNode }) {
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
+  const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
+  const pendingFeedIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab])
+  const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
   const notificationIds = useNostrStore((s) => s.notificationIds)
   const notificationsLastSeenAt = useNostrStore((s) => s.notificationsLastSeenAt)
   const readNotificationIds = useNostrStore((s) => s.readNotificationIds)
@@ -128,6 +124,41 @@ export function Layout({ children }: { children: ReactNode }) {
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+
+  const pendingFeedCount = useMemo(() => {
+    if (!pendingFeedIds || pendingFeedIds.length === 0) return 0
+    let count = 0
+    for (const id of pendingFeedIds) {
+      const ev = events[id]
+      if (!ev || isEventDeleted(ev) || isEventMuted(ev)) continue
+      count++
+    }
+    return count
+  }, [
+    pendingFeedIds,
+    events,
+    deletedByAuthor,
+    isEventDeleted,
+    isEventMuted,
+    mutedPubkeys,
+    mutedHashtags,
+    mutedWords,
+    privateMutedPubkeys,
+    privateMutedHashtags,
+    privateMutedWords,
+  ])
+
+  // Clicking the nav item (or logo) for the page you're already on flushes pending feed posts and scrolls to the top
+  const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
+    if (location.pathname === to && !location.search && !location.hash) {
+      e.preventDefault()
+      if (to === '/' && pendingFeedCount > 0) {
+        flushPendingFeed(activeFeedTab)
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -269,9 +300,21 @@ export function Layout({ children }: { children: ReactNode }) {
     icon: typeof Flame
     end?: boolean
     badge?: string | number
-    badgeTone?: 'red' | 'green'
+    badgeTone?: 'red' | 'green' | 'orange'
   }> = [
-    { to: '/', label: 'Feed', icon: Flame, end: true },
+    {
+      to: '/',
+      label: 'Feed',
+      icon: Flame,
+      end: true,
+      badge:
+        pendingFeedCount > 0
+          ? pendingFeedCount > 99
+            ? '99+'
+            : pendingFeedCount
+          : undefined,
+      badgeTone: 'orange',
+    },
     {
       to: '/notifications',
       label: 'Notifications',
@@ -361,7 +404,9 @@ export function Layout({ children }: { children: ReactNode }) {
                             ? 'text-red-500'
                             : badge && badgeTone === 'green'
                               ? 'text-emerald-400'
-                              : ''
+                              : badge && badgeTone === 'orange'
+                                ? 'text-[#ff922b]'
+                                : ''
                         }`}
                       />
                       <span className="truncate">{label}</span>
@@ -371,7 +416,9 @@ export function Layout({ children }: { children: ReactNode }) {
                         className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold tabular-nums leading-none ${
                           badgeTone === 'green'
                             ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
-                            : 'bg-red-600/20 border-red-500/40 text-red-400'
+                            : badgeTone === 'orange'
+                              ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-[#ff922b]'
+                              : 'bg-red-600/20 border-red-500/40 text-red-400'
                         }`}
                       >
                         {badge}
@@ -637,7 +684,19 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#0e0e11]/95 backdrop-blur-md border-t border-[#20222c] flex justify-around pt-2 fw-safe-bottom">
         {[
-          { to: '/', icon: Flame, label: 'Feed', end: true, badge: undefined as string | number | undefined, tone: undefined as 'red' | 'green' | undefined },
+          {
+            to: '/',
+            icon: Flame,
+            label: 'Feed',
+            end: true,
+            badge:
+              pendingFeedCount > 0
+                ? pendingFeedCount > 99
+                  ? '99+'
+                  : pendingFeedCount
+                : (undefined as string | number | undefined),
+            tone: 'orange' as 'red' | 'green' | 'orange' | undefined,
+          },
           { to: '/search', icon: Search, label: 'Search' },
           { to: '/live', icon: Radio, label: 'Live', badge: liveCount > 0 ? liveCount : undefined, tone: 'red' as const },
           {
@@ -673,7 +732,9 @@ export function Layout({ children }: { children: ReactNode }) {
                   className={`absolute -top-1.5 -right-2.5 px-1 min-w-[16px] h-4 rounded-full text-[9px] font-bold flex items-center justify-center tabular-nums leading-none ${
                     tone === 'green'
                       ? 'bg-emerald-500 text-black'
-                      : 'bg-red-600 text-white'
+                      : tone === 'orange'
+                        ? 'bg-[#e8590c] text-white'
+                        : 'bg-red-600 text-white'
                   }`}
                 >
                   {badge}

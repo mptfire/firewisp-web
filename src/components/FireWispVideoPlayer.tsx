@@ -73,7 +73,7 @@ export function FireWispVideoPlayer({
     setBufferedEnd(0)
   }, [src])
 
-  // Sync remembered volume / boost / mute to the <video>
+  // Sync remembered volume / boost / mute to the <video> immediately on mount and on every change
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -82,7 +82,7 @@ export function FireWispVideoPlayer({
     return () => {
       reportVideoSoundActive(video, false)
     }
-  }, [mediaVolume, mediaMuted, webAudioCapable, playing])
+  }, [mediaVolume, mediaMuted, webAudioCapable, playing, useCors, src])
 
   // Pause automatically if another feed video starts playing
   useEffect(() => {

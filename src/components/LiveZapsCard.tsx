@@ -173,7 +173,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
       <div className="fw-zap-circuit-inner p-3 space-y-2">
         {/* Header */}
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-[#f59f00] flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-white flex items-center gap-1.5">
             <Zap
               className={`w-3.5 h-3.5 shrink-0 transition ${
                 circuitActive

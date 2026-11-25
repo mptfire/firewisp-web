@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Volume2, VolumeX } from 'lucide-react'
+import {
+  applyVideoAudioLevel,
+  isIosDevice,
+  isWebAudioAvailable,
+  reportVideoSoundActive,
+  unlockSharedAudioContext,
+} from '../lib/mediaAudio'
 import { createSafeHlsConfig } from '../lib/nostr/hlsSafe'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
+import { useSettingsStore } from '../lib/store/useSettingsStore'
 
 export type HoverPreviewStatus = 'connecting' | 'playing' | 'audio-only' | 'error'
 
@@ -26,8 +34,16 @@ export function LiveHoverPreview({
   const onStatusChangeRef = useRef(onStatusChange)
   onStatusChangeRef.current = onStatusChange
 
+  const mediaVolume = useSettingsStore((s) => s.mediaVolume)
+  const mediaMuted = useSettingsStore((s) => s.mediaMuted)
+  const ios = useMemo(() => isIosDevice(), [])
+
   const [status, setStatus] = useState<HoverPreviewStatus>('connecting')
   const [muted, setMuted] = useState(true)
+  const [isMseStream, setIsMseStream] = useState(false)
+
+  const effectiveMuted = muted || mediaMuted
+  const webAudioCapable = isWebAudioAvailable() && isMseStream && !ios
 
   const updateStatus = (next: HoverPreviewStatus) => {
     setStatus(next)
@@ -38,6 +54,7 @@ export function LiveHoverPreview({
     const video = videoRef.current
     const safeUrl = sanitizePublicHttpsUrl(streamUrl)
     setMuted(true)
+    setIsMseStream(false)
     if (!video || !safeUrl) {
       updateStatus('error')
       return
@@ -52,6 +69,7 @@ export function LiveHoverPreview({
     const teardown = () => {
       destroyed = true
       clearTimeout(timeout)
+      reportVideoSoundActive(video, false)
       video.removeEventListener('playing', markPlaying)
       video.removeEventListener('loadeddata', onResize)
       video.removeEventListener('resize', onResize)
@@ -94,6 +112,7 @@ export function LiveHoverPreview({
 
     updateStatus('connecting')
     video.muted = true
+    video.volume = Math.min(1, useSettingsStore.getState().mediaVolume)
     video.addEventListener('playing', markPlaying)
     video.addEventListener('loadeddata', onResize)
     video.addEventListener('resize', onResize)
@@ -129,6 +148,7 @@ export function LiveHoverPreview({
             }),
           )
           hlsInstance = hls
+          setIsMseStream(true)
           hls.loadSource(safeUrl)
           hls.attachMedia(video)
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -170,13 +190,38 @@ export function LiveHoverPreview({
     return teardown
   }, [streamUrl])
 
+  // Keep preview audio strictly synced with Global Audio volume (0–200% boost) & mute + equalizer
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const isPlayingState = status === 'playing' || status === 'audio-only'
+    applyVideoAudioLevel(
+      video,
+      mediaVolume,
+      effectiveMuted,
+      webAudioCapable,
+      isPlayingState && !effectiveMuted && webAudioCapable,
+    )
+    reportVideoSoundActive(video, isPlayingState && !effectiveMuted && mediaVolume > 0)
+    return () => {
+      reportVideoSoundActive(video, false)
+    }
+  }, [mediaVolume, effectiveMuted, webAudioCapable, status])
+
   const toggleMute = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     const video = videoRef.current
     if (!video) return
+    unlockSharedAudioContext()
     const nextMuted = !muted
-    video.muted = nextMuted
+    const st = useSettingsStore.getState()
+    if (!nextMuted && st.mediaMuted) {
+      st.setMediaMuted(false)
+      if (st.mediaVolume <= 0) st.setMediaVolume(0.85)
+    }
+    const targetVol = useSettingsStore.getState().mediaVolume
+    applyVideoAudioLevel(video, targetVol, nextMuted, webAudioCapable, !nextMuted && webAudioCapable)
     setMuted(nextMuted)
     if (!nextMuted && video.paused) {
       void video.play().catch(() => {})
@@ -187,7 +232,7 @@ export function LiveHoverPreview({
     <>
       <video
         ref={videoRef}
-        muted={muted}
+        muted={effectiveMuted}
         playsInline
         className={`absolute inset-0 w-full h-full object-cover bg-black transition-opacity duration-200 pointer-events-none ${
           status === 'playing' ? 'opacity-100' : 'opacity-0'
@@ -199,13 +244,13 @@ export function LiveHoverPreview({
         <button
           type="button"
           onClick={toggleMute}
-          title={muted ? 'Unmute preview' : 'Mute preview'}
-          aria-label={muted ? 'Unmute preview' : 'Mute preview'}
+          title={effectiveMuted ? 'Unmute preview (uses Global Audio volume)' : 'Mute preview'}
+          aria-label={effectiveMuted ? 'Unmute preview' : 'Mute preview'}
           className={`absolute top-2 ${
             rightOffset === 'wide' ? 'right-16' : rightOffset ? 'right-9' : 'right-2'
           } z-20 p-1 rounded-md bg-black/75 hover:bg-black/95 border border-white/15 text-white transition cursor-pointer`}
         >
-          {muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#ff922b]" />}
+          {effectiveMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-[#ff922b]" />}
         </button>
       )}
 

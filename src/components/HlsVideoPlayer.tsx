@@ -273,18 +273,23 @@ export function HlsVideoPlayer({
 
             if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR) {
               const statusCode = data.response?.code
-              const definitiveOffline =
-                statusCode === 404 || statusCode === 410 || statusCode === 403
-              if (!definitiveOffline && networkRecoveryAttempts < 1) {
+              const definitiveOffline = statusCode === 404 || statusCode === 410
+              if (!definitiveOffline && networkRecoveryAttempts < 2) {
                 networkRecoveryAttempts++
-                hls.startLoad()
+                if (networkRecoveryAttempts === 1) {
+                  hls.startLoad()
+                } else {
+                  // Reload master manifest on 2nd recovery so short-lived session tokens (e.g. streamstr ?vt=) refresh
+                  hls.loadSource(safeStreamUrl)
+                }
                 return
               }
               destroyHls()
+              const detailHint = `${data.details}${statusCode ? ` · HTTP ${statusCode}` : ''}`
               setError(
                 isLiveRef.current && onStreamOfflineRef.current
-                  ? 'Stream could not be loaded — it may be offline. Hidden from Live Now; click Retry to reconnect.'
-                  : 'Stream appears offline or unreachable. Click Retry to reconnect.',
+                  ? `Stream could not be loaded (${detailHint}) — it may be offline. Hidden from Live Now; click Retry to reconnect.`
+                  : `Stream appears offline or unreachable (${detailHint}). Click Retry to reconnect.`,
               )
               setBuffering(false)
               notifyOffline()
