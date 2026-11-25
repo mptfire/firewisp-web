@@ -536,6 +536,59 @@
   animation-delay: -0.26s;
 }
 
+/* White luminous wisp variant orbiting Feed when new notes arrive (zero highlight box/outline) */
+@keyframes fw-white-wisp-flicker {
+  0%,
+  100% {
+    transform: scale(1, 1) rotate(0deg);
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+      drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
+  }
+  35% {
+    transform: scale(1.07, 0.95) rotate(-2deg);
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 1))
+      drop-shadow(0 0 11px rgba(241, 245, 249, 0.8));
+  }
+  70% {
+    transform: scale(0.96, 1.06) rotate(2deg);
+    filter: drop-shadow(0 0 3.5px rgba(255, 255, 255, 0.85))
+      drop-shadow(0 0 8px rgba(203, 213, 225, 0.6));
+  }
+}
+
+.fw-white-wisp {
+  animation:
+    fw-flame-orbit 24s linear infinite,
+    fw-white-wisp-flicker 2.2s ease-in-out infinite;
+  animation-delay: -1.4s, 0s;
+}
+
+.fw-white-tail-1 {
+  width: 11px;
+  height: 3.5px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.32), #e2e8f0 55%, #ffffff);
+  box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.58);
+  animation-delay: -0.95s;
+}
+
+.fw-white-tail-2 {
+  width: 9px;
+  height: 2.25px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.14), #cbd5e1 65%, rgba(255, 255, 255, 0.85));
+  box-shadow: 0 0 4px 0.5px rgba(226, 232, 240, 0.42);
+  animation-delay: -0.58s;
+}
+
+.fw-white-tail-3 {
+  width: 7px;
+  height: 1.5px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0), rgba(203, 213, 225, 0.55) 70%, rgba(241, 245, 249, 0.72));
+  animation-delay: -0.26s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fw-edge-btn::before,
   .fw-zap-circuit.fw-zap-circuit-active::before,

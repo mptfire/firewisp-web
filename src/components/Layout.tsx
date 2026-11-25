@@ -40,9 +40,16 @@ import { SidebarAudioDeck } from './SidebarAudioDeck'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
 
-function FireWispFlameSprite({ idPrefix }: { idPrefix: string }) {
+function FireWispFlameSprite({
+  idPrefix,
+  variant = 'ember',
+}: {
+  idPrefix: string
+  variant?: 'ember' | 'white'
+}) {
   const outerId = `${idPrefix}-wisp-outer`
   const coreId = `${idPrefix}-wisp-core`
+  const isWhite = variant === 'white'
   return (
     <svg
       viewBox="0 0 28 20"
@@ -54,40 +61,53 @@ function FireWispFlameSprite({ idPrefix }: { idPrefix: string }) {
     >
       <defs>
         <linearGradient id={outerId} x1="2" y1="10" x2="26" y2="10" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#c92a2a" />
-          <stop offset="45%" stopColor="#e8590c" />
-          <stop offset="82%" stopColor="#ff922b" />
-          <stop offset="100%" stopColor="#ffd43b" />
+          <stop offset="0%" stopColor={isWhite ? '#94a3b8' : '#c92a2a'} />
+          <stop offset="45%" stopColor={isWhite ? '#cbd5e1' : '#e8590c'} />
+          <stop offset="82%" stopColor={isWhite ? '#f1f5f9' : '#ff922b'} />
+          <stop offset="100%" stopColor={isWhite ? '#ffffff' : '#ffd43b'} />
         </linearGradient>
         <radialGradient id={coreId} cx="76%" cy="50%" r="55%">
-          <stop offset="0%" stopColor="#fff9db" />
-          <stop offset="48%" stopColor="#ffd43b" />
-          <stop offset="100%" stopColor="#ff922b" />
+          <stop offset="0%" stopColor={isWhite ? '#ffffff' : '#fff9db'} />
+          <stop offset="48%" stopColor={isWhite ? '#f8fafc' : '#ffd43b'} />
+          <stop offset="100%" stopColor={isWhite ? '#e2e8f0' : '#ff922b'} />
         </radialGradient>
       </defs>
       {/* Upper & lower curving side flame wisps matching the Fire Wisp logo */}
       <path
         d="M19.6 3.7C16.8 1.5 12.8 1.5 9.4 3.4C12.2 3.0 14.8 3.6 17.0 4.6C18.0 4.4 18.9 4.1 19.6 3.7Z"
-        fill="#e8590c"
+        fill={isWhite ? '#e2e8f0' : '#e8590c'}
       />
       <path
         d="M20.0 16.0C17.0 18.2 13.2 18.1 10.0 16.2C12.7 16.6 15.2 16.0 17.4 15.1C18.4 15.3 19.3 15.6 20.0 16.0Z"
-        fill="#d9480f"
+        fill={isWhite ? '#cbd5e1' : '#d9480f'}
       />
       {/* Main sweeping S-curved Fire Wisp body */}
       <path
         d="M25.5 10C25.5 6.4 22.4 4.2 18.2 4.5C14.8 4.7 12.2 6.3 8.8 5.8C6.0 5.4 4.1 3.6 2.2 4.6C4.4 7.0 6.8 8.6 9.6 9.4C6.6 10.2 4.6 11.4 3.0 13.0C5.8 13.3 8.6 12.4 11.6 13.2C15.2 14.3 18.0 15.8 21.4 15.2C24.0 14.7 25.5 12.6 25.5 10Z"
         fill={`url(#${outerId})`}
       />
-      {/* Bright golden-yellow inner flame core */}
+      {/* Bright inner flame core */}
       <path
         d="M23.6 10C23.6 7.5 21.3 6.0 18.3 6.3C15.5 6.6 13.4 8.2 9.2 8.2C12.6 9.4 13.8 10.9 11.2 12.0C14.4 12.2 16.8 13.6 19.6 13.5C22.1 13.4 23.6 12.0 23.6 10Z"
         fill={`url(#${coreId})`}
       />
-      {/* Luminous warm-white wisp heart & floating ember sparks */}
-      <ellipse cx="20.4" cy="10" rx="2.5" ry="1.9" fill="#fff9db" fillOpacity="0.92" />
-      <path d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z" fill="#ff922b" />
-      <path d="M8.0 17.2C6.9 17.5 6.0 16.9 5.5 16.2C6.5 16.2 7.4 16.5 8.0 17.2Z" fill="#ff922b" />
+      {/* Luminous wisp heart & floating sparks */}
+      <ellipse
+        cx="20.4"
+        cy="10"
+        rx="2.5"
+        ry="1.9"
+        fill={isWhite ? '#ffffff' : '#fff9db'}
+        fillOpacity={isWhite ? '0.98' : '0.92'}
+      />
+      <path
+        d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z"
+        fill={isWhite ? '#f8fafc' : '#ff922b'}
+      />
+      <path
+        d="M8.0 17.2C6.9 17.5 6.0 16.9 5.5 16.2C6.5 16.2 7.4 16.5 8.0 17.2Z"
+        fill={isWhite ? '#f8fafc' : '#ff922b'}
+      />
     </svg>
   )
 }
@@ -415,14 +435,12 @@ export function Layout({ children }: { children: ReactNode }) {
                     onClick={(e) => scrollTopIfCurrent(e, to)}
                     className={({ isActive }) =>
                       `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
-                        isActive
-                          ? hasFeedNew
-                            ? 'bg-[#e8590c]/22 text-[#ff922b] border border-[#ff922b]/55 font-semibold'
-                            : 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
-                          : hasNotifFlame
-                            ? 'fw-notif-flame text-white hover:bg-white/5'
-                            : hasFeedNew
-                              ? 'text-[#ff922b] font-semibold hover:bg-[#e8590c]/10'
+                        hasFeedNew
+                          ? 'fw-notif-flame text-[#ff922b] font-semibold hover:bg-white/5'
+                          : isActive
+                            ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
+                            : hasNotifFlame
+                              ? 'fw-notif-flame text-white hover:bg-white/5'
                               : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
                       }`
                     }
@@ -437,6 +455,16 @@ export function Layout({ children }: { children: ReactNode }) {
                         </span>
                       </>
                     )}
+                    {hasFeedNew && (
+                      <>
+                        <span className="fw-notif-seg fw-white-tail-3" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-white-tail-2" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-white-tail-1" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-notif-wisp fw-white-wisp" aria-hidden="true">
+                          <FireWispFlameSprite idPrefix="fw-feed" variant="white" />
+                        </span>
+                      </>
+                    )}
                     <span className="flex items-center gap-3 min-w-0">
                       <Icon
                         className={`w-4 h-4 shrink-0 ${
@@ -445,7 +473,7 @@ export function Layout({ children }: { children: ReactNode }) {
                             : badge && badgeTone === 'green'
                               ? 'text-emerald-400'
                               : hasFeedNew
-                                ? 'text-[#ff922b] fill-[#ff922b]/35'
+                                ? 'text-[#ff922b]'
                                 : ''
                         }`}
                       />
@@ -459,7 +487,7 @@ export function Layout({ children }: { children: ReactNode }) {
                           badgeTone === 'green'
                             ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
                             : badgeTone === 'orange'
-                              ? 'bg-[#e8590c]/25 border-[#ff922b]/60 text-[#ff922b]'
+                              ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-[#ff922b]'
                               : 'bg-red-600/20 border-red-500/40 text-red-400'
                         }`}
                       >
