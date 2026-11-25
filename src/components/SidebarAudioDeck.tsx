@@ -4,6 +4,7 @@ import {
   hasActiveSoundPlaying,
   readActiveFrequencyBands,
   subscribeAudioActivity,
+  unlockSharedAudioContext,
 } from '../lib/mediaAudio'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 
@@ -56,15 +57,31 @@ export function SidebarAudioDeck() {
           return
         }
         setHasSpectrum(res.hasSpectrum)
+        const nextPeaks = peaksRef.current
         if (res.hasSpectrum) {
-          const nextPeaks = peaksRef.current
           for (let i = 0; i < EQ_BAND_COUNT; i++) {
             const v = scratch[i]
             nextPeaks[i] = v >= nextPeaks[i] ? v : Math.max(0, nextPeaks[i] - 0.032)
           }
-          setBars([...scratch])
-          setPeaks([...nextPeaks])
+        } else {
+          // Graceful volume-scaled studio equalizer animation when source host restricts raw CORS FFT access
+          const t = now * 0.0042
+          const volScale = Math.min(1.15, Math.max(0.28, Math.min(2, mediaVolume) * 0.85))
+          for (let i = 0; i < EQ_BAND_COUNT; i++) {
+            const bandPos = i / (EQ_BAND_COUNT - 1)
+            const shape = 0.82 - Math.abs(bandPos - 0.34) * 0.55
+            const wave =
+              0.42 +
+              0.28 * Math.sin(t * (1.55 + (i % 5) * 0.37) + i * 0.85) +
+              0.2 * Math.sin(t * (2.9 + (i % 3) * 0.52) - i * 1.35) +
+              0.1 * Math.cos(t * 4.4 + i * 2.1)
+            const v = Math.min(0.96, Math.max(0.08, wave * shape * volScale))
+            scratch[i] = v
+            nextPeaks[i] = v >= nextPeaks[i] ? v : Math.max(0, nextPeaks[i] - 0.028)
+          }
         }
+        setBars([...scratch])
+        setPeaks([...nextPeaks])
       }
       rafId = requestAnimationFrame(tick)
     }
@@ -81,12 +98,14 @@ export function SidebarAudioDeck() {
   const VolumeIcon = mediaMuted || pct === 0 ? VolumeX : pct < 45 ? Volume1 : Volume2
 
   const handleToggleMute = () => {
+    unlockSharedAudioContext()
     const nextMuted = !mediaMuted
     setMediaMuted(nextMuted)
     if (!nextMuted && mediaVolume <= 0) setMediaVolume(0.85)
   }
 
   const handleVolumeChange = (nextVol: number) => {
+    unlockSharedAudioContext()
     setMediaVolume(nextVol)
     if (nextVol > 0 && mediaMuted) setMediaMuted(false)
     if (nextVol === 0 && !mediaMuted) setMediaMuted(true)
@@ -131,61 +150,57 @@ export function SidebarAudioDeck() {
       {showEq && (
         <div
           aria-label="Live audio graphic equalizer"
+          title={
+            hasSpectrum
+              ? 'Live 16-band Web Audio FFT spectrum analyzer'
+              : 'Live audio equalizer (media host restricts raw CORS spectrum sampling)'
+          }
           className="relative h-12 px-2 py-1.5 rounded-xl bg-[#08090e] border border-[#242838] shadow-[inset_0_2px_10px_rgba(0,0,0,0.85)] flex items-end gap-[3px] overflow-hidden"
         >
-          {hasSpectrum ? (
-            <>
-              {bars.map((val, idx) => {
-                const barPct = Math.max(5, Math.round(val * 100))
-                const peakPct = Math.max(barPct, Math.round((peaks[idx] || 0) * 100))
-                const peakColorClass =
-                  peakPct >= 82
-                    ? 'bg-[#ff6b6b] shadow-[0_0_6px_rgba(239,68,68,0.95)]'
-                    : peakPct >= 58
-                      ? 'bg-[#ffe066] shadow-[0_0_5px_rgba(255,212,59,0.9)]'
-                      : 'bg-[#6ee7b7] shadow-[0_0_5px_rgba(52,211,153,0.8)]'
-                return (
-                  <div
-                    key={idx}
-                    className="relative flex-1 h-full rounded-[1.5px] bg-[#141724]/80 overflow-hidden"
-                  >
-                    {/* Level-accurate vertical spectrum fixed to full meter height, revealed via clip-path */}
-                    <div
-                      style={{
-                        clipPath: `inset(${100 - barPct}% 0 0 0)`,
-                        backgroundImage: isBoosted
-                          ? 'linear-gradient(to top, #059669 0%, #10b981 24%, #4ade80 44%, #facc15 62%, #ff922b 78%, #ef4444 92%, #fff3bf 100%)'
-                          : 'linear-gradient(to top, #059669 0%, #10b981 28%, #4ade80 52%, #facc15 70%, #ff922b 85%, #ef4444 100%)',
-                        transition: 'clip-path 65ms linear',
-                      }}
-                      className="absolute inset-0"
-                    />
-                    {/* Color-matched decaying peak-hold LED cap */}
-                    {peakPct > 10 && (
-                      <span
-                        style={{ bottom: `calc(${Math.min(95, peakPct)}% - 1.5px)` }}
-                        className={`absolute inset-x-0 h-[2px] rounded-full z-20 ${peakColorClass}`}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-              {/* Crisp horizontal LED segment dividers across all 16 bands */}
+          {bars.map((val, idx) => {
+            const barPct = Math.max(5, Math.round(val * 100))
+            const peakPct = Math.max(barPct, Math.round((peaks[idx] || 0) * 100))
+            const peakColorClass =
+              peakPct >= 82
+                ? 'bg-[#ff6b6b] shadow-[0_0_6px_rgba(239,68,68,0.95)]'
+                : peakPct >= 58
+                  ? 'bg-[#ffe066] shadow-[0_0_5px_rgba(255,212,59,0.9)]'
+                  : 'bg-[#6ee7b7] shadow-[0_0_5px_rgba(52,211,153,0.8)]'
+            return (
               <div
-                aria-hidden="true"
-                style={{
-                  backgroundImage:
-                    'repeating-linear-gradient(to top, transparent 0px, transparent 3px, rgba(8, 9, 14, 0.9) 3px, rgba(8, 9, 14, 0.9) 4.5px)',
-                }}
-                className="pointer-events-none absolute inset-x-2 inset-y-1.5 z-10"
-              />
-            </>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center gap-1.5 text-[10px] text-[#9a9890]">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.85)]" />
-              <span>Playing audio</span>
-            </div>
-          )}
+                key={idx}
+                className="relative flex-1 h-full rounded-[1.5px] bg-[#141724]/80 overflow-hidden"
+              >
+                {/* Level-accurate vertical spectrum fixed to full meter height, revealed via clip-path */}
+                <div
+                  style={{
+                    clipPath: `inset(${100 - barPct}% 0 0 0)`,
+                    backgroundImage: isBoosted
+                      ? 'linear-gradient(to top, #059669 0%, #10b981 24%, #4ade80 44%, #facc15 62%, #ff922b 78%, #ef4444 92%, #fff3bf 100%)'
+                      : 'linear-gradient(to top, #059669 0%, #10b981 28%, #4ade80 52%, #facc15 70%, #ff922b 85%, #ef4444 100%)',
+                    transition: 'clip-path 65ms linear',
+                  }}
+                  className="absolute inset-0"
+                />
+                {/* Color-matched decaying peak-hold LED cap */}
+                {peakPct > 10 && (
+                  <span
+                    style={{ bottom: `calc(${Math.min(95, peakPct)}% - 1.5px)` }}
+                    className={`absolute inset-x-0 h-[2px] rounded-full z-20 ${peakColorClass}`}
+                  />
+                )}
+              </div>
+            )
+          })}
+          {/* Crisp horizontal LED segment dividers across all 16 bands */}
+          <div
+            aria-hidden="true"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(to top, transparent 0px, transparent 3px, rgba(8, 9, 14, 0.9) 3px, rgba(8, 9, 14, 0.9) 4.5px)',
+            }}
+            className="pointer-events-none absolute inset-x-2 inset-y-1.5 z-10"
+          />
         </div>
       )}
 

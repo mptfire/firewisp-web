@@ -11,6 +11,7 @@ import {
   resumeVideoAudioGraph,
   selectDataSaverMaxLevel,
   selectLowestBitrateLevel,
+  unlockSharedAudioContext,
 } from '../lib/mediaAudio'
 import { createSafeHlsConfig } from '../lib/nostr/hlsSafe'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
@@ -594,7 +595,10 @@ export function HlsVideoPlayer({
           <div className="relative z-10 flex flex-col items-center gap-3 max-w-md">
             <button
               type="button"
-              onClick={() => setStarted(true)}
+              onClick={() => {
+                unlockSharedAudioContext()
+                setStarted(true)
+              }}
               className="w-16 h-16 rounded-full bg-[#e8590c] hover:bg-[#d9480f] text-white shadow-2xl shadow-black/60 flex items-center justify-center transition hover:scale-105 cursor-pointer"
               aria-label="Play live stream"
             >

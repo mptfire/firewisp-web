@@ -21,6 +21,55 @@ const failedVideos = new WeakSet<HTMLVideoElement>()
 const activeSoundVideos = new Set<HTMLVideoElement>()
 const audioActivityListeners = new Set<() => void>()
 
+// Single shared AudioContext across all Fire Wisp players (avoids Chrome's 6-context cap
+// and ensures any single user click/tap unlocks live FFT spectrum analysis for all streams).
+let sharedAudioCtx: AudioContext | null = null
+let gestureListenersInstalled = false
+
+function getAudioContextCtor(): typeof AudioContext | null {
+  if (typeof window === 'undefined') return null
+  return (
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ||
+    null
+  )
+}
+
+function getSharedAudioContext(): AudioContext | null {
+  if (sharedAudioCtx && sharedAudioCtx.state !== 'closed') {
+    return sharedAudioCtx
+  }
+  const Ctor = getAudioContextCtor()
+  if (!Ctor) return null
+  try {
+    sharedAudioCtx = new Ctor()
+    return sharedAudioCtx
+  } catch {
+    return null
+  }
+}
+
+export function unlockSharedAudioContext(): void {
+  const ctx = getSharedAudioContext()
+  if (ctx && ctx.state === 'suspended') {
+    void ctx.resume().catch(() => {})
+  }
+}
+
+function ensureGestureUnlockListeners(): void {
+  if (gestureListenersInstalled || typeof window === 'undefined') return
+  gestureListenersInstalled = true
+  const onGesture = () => {
+    if (sharedAudioCtx && sharedAudioCtx.state === 'running') return
+    unlockSharedAudioContext()
+  }
+  window.addEventListener('pointerdown', onGesture, { capture: true, passive: true })
+  window.addEventListener('keydown', onGesture, { capture: true, passive: true })
+  window.addEventListener('click', onGesture, { capture: true, passive: true })
+}
+
+ensureGestureUnlockListeners()
+
 function notifyAudioActivity() {
   for (const cb of audioActivityListeners) {
     try {
@@ -57,15 +106,6 @@ export function hasActiveSoundPlaying(): boolean {
   return false
 }
 
-function getAudioContextCtor(): typeof AudioContext | null {
-  if (typeof window === 'undefined') return null
-  return (
-    window.AudioContext ||
-    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ||
-    null
-  )
-}
-
 export function isWebAudioAvailable(): boolean {
   return Boolean(getAudioContextCtor())
 }
@@ -79,16 +119,17 @@ export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph 
     return existing
   }
   if (failedVideos.has(video)) return null
-  const Ctor = getAudioContextCtor()
-  if (!Ctor) return null
+  const ctx = getSharedAudioContext()
+  if (!ctx) return null
 
   try {
-    const ctx = new Ctor()
     const source = ctx.createMediaElementSource(video)
     const gain = ctx.createGain()
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 256
-    analyser.smoothingTimeConstant = 0.76
+    analyser.minDecibels = -85
+    analyser.maxDecibels = -15
+    analyser.smoothingTimeConstant = 0.72
     source.connect(gain)
     gain.connect(analyser)
     analyser.connect(ctx.destination)
@@ -112,6 +153,7 @@ export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph 
 }
 
 export function resumeVideoAudioGraph(video: HTMLVideoElement): void {
+  unlockSharedAudioContext()
   const existing = graphByVideo.get(video)
   if (existing && existing.ctx.state === 'suspended') {
     void existing.ctx.resume().catch(() => {})
@@ -191,9 +233,14 @@ export function readActiveFrequencyBands(
     if (v.paused || v.muted) continue
     activeVideo = v
     const g = graphByVideo.get(v)
-    if (g && g.ctx.state === 'running') {
-      activeGraph = g
-      break
+    if (g) {
+      if (g.ctx.state === 'suspended') {
+        void g.ctx.resume().catch(() => {})
+      }
+      if (g.ctx.state === 'running') {
+        activeGraph = g
+        break
+      }
     }
   }
 
