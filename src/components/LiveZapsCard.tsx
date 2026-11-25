@@ -106,7 +106,22 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
           queueProfiles([parsed.senderPubkey, parsed.recipientPubkey])
           setLoading(false)
           if (eoseReached || parsed.createdAt >= startSec - 5) {
-            triggerYellowCircuit(parsed.id)
+            const st = useSettingsStore.getState()
+            const isMutedZap =
+              st.mutedPubkeys.includes(parsed.senderPubkey) ||
+              st.privateMutedPubkeys.includes(parsed.senderPubkey) ||
+              st.mutedPubkeys.includes(parsed.recipientPubkey) ||
+              st.privateMutedPubkeys.includes(parsed.recipientPubkey)
+            if (!isMutedZap) {
+              triggerYellowCircuit(parsed.id)
+              if (parsed.sats > 100 && typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('fw-big-zap', {
+                    detail: { id: parsed.id, sats: parsed.sats },
+                  }),
+                )
+              }
+            }
           }
           setRawZaps((prev) => {
             if (prev.some((z) => z.id === parsed.id)) return prev

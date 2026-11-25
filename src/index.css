@@ -222,9 +222,87 @@
   background: #15161c;
 }
 
+/* Full-screen gold perimeter circuit when a live zap > 100 sats arrives */
+.fw-screen-gold-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 3px;
+  opacity: 0;
+  transition: opacity 320ms ease;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+.fw-screen-gold-frame::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(180vmax, 1800px);
+  aspect-ratio: 1 / 1;
+  pointer-events: none;
+  background: conic-gradient(
+    from 0deg,
+    rgba(245, 159, 0, 0.28) 0deg,
+    #f59f00 35deg,
+    #ffd43b 65deg,
+    #fff9db 82deg,
+    rgba(245, 159, 0, 0.22) 100deg 180deg,
+    #f59f00 215deg,
+    #ffd43b 245deg,
+    #fff9db 262deg,
+    rgba(245, 159, 0, 0.28) 280deg 360deg
+  );
+  transform: translate(-50%, -50%) rotate(0deg);
+}
+
+.fw-screen-gold-frame.fw-screen-gold-active {
+  opacity: 1;
+}
+
+.fw-screen-gold-frame.fw-screen-gold-active::before {
+  animation: fw-edge-spin 2s linear infinite;
+}
+
+.fw-screen-gold-frame.fw-screen-gold-mega {
+  padding: 4px;
+}
+
+.fw-screen-gold-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 44;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    inset 0 0 26px 2px rgba(245, 159, 0, 0.35),
+    inset 0 0 8px 1px rgba(255, 224, 102, 0.55);
+  transition: opacity 320ms ease;
+}
+
+.fw-screen-gold-glow.fw-screen-gold-active {
+  opacity: 1;
+}
+
+.fw-screen-gold-glow.fw-screen-gold-mega {
+  box-shadow:
+    inset 0 0 42px 4px rgba(245, 159, 0, 0.48),
+    inset 0 0 12px 2px rgba(255, 232, 102, 0.72);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fw-edge-btn::before,
-  .fw-zap-circuit.fw-zap-circuit-active::before {
+  .fw-zap-circuit.fw-zap-circuit-active::before,
+  .fw-screen-gold-frame.fw-screen-gold-active::before {
     animation: none;
   }
 }

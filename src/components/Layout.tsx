@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -73,6 +73,29 @@ export function Layout({ children }: { children: ReactNode }) {
     return count
   })
   const [relaysExpanded, setRelaysExpanded] = useState(false)
+  const [screenGoldSats, setScreenGoldSats] = useState(0)
+  const screenGoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Pulse the gold perimeter frame around the main Fire Wisp screen when a live zap > 100 sats arrives
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onBigZap = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ sats?: number }>).detail
+      const sats = typeof detail?.sats === 'number' ? detail.sats : 0
+      if (sats <= 100) return
+      setScreenGoldSats(sats)
+      if (screenGoldTimerRef.current) clearTimeout(screenGoldTimerRef.current)
+      screenGoldTimerRef.current = setTimeout(() => {
+        screenGoldTimerRef.current = null
+        setScreenGoldSats(0)
+      }, 3200)
+    }
+    window.addEventListener('fw-big-zap', onBigZap)
+    return () => {
+      window.removeEventListener('fw-big-zap', onBigZap)
+      if (screenGoldTimerRef.current) clearTimeout(screenGoldTimerRef.current)
+    }
+  }, [])
   const [isDesktopMd, setIsDesktopMd] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(min-width: 768px)').matches
@@ -484,6 +507,20 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <FloatingStreamPlayer />
       <AuthModal />
+
+      {/* Full-screen gold circuit aura on live zaps > 100 sats */}
+      <div
+        aria-hidden="true"
+        className={`fw-screen-gold-glow ${
+          screenGoldSats > 100 ? 'fw-screen-gold-active' : ''
+        } ${screenGoldSats >= 1000 ? 'fw-screen-gold-mega' : ''}`}
+      />
+      <div
+        aria-hidden="true"
+        className={`fw-screen-gold-frame ${
+          screenGoldSats > 100 ? 'fw-screen-gold-active' : ''
+        } ${screenGoldSats >= 1000 ? 'fw-screen-gold-mega' : ''}`}
+      />
     </div>
   )
 }
