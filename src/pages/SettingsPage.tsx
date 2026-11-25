@@ -18,7 +18,10 @@ import {
   Download,
   Loader2,
   Send,
+  Smartphone,
+  ExternalLink,
 } from 'lucide-react'
+import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -1027,6 +1030,40 @@ export function SettingsPage() {
             Remove saved encrypted browser vault
           </button>
         )}
+      </section>
+
+      {/* Fire Wisp for Android */}
+      <section className="p-4 space-y-3">
+        <h2 className="font-semibold text-sm flex items-center gap-2">
+          <Smartphone className="w-4 h-4 text-[#f59f00]" />
+          Fire Wisp for Android
+        </h2>
+        <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-3">
+          <p className="text-xs text-[#9a9890] leading-relaxed">
+            Built-in fail-closed Tor, Amber signer, NIP-49 backups, and a self-custodial Lightning
+            wallet.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={ANDROID_APP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 min-w-[160px] px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold text-center text-white flex items-center justify-center gap-1.5 transition"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              Download APK
+            </a>
+            <a
+              href={ZAPSTORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 min-w-[160px] px-3.5 py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-xs font-medium text-center text-[#d4d2cb] flex items-center justify-center gap-1.5 transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Also on Zapstore
+            </a>
+          </div>
+        </div>
       </section>
     </div>
   )
