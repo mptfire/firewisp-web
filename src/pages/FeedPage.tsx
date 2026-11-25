@@ -383,7 +383,7 @@ export function FeedPage() {
               />
               <span className="truncate">
                 {tab === 'trending'
-                  ? 'Curated trending notes (trending.relays.land)'
+                  ? 'Live global trending & most-zapped notes (4h + 24h)'
                   : spamFilterEnabled
                     ? spamBlockedCount > 0
                       ? `Curated Explore · ${spamBlockedCount} filtered`

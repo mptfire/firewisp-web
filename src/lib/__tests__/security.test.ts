@@ -43,6 +43,7 @@ import {
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
 import { buildBud03BlossomListTags, buildNip65RelayListTags } from '../nostr/lists'
+import { mergeTrendingNotes } from '../nostr/trending'
 import { computeLiveZapsStats, parseLiveZapReceipt } from '../nostr/zapsFeed'
 import { parseSharedQueryParams } from '../shareTarget'
 import { useLiveStore } from '../store/useLiveStore'
@@ -1074,5 +1075,38 @@ describe('Full code-audit regression & security hardening', () => {
       'https://blossom.mptfire.de',
       'https://blossom.nostr.build',
     ])
+  })
+
+  it('merges 4h hot + 24h trending + relay notes, drops stale leftovers, and caps per-author burst', () => {
+    const now = 1_800_000_000
+    const mk = (id: string, pubkey: string, ageSec: number) => ({
+      id,
+      pubkey,
+      kind: 1,
+      created_at: now - ageSec,
+      tags: [],
+      content: `note ${id}`,
+      sig: '0'.repeat(128),
+    })
+
+    const merged = mergeTrendingNotes({
+      hotNotes: [
+        mk('h1', 'a'.repeat(64), 900), // 15m ago
+        mk('h2', 'a'.repeat(64), 1800), // 30m ago
+        mk('h3', 'a'.repeat(64), 2400), // 3rd from same author -> capped
+      ],
+      trending24hNotes: [
+        mk('h1', 'a'.repeat(64), 900), // duplicate -> skipped
+        mk('t1', 'b'.repeat(64), 3600 * 6), // 6h ago
+      ],
+      relayTrendingNotes: [
+        mk('r1', 'c'.repeat(64), 3600 * 10), // 10h ago
+        mk('old', 'd'.repeat(64), 3600 * 24 * 30), // 30 days old -> dropped
+        mk('fut', 'e'.repeat(64), -3600), // far future -> dropped
+      ],
+      nowSec: now,
+    })
+
+    expect(merged.map((e) => e.id)).toEqual(['h1', 'h2', 't1', 'r1'])
   })
 })

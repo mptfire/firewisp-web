@@ -13,6 +13,7 @@ import {
   KIND_RELAY_LIST,
 } from '../nostr/lists'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
+import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
 import { useSettingsStore } from './useSettingsStore'
@@ -830,14 +831,29 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (!force && get().trendingSidebarIds.length > 0) return
     set({ loadingTrends: true })
     try {
-      const trendingRaw = await nostrPool.query([TRENDING_RELAY], { kinds: [1], limit: 120 }, 4500)
-      if (trendingRaw.length === 0) return
+      const since48h = Math.floor(Date.now() / 1000) - 48 * 3600
+      const [globalBundle, relayRaw] = await Promise.all([
+        fetchGlobalTrendingEvents(4000),
+        nostrPool.query([TRENDING_RELAY], { kinds: [1], since: since48h, limit: 60 }, 4000),
+      ])
+
+      for (const p of globalBundle.profiles) get().ingestEvent(p)
+      for (const z of globalBundle.zaps) get().ingestEvent(z)
+
+      const mergedCandidates = mergeTrendingNotes({
+        hotNotes: globalBundle.hotNotes,
+        trending24hNotes: globalBundle.trending24hNotes,
+        relayTrendingNotes: relayRaw,
+        maxPerAuthor: 1,
+        limit: 80,
+      })
+      if (mergedCandidates.length === 0) return
 
       // Pick top 6 Trending Posts (distinct authors, non-spam, readable text or media)
       const hotSeenContent = new Map<string, Set<string>>()
       const hotAuthors = new Set<string>()
       const hotPosts: Event[] = []
-      for (const ev of trendingRaw) {
+      for (const ev of mergedCandidates) {
         if (!isTopLevelNote(ev) || get().isEventMuted(ev)) continue
         const pk = ev.pubkey.toLowerCase()
         if (hotAuthors.has(pk)) continue
@@ -856,9 +872,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
       for (const ev of hotPosts) get().ingestEvent(ev)
       if (hotPosts.length > 0) {
-        void get().fetchProfiles(hotPosts.map((e) => e.pubkey))
+        const missingProfilePks = hotPosts
+          .map((e) => e.pubkey)
+          .filter((pk) => !get().profiles[pk])
+        if (missingProfilePks.length > 0) void get().fetchProfiles(missingProfilePks)
         const hotIds = hotPosts.map((e) => e.id)
-        const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), TRENDING_RELAY])].slice(0, 6)
+        const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays])].slice(0, 6)
         void nostrPool
           .query(metaRelays, { kinds: [1, 6, 7, 9735], '#e': hotIds, limit: 200 }, 3500)
           .then((meta) => {
@@ -991,8 +1010,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       // Background-fetch engagement counts for the older batch
       const olderIds = fetched.slice(0, 40).map((e) => e.id)
       if (olderIds.length > 0) {
+        const engagementRelays = tab === 'trending' ? mergedFollowingRelays : targetRelays
         void nostrPool
-          .query(targetRelays, { kinds: [1, 5, 6, 7, 1111, 9735], '#e': olderIds, limit: 250 }, 3500)
+          .query(engagementRelays, { kinds: [1, 5, 6, 7, 1111, 9735], '#e': olderIds, limit: 250 }, 3500)
           .then((metaEvents) => {
             for (const m of metaEvents) get().ingestEvent(m)
           })
@@ -1236,8 +1256,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return [{ kinds: [1, 20, 21, 22], authors: extendedAuthors.slice(0, 200), limit: 80 }]
       }
       if (tab === 'trending') {
-        // trending.relays.land serves curated kind-1 trending notes directly
-        return [{ kinds: [1], limit: 80 }]
+        // Fetch live global 4h most-zapped + 24h trending (cryptographically verified) in parallel with trending.relays.land
+        const since48h = Math.floor(Date.now() / 1000) - 48 * 3600
+        return [{ kinds: [1], since: since48h, limit: 80 }]
       }
       return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
     })()
@@ -1269,12 +1290,63 @@ export const useNostrStore = create<NostrState>((set, get) => ({
                   ? s.trendingFeedIds.slice(0, 40)
                   : s.globalFeedIds.slice(0, 40)
       if (ids.length > 0) {
+        const engagementRelays = tab === 'trending' ? mergedFollowingRelays : targetRelays
         void nostrPool
-          .query(targetRelays, { kinds: [1, 5, 6, 7, 1111, 9735], '#e': ids, limit: 300 }, 3500)
+          .query(engagementRelays, { kinds: [1, 5, 6, 7, 1111, 9735], '#e': ids, limit: 300 }, 3500)
           .then((metaEvents) => {
             for (const m of metaEvents) get().ingestEvent(m)
           })
       }
+    }
+
+    // For Trending tab, also pull cryptographically verified global 4h most-zapped + 24h trending notes
+    let trendingCancelled = false
+    if (tab === 'trending') {
+      void fetchGlobalTrendingEvents(4500).then((bundle) => {
+        if (trendingCancelled) return
+        for (const p of bundle.profiles) get().ingestEvent(p)
+        for (const z of bundle.zaps) get().ingestEvent(z)
+
+        const relayNotes = get()
+          .trendingFeedIds.map((id) => get().events[id])
+          .filter((e): e is Event => Boolean(e))
+        const merged = mergeTrendingNotes({
+          hotNotes: bundle.hotNotes,
+          trending24hNotes: bundle.trending24hNotes,
+          relayTrendingNotes: relayNotes,
+          limit: 120,
+        })
+        if (merged.length === 0) return
+
+        for (const ev of merged) get().ingestEvent(ev)
+        const missingPks = merged
+          .map((e) => e.pubkey)
+          .filter((pk) => !get().profiles[pk])
+        if (missingPks.length > 0) void get().fetchProfiles(missingPks)
+
+        set((s) => {
+          const eventsMap = { ...s.events }
+          for (const ev of merged) eventsMap[ev.id] = ev
+          return {
+            events: eventsMap,
+            trendingFeedIds: merged.map((e) => e.id),
+            loadingFeed: false,
+          }
+        })
+
+        const topIds = merged.slice(0, 45).map((e) => e.id)
+        if (topIds.length > 0) {
+          void nostrPool
+            .query(
+              mergedFollowingRelays,
+              { kinds: [1, 5, 6, 7, 1111, 9735], '#e': topIds, limit: 300 },
+              3500,
+            )
+            .then((metaEvents) => {
+              for (const m of metaEvents) get().ingestEvent(m)
+            })
+        }
+      })
     }
 
     // Safety timeout so a single stalled relay never leaves the feed skeleton stuck
@@ -1382,6 +1454,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     return () => {
       cancelled = true
+      trendingCancelled = true
       clearTimeout(eoseFallbackTimer)
       if (batchTimer) clearTimeout(batchTimer)
       for (const s of subs) s.close()
