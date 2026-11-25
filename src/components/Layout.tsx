@@ -63,6 +63,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
+  const showGlobalAudio = useSettingsStore((s) => s.showGlobalAudio)
   const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -541,7 +542,7 @@ export function Layout({ children }: { children: ReactNode }) {
               </div>
             ) : null}
 
-            {isDesktopMd && (
+            {isDesktopMd && showGlobalAudio && (
               <div className="mt-3">
                 <SidebarAudioDeck />
               </div>

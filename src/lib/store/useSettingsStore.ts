@@ -80,6 +80,7 @@ export interface SettingsState {
   showExploreTab: boolean
   showLiveNowBar: boolean
   showLiveZaps: boolean
+  showGlobalAudio: boolean
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
@@ -125,6 +126,7 @@ export interface SettingsState {
   setShowExploreTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
   setShowLiveZaps: (enabled: boolean) => void
+  setShowGlobalAudio: (enabled: boolean) => void
   setShowBookmarksNav: (enabled: boolean) => void
   setSidebarFeedMode: (mode: SidebarFeedMode) => void
   setHoverStreamPreview: (enabled: boolean) => void
@@ -160,6 +162,7 @@ interface PersistedSettings {
   showExploreTab: boolean
   showLiveNowBar: boolean
   showLiveZaps: boolean
+  showGlobalAudio: boolean
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
@@ -208,6 +211,7 @@ function loadInitial(): PersistedSettings & {
     showExploreTab: false,
     showLiveNowBar: true,
     showLiveZaps: true,
+    showGlobalAudio: true,
     showBookmarksNav: false,
     sidebarFeedMode: 'trending',
     hoverStreamPreview: true,
@@ -323,6 +327,7 @@ function persist(state: SettingsState) {
     showExploreTab: state.showExploreTab,
     showLiveNowBar: state.showLiveNowBar,
     showLiveZaps: state.showLiveZaps,
+    showGlobalAudio: state.showGlobalAudio,
     showBookmarksNav: state.showBookmarksNav,
     sidebarFeedMode: state.sidebarFeedMode,
     hoverStreamPreview: state.hoverStreamPreview,
@@ -595,6 +600,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowLiveZaps: (showLiveZaps) => {
     set({ showLiveZaps })
+    persist(get())
+  },
+  setShowGlobalAudio: (showGlobalAudio) => {
+    set({ showGlobalAudio })
     persist(get())
   },
   setShowBookmarksNav: (showBookmarksNav) => {

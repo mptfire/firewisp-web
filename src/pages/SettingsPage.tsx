@@ -157,6 +157,21 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Show Global Audio deck</div>
+            <div className="text-[#8c8a82]">
+              Displays the persistent Global Audio volume slider (0–200% boost) and live 16-band graphic equalizer in the sidebar.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showGlobalAudio}
+            onChange={(e) => settings.setShowGlobalAudio(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Mobile Data Saving mode</div>
             <div className="text-[#8c8a82]">
               Caps multi-bitrate live streams to ≤ 480p (~1.5 Mbps), starts on lowest quality, trims stream pre-buffering, and pauses hover previews to cut bandwidth.
