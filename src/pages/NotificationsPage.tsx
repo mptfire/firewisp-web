@@ -19,31 +19,28 @@ export function NotificationsPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const notificationIds = useNostrStore((s) => s.notificationIds)
+  const notificationsLastSeenAt = useNostrStore((s) => s.notificationsLastSeenAt)
+  const markNotificationsRead = useNostrStore((s) => s.markNotificationsRead)
   const events = useNostrStore((s) => s.events)
   const profiles = useNostrStore((s) => s.profiles)
-  const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
-  const subscribeNotifications = useNostrStore((s) => s.subscribeNotifications)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => notificationIds.length === 0)
+  // Snapshot the previous last-seen timestamp on entry so newly unread rows stay highlighted while reading
+  const [unreadCutoff] = useState(() => notificationsLastSeenAt)
 
   useEffect(() => {
     if (!pubkey) return
-    setLoading(true)
-    const unsub = subscribeNotifications(pubkey)
-    const timer = setTimeout(() => setLoading(false), 2500)
-    return () => {
-      clearTimeout(timer)
-      unsub()
-    }
-  }, [pubkey, userReadRelays, subscribeNotifications])
+    const timer = setTimeout(() => setLoading(false), 1800)
+    return () => clearTimeout(timer)
+  }, [pubkey])
 
   const visibleNotificationIds = useMemo(() => {
     const allMutedPks =
@@ -74,6 +71,15 @@ export function NotificationsPage() {
   useEffect(() => {
     if (visibleNotificationIds.length > 0) setLoading(false)
   }, [visibleNotificationIds.length])
+
+  // Mark notifications as read while viewing the Notifications page
+  const latestNotifCreatedAt = visibleNotificationIds[0]
+    ? events[visibleNotificationIds[0]]?.created_at || 0
+    : 0
+  useEffect(() => {
+    if (!pubkey) return
+    markNotificationsRead(pubkey, latestNotifCreatedAt)
+  }, [pubkey, latestNotifCreatedAt, markNotificationsRead])
 
   if (!pubkey) {
     return (
@@ -150,11 +156,15 @@ export function NotificationsPage() {
           const previewText =
             ev.kind === 9735 ? zapInfo?.comment : ev.kind === 1 || ev.kind === 1111 ? ev.content : undefined
 
+          const isUnread = unreadCutoff > 0 && ev.created_at > unreadCutoff
+
           return (
             <Link
               key={ev.id}
               to={linkTarget}
-              className="flex items-start gap-3 px-4 py-3 border-b border-[#20222c] hover:bg-white/[0.02] transition"
+              className={`flex items-start gap-3 px-4 py-3 border-b border-[#20222c] hover:bg-white/[0.03] transition ${
+                isUnread ? 'bg-emerald-500/[0.06] border-l-2 border-l-emerald-400' : ''
+              }`}
             >
               <Icon className={`w-4 h-4 mt-1.5 shrink-0 ${iconColor}`} />
               <Avatar src={p?.picture} pubkey={actorPubkey} name={name} size="sm" />

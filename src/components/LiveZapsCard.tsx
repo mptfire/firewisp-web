@@ -176,20 +176,26 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
             />
             Live Zaps
           </span>
-          <span
-            className={`px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0 transition ${
-              circuitActive
-                ? 'bg-[#ffe066]/20 border-[#ffe066]/60 text-[#ffe066]'
-                : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-            }`}
-          >
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="px-1.5 py-0.5 rounded border bg-emerald-500/15 border-emerald-500/35 text-emerald-300 text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              LIVE
+            </span>
             <span
-              className={`w-1.5 h-1.5 rounded-full animate-pulse ${
-                circuitActive ? 'bg-[#ffe066]' : 'bg-emerald-400'
+              className={`px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-wider uppercase flex items-center gap-0.5 transition-all duration-200 ${
+                circuitActive
+                  ? 'bg-[#ffd43b]/25 border-[#ffe066]/80 text-[#ffe066] shadow-[0_0_10px_rgba(255,212,59,0.55)]'
+                  : 'bg-[#1b1d26] border-[#2b2e3d] text-[#6f6d66]'
               }`}
-            />
-            {circuitActive ? 'ZAP!' : 'LIVE'}
-          </span>
+            >
+              <Zap
+                className={`w-2.5 h-2.5 transition ${
+                  circuitActive ? 'text-[#ffe066] fill-[#ffe066]' : 'text-[#6f6d66]'
+                }`}
+              />
+              ZAP
+            </span>
+          </div>
         </div>
 
       {/* Compact Scoreboard Strip */}

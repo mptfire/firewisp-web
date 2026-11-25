@@ -127,6 +127,7 @@ export interface NostrState {
   sidebarFeedIds: Record<SidebarFeedMode, string[]>
   sidebarFeedLoading: Record<SidebarFeedMode, boolean>
   notificationIds: string[]
+  notificationsLastSeenAt: number
   dms: DecryptedDm[]
 
   loadingFeed: boolean
@@ -151,6 +152,7 @@ export interface NostrState {
   resetUserState: () => void
   subscribeFeed: (tab: FeedTab) => () => void
   subscribeNotifications: (pubkey: string) => () => void
+  markNotificationsRead: (pubkey: string, latestSec?: number) => void
   subscribeDms: () => () => void
 
   publishNote: (params: {
@@ -177,6 +179,45 @@ export interface NostrState {
 
   isEventMuted: (event: Event) => boolean
   isEventDeleted: (event: Pick<Event, 'id' | 'pubkey'>) => boolean
+}
+
+const NOTIF_SEEN_STORAGE_KEY = 'firewisp_notif_seen_v1'
+
+function loadNotifSeenAt(pubkey: string): number {
+  const clean = pubkey.toLowerCase()
+  const fallback = Math.floor(Date.now() / 1000) - 12 * 3600
+  if (typeof localStorage === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(NOTIF_SEEN_STORAGE_KEY)
+    if (!raw) return fallback
+    const map = JSON.parse(raw) as Record<string, unknown>
+    const val = map[clean]
+    if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+      return Math.floor(val)
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return fallback
+}
+
+function saveNotifSeenAt(pubkey: string, unixSec: number): void {
+  const clean = pubkey.toLowerCase()
+  if (typeof localStorage === 'undefined') return
+  try {
+    let map: Record<string, number> = {}
+    const raw = localStorage.getItem(NOTIF_SEEN_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'number' && Number.isFinite(v)) map[k] = Math.floor(v)
+      }
+    }
+    map[clean] = Math.floor(unixSec)
+    localStorage.setItem(NOTIF_SEEN_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // ignore storage errors
+  }
 }
 
 // Track last fetch timestamp per pubkey (60s miss cooldown so failed fetches can recover later)
@@ -326,6 +367,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     firewisp: false,
   },
   notificationIds: [],
+  notificationsLastSeenAt: 0,
   dms: [],
 
   loadingFeed: false,
@@ -413,6 +455,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       sidebarFeedIds: { ...s.sidebarFeedIds, extended: [] },
       pendingFeedIds: { ...s.pendingFeedIds, foryou: [], following: [], extended: [] },
       notificationIds: [],
+      notificationsLastSeenAt: 0,
       dms: [],
     }))
   },
@@ -1585,7 +1628,20 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
   },
 
+  markNotificationsRead: (pubkey, latestSec) => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const next = Math.max(nowSec, latestSec || 0, get().notificationsLastSeenAt)
+    saveNotifSeenAt(pubkey, next)
+    set({ notificationsLastSeenAt: next })
+  },
+
   subscribeNotifications: (pubkey) => {
+    const cleanPk = pubkey.toLowerCase()
+    const storedSeen = loadNotifSeenAt(cleanPk)
+    set((s) => ({
+      notificationsLastSeenAt:
+        s.notificationsLastSeenAt > storedSeen ? s.notificationsLastSeenAt : storedSeen,
+    }))
     const relays = [
       ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
     ].slice(0, 10)

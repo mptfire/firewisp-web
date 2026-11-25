@@ -68,6 +68,8 @@ export function App() {
   const initPoolListener = useNostrStore((s) => s.initPoolListener)
   const subscribeLiveDiscovery = useLiveStore((s) => s.subscribeLiveDiscovery)
   const loadUserGraph = useNostrStore((s) => s.loadUserGraph)
+  const subscribeNotifications = useNostrStore((s) => s.subscribeNotifications)
+  const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
 
@@ -86,6 +88,12 @@ export function App() {
       void loadUserGraph(pubkey)
     }
   }, [pubkey, loadUserGraph])
+
+  // Keep notifications subscribed globally while signed in so unread badge updates live on every page
+  useEffect(() => {
+    if (!pubkey) return
+    return subscribeNotifications(pubkey)
+  }, [pubkey, userReadRelays, subscribeNotifications])
 
   useEffect(() => {
     if (!toastMessage) return

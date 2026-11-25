@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -28,7 +28,7 @@ import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { isLiveStreamFresh } from '../lib/nostr/nip53'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
-import { useNostrStore } from '../lib/store/useNostrStore'
+import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
@@ -60,6 +60,18 @@ export function Layout({ children }: { children: ReactNode }) {
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
+  const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
+  const notificationIds = useNostrStore((s) => s.notificationIds)
+  const notificationsLastSeenAt = useNostrStore((s) => s.notificationsLastSeenAt)
+  const events = useNostrStore((s) => s.events)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
+  const isEventMuted = useNostrStore((s) => s.isEventMuted)
+  const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -72,6 +84,48 @@ export function Layout({ children }: { children: ReactNode }) {
     }
     return count
   })
+
+  const unreadNotificationCount = useMemo(() => {
+    if (!pubkey || location.pathname === '/notifications' || notificationsLastSeenAt <= 0) return 0
+    const allMutedPks =
+      privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
+    let count = 0
+    for (const id of notificationIds) {
+      const ev = events[id]
+      if (!ev) continue
+      if (ev.created_at <= notificationsLastSeenAt) break
+      if (isEventDeleted(ev) || isEventMuted(ev)) continue
+      if (ev.kind === 9735) {
+        const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
+        if (allMutedPks.includes(actorPk)) continue
+      }
+      count++
+    }
+    return count
+  }, [
+    pubkey,
+    location.pathname,
+    notificationIds,
+    notificationsLastSeenAt,
+    events,
+    deletedByAuthor,
+    isEventDeleted,
+    isEventMuted,
+    mutedPubkeys,
+    mutedHashtags,
+    mutedWords,
+    privateMutedPubkeys,
+    privateMutedHashtags,
+    privateMutedWords,
+  ])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.title =
+      unreadNotificationCount > 0
+        ? `(${unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}) Fire Wisp`
+        : 'Fire Wisp — Privacy-Focused Nostr Web Client'
+  }, [unreadNotificationCount])
   const [relaysExpanded, setRelaysExpanded] = useState(false)
   const [screenGoldSats, setScreenGoldSats] = useState(0)
   const screenGoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -134,11 +188,35 @@ export function Layout({ children }: { children: ReactNode }) {
     return a[0].localeCompare(b[0])
   })
 
-  const navItems = [
+  const navItems: Array<{
+    to: string
+    label: string
+    icon: typeof Flame
+    end?: boolean
+    badge?: string | number
+    badgeTone?: 'red' | 'green'
+  }> = [
     { to: '/', label: 'Feed', icon: Flame, end: true },
-    { to: '/notifications', label: 'Notifications', icon: Bell },
+    {
+      to: '/notifications',
+      label: 'Notifications',
+      icon: Bell,
+      badge:
+        unreadNotificationCount > 0
+          ? unreadNotificationCount > 99
+            ? '99+'
+            : unreadNotificationCount
+          : undefined,
+      badgeTone: 'green',
+    },
     { to: '/search', label: 'Search', icon: Search },
-    { to: '/live', label: 'Live', icon: Radio, badge: liveCount > 0 ? liveCount : undefined },
+    {
+      to: '/live',
+      label: 'Live',
+      icon: Radio,
+      badge: liveCount > 0 ? liveCount : undefined,
+      badgeTone: 'red',
+    },
     ...(showBookmarksNav ? [{ to: '/bookmarks', label: 'Bookmarks', icon: Bookmark }] : []),
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
     { to: '/settings', label: 'Settings', icon: Settings },
@@ -172,7 +250,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </Link>
 
             <nav className="space-y-1">
-              {navItems.map(({ to, label, icon: Icon, end, badge }) => (
+              {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => (
                 <NavLink
                   key={to}
                   to={to}
@@ -189,13 +267,23 @@ export function Layout({ children }: { children: ReactNode }) {
                   <span className="flex items-center gap-3 min-w-0">
                     <Icon
                       className={`w-4 h-4 shrink-0 ${
-                        to === '/live' && badge ? 'text-red-500' : ''
+                        badge && badgeTone === 'red'
+                          ? 'text-red-500'
+                          : badge && badgeTone === 'green'
+                            ? 'text-emerald-400'
+                            : ''
                       }`}
                     />
                     <span className="truncate">{label}</span>
                   </span>
                   {badge !== undefined && (
-                    <span className="px-1.5 py-0.5 rounded-md bg-red-600/20 border border-red-500/40 text-red-400 text-[10px] font-bold tabular-nums leading-none">
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold tabular-nums leading-none ${
+                        badgeTone === 'green'
+                          ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                          : 'bg-red-600/20 border-red-500/40 text-red-400'
+                      }`}
+                    >
                       {badge}
                     </span>
                   )}
@@ -468,13 +556,24 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#0e0e11]/95 backdrop-blur-md border-t border-[#20222c] flex justify-around py-2">
         {[
-          { to: '/', icon: Flame, label: 'Feed', end: true },
+          { to: '/', icon: Flame, label: 'Feed', end: true, badge: undefined as string | number | undefined, tone: undefined as 'red' | 'green' | undefined },
           { to: '/search', icon: Search, label: 'Search' },
-          { to: '/live', icon: Radio, label: 'Live' },
-          { to: '/notifications', icon: Bell, label: 'Notifications' },
+          { to: '/live', icon: Radio, label: 'Live', badge: liveCount > 0 ? liveCount : undefined, tone: 'red' as const },
+          {
+            to: '/notifications',
+            icon: Bell,
+            label: 'Notifications',
+            badge:
+              unreadNotificationCount > 0
+                ? unreadNotificationCount > 99
+                  ? '99+'
+                  : unreadNotificationCount
+                : undefined,
+            tone: 'green' as const,
+          },
           ...(showBookmarksNav ? [{ to: '/bookmarks', icon: Bookmark, label: 'Bookmarks' }] : []),
           { to: '/settings', icon: Settings, label: 'Settings' },
-        ].map(({ to, icon: Icon, label, end }) => (
+        ].map(({ to, icon: Icon, label, end, badge, tone }) => (
           <NavLink
             key={to}
             to={to}
@@ -486,7 +585,20 @@ export function Layout({ children }: { children: ReactNode }) {
               }`
             }
           >
-            <Icon className="w-5 h-5" />
+            <span className="relative inline-flex">
+              <Icon className="w-5 h-5" />
+              {badge !== undefined && (
+                <span
+                  className={`absolute -top-1.5 -right-2.5 px-1 min-w-[16px] h-4 rounded-full text-[9px] font-bold flex items-center justify-center tabular-nums leading-none ${
+                    tone === 'green'
+                      ? 'bg-emerald-500 text-black'
+                      : 'bg-red-600 text-white'
+                  }`}
+                >
+                  {badge}
+                </span>
+              )}
+            </span>
             <span className="truncate max-w-[68px]">{label}</span>
           </NavLink>
         ))}
