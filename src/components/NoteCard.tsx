@@ -613,17 +613,17 @@ export const NoteCard = memo(function NoteCard({
   const toggleRepost = useNostrStore((s) => s.toggleRepost)
   const toggleBookmark = useNostrStore((s) => s.toggleBookmark)
   const toggleFollow = useNostrStore((s) => s.toggleFollow)
+  const blockPubkey = useNostrStore((s) => s.blockPubkey)
+  const unblockPubkey = useNostrStore((s) => s.unblockPubkey)
+  const muteHashtagGlobal = useNostrStore((s) => s.muteHashtagGlobal)
   const isFollowingAuthor = useNostrStore((s) =>
     s.follows.includes(event.pubkey.toLowerCase()),
   )
   const myPubkey = useAuthStore((s) => s.pubkey)
-  const mutePubkey = useSettingsStore((s) => s.mutePubkey)
-  const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
   const isAuthorMuted = useSettingsStore((s) => {
     const pk = event.pubkey.toLowerCase()
     return s.mutedPubkeys.includes(pk) || s.privateMutedPubkeys.includes(pk)
   })
-  const muteHashtag = useSettingsStore((s) => s.muteHashtag)
   const isMyNote = Boolean(myPubkey && myPubkey.toLowerCase() === event.pubkey.toLowerCase())
 
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
@@ -853,11 +853,9 @@ export const NoteCard = memo(function NoteCard({
                   onClick={(e) => {
                     e.stopPropagation()
                     if (isAuthorMuted) {
-                      unmutePubkey(event.pubkey)
-                      useNostrStore.getState().setToast(`Unblocked ${displayName}`)
+                      void unblockPubkey(event.pubkey, displayName)
                     } else {
-                      mutePubkey(event.pubkey)
-                      useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                      void blockPubkey(event.pubkey, displayName)
                     }
                   }}
                   title={isAuthorMuted ? `Unblock ${displayName}` : `Block & mute ${displayName}`}
@@ -918,11 +916,9 @@ export const NoteCard = memo(function NoteCard({
                       <button
                         onClick={() => {
                           if (isAuthorMuted) {
-                            unmutePubkey(event.pubkey)
-                            useNostrStore.getState().setToast(`Unblocked ${displayName}`)
+                            void unblockPubkey(event.pubkey, displayName)
                           } else {
-                            mutePubkey(event.pubkey)
-                            useNostrStore.getState().setToast(`Blocked ${displayName} (undo in Settings)`)
+                            void blockPubkey(event.pubkey, displayName)
                           }
                           setMenuOpen(false)
                         }}
@@ -992,7 +988,7 @@ export const NoteCard = memo(function NoteCard({
                           #{seg.tag}
                         </Link>
                         <button
-                          onClick={() => muteHashtag(seg.tag)}
+                          onClick={() => void muteHashtagGlobal(seg.tag)}
                           title={`Mute #${seg.tag}`}
                           className="ml-0.5 opacity-0 group-hover:opacity-100 text-[#8a8880] hover:text-red-400 transition cursor-pointer"
                         >

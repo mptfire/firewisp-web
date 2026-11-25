@@ -1,8 +1,230 @@
+import type { Event } from 'nostr-tools/pure'
 import type { RelayEntry } from '../constants'
 import { sanitizeBlossomUrl, sanitizePublicRelayUrl } from '../sanitize'
+import type { FireWispSigner } from './signer'
 
+export const KIND_MUTE_LIST = 10000
 export const KIND_RELAY_LIST = 10002
 export const KIND_BLOSSOM_SERVER_LIST = 10063
+export const MAX_NIP44_PLAINTEXT_BYTES = 65535
+
+export type MuteItemType = 'p' | 't' | 'word'
+
+export interface MuteListMutation {
+  op: 'add' | 'remove'
+  type: MuteItemType
+  value: string
+}
+
+export interface ParsedMuteTags {
+  pubkeys: string[]
+  hashtags: string[]
+  words: string[]
+}
+
+export function normalizeMuteValue(type: MuteItemType, raw: string): string | null {
+  if (type === 'p') {
+    const clean = raw.trim().toLowerCase()
+    return /^[0-9a-f]{64}$/.test(clean) ? clean : null
+  }
+  if (type === 't') {
+    const clean = raw.trim().toLowerCase().replace(/^#+/, '')
+    return clean.length > 0 ? clean : null
+  }
+  const clean = raw.trim().toLowerCase()
+  return clean.length >= 2 ? clean : null
+}
+
+/**
+ * Extracts normalized `p`, `t`, and `word` entries from a NIP-51 `kind: 10000` tag array
+ * (either public `event.tags` or parsed decrypted private tags).
+ */
+export function extractMuteItemsFromTags(tags: readonly unknown[]): ParsedMuteTags {
+  const pubkeys = new Set<string>()
+  const hashtags = new Set<string>()
+  const words = new Set<string>()
+  for (const item of tags) {
+    if (!Array.isArray(item) || typeof item[0] !== 'string' || typeof item[1] !== 'string') {
+      continue
+    }
+    if (item[0] === 'p') {
+      const clean = normalizeMuteValue('p', item[1])
+      if (clean) pubkeys.add(clean)
+    } else if (item[0] === 't') {
+      const clean = normalizeMuteValue('t', item[1])
+      if (clean) hashtags.add(clean)
+    } else if (item[0] === 'word') {
+      const clean = normalizeMuteValue('word', item[1])
+      if (clean) words.add(clean)
+    }
+  }
+  return {
+    pubkeys: [...pubkeys],
+    hashtags: [...hashtags],
+    words: [...words],
+  }
+}
+
+/**
+ * Parses decrypted NIP-51 private mute-list JSON strictly as an array of `string[]` tags.
+ * Returns `null` if the payload is not a valid JSON array (fail-closed so callers never overwrite corrupt/unknown content).
+ * Preserves ALL tag types (`p`, `t`, `word`, `e`, and any client-specific tags) and extra positional fields.
+ */
+export function parsePrivateMuteTagsJson(plaintext: string): string[][] | null {
+  try {
+    const parsed = JSON.parse(plaintext) as unknown
+    if (!Array.isArray(parsed)) return null
+    const tags: string[][] = []
+    for (const item of parsed) {
+      if (Array.isArray(item) && item.length > 0 && item.every((x) => typeof x === 'string')) {
+        tags.push([...(item as string[])])
+      }
+    }
+    return tags
+  } catch {
+    return null
+  }
+}
+
+function tagMatchesMute(tag: readonly string[], type: MuteItemType, cleanVal: string): boolean {
+  if (tag[0] !== type || typeof tag[1] !== 'string') return false
+  const normalized = normalizeMuteValue(type, tag[1])
+  return normalized === cleanVal
+}
+
+/**
+ * Safely applies `add` / `remove` mutations to a NIP-51 `kind: 10000` mute list without losing any
+ * existing public or private tags (including `e` thread mutes, relay hints, or unknown tags).
+ * - `add` appends to `privateTags` (encrypted) unless already muted publicly or privately.
+ * - `remove` removes matching tags from BOTH `publicTags` and `privateTags`.
+ */
+export function applyMuteListMutations(params: {
+  publicTags: readonly string[][]
+  privateTags: readonly string[][]
+  mutations: readonly MuteListMutation[]
+}): {
+  publicTags: string[][]
+  privateTags: string[][]
+  changed: boolean
+} {
+  let publicTags = params.publicTags.map((t) => [...t])
+  let privateTags = params.privateTags.map((t) => [...t])
+  let changed = false
+
+  for (const m of params.mutations) {
+    const cleanVal = normalizeMuteValue(m.type, m.value)
+    if (!cleanVal) continue
+
+    if (m.op === 'add') {
+      const existsPublic = publicTags.some((t) => tagMatchesMute(t, m.type, cleanVal))
+      const existsPrivate = privateTags.some((t) => tagMatchesMute(t, m.type, cleanVal))
+      if (!existsPublic && !existsPrivate) {
+        privateTags.push([m.type, cleanVal])
+        changed = true
+      }
+    } else {
+      const nextPub = publicTags.filter((t) => !tagMatchesMute(t, m.type, cleanVal))
+      const nextPriv = privateTags.filter((t) => !tagMatchesMute(t, m.type, cleanVal))
+      if (nextPub.length !== publicTags.length || nextPriv.length !== privateTags.length) {
+        publicTags = nextPub
+        privateTags = nextPriv
+        changed = true
+      }
+    }
+  }
+
+  return { publicTags, privateTags, changed }
+}
+
+/**
+ * Ensures replaceable Nostr events (`kind: 10000`) always get a strictly newer `created_at`
+ * than the event they replace, even on rapid back-to-back updates or slightly skewed device clocks.
+ */
+export function computeNextReplaceableCreatedAt(
+  baseEvent: Pick<Event, 'created_at'> | null | undefined,
+  nowSec = Math.floor(Date.now() / 1000),
+): number {
+  const prev = baseEvent?.created_at ?? 0
+  return Math.max(nowSec, prev + 1)
+}
+
+/**
+ * Decrypts NIP-51 `kind: 10000` private content (supporting both NIP-44 and legacy NIP-04 `?iv=`).
+ * Returns `null` if content is non-empty and decryption fails or does not parse as a tag array (fail-closed!).
+ */
+export async function decryptMuteListContent(
+  signer: Pick<FireWispSigner, 'canEncrypt' | 'nip44Decrypt' | 'nip04Decrypt'> | null | undefined,
+  pubkey: string,
+  content: string,
+): Promise<{ tags: string[][]; scheme: 'nip44' | 'nip04' } | null> {
+  if (!content || !content.trim()) {
+    return { tags: [], scheme: 'nip44' }
+  }
+  if (!signer) return null
+
+  const cleanPk = pubkey.toLowerCase()
+  const looksNip04 = content.includes('?iv=')
+  let decrypted: string | null = null
+  let scheme: 'nip44' | 'nip04' = looksNip04 ? 'nip04' : 'nip44'
+
+  if (looksNip04 && signer.nip04Decrypt) {
+    try {
+      decrypted = await signer.nip04Decrypt(cleanPk, content)
+      scheme = 'nip04'
+    } catch {
+      // fallback to NIP-44 below
+    }
+  }
+  if (!decrypted && signer.canEncrypt) {
+    try {
+      decrypted = await signer.nip44Decrypt(cleanPk, content)
+      scheme = 'nip44'
+    } catch {
+      // fallback to NIP-04 below
+    }
+  }
+  if (!decrypted && !looksNip04 && signer.nip04Decrypt) {
+    try {
+      decrypted = await signer.nip04Decrypt(cleanPk, content)
+      scheme = 'nip04'
+    } catch {
+      // signer declined or incompatible ciphertext
+    }
+  }
+  if (!decrypted) return null
+
+  const tags = parsePrivateMuteTagsJson(decrypted)
+  if (!tags) return null
+  return { tags, scheme }
+}
+
+/**
+ * Encrypts NIP-51 `kind: 10000` private tags using NIP-44 (preferred) with NIP-04 fallback.
+ * Returns `''` when `privateTags` is empty.
+ */
+export async function encryptMuteListTags(
+  signer: Pick<FireWispSigner, 'canEncrypt' | 'nip44Encrypt' | 'nip04Encrypt'>,
+  pubkey: string,
+  privateTags: readonly string[][],
+): Promise<string> {
+  if (privateTags.length === 0) return ''
+  const cleanPk = pubkey.toLowerCase()
+  const plaintext = JSON.stringify(privateTags)
+  const byteLen = new TextEncoder().encode(plaintext).length
+
+  if (signer.canEncrypt) {
+    if (byteLen > MAX_NIP44_PLAINTEXT_BYTES) {
+      throw new Error(
+        `Encrypted mute list exceeds NIP-44 maximum size (${byteLen}/${MAX_NIP44_PLAINTEXT_BYTES} bytes)`,
+      )
+    }
+    return signer.nip44Encrypt(cleanPk, plaintext)
+  }
+  if (signer.nip04Encrypt) {
+    return signer.nip04Encrypt(cleanPk, plaintext)
+  }
+  throw new Error('Your signer does not support NIP-44 or NIP-04 encryption for mute list sync')
+}
 
 /**
  * Builds canonical NIP-65 (`kind: 10002`) `r` tags from relay entries.

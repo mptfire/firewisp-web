@@ -115,6 +115,9 @@ export interface SettingsState {
   removeMutedWord: (word: string) => void
   mergeRemoteMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
   mergePrivateMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
+  setPrivateMutes: (mutes: { pubkeys: string[]; hashtags: string[]; words: string[] }) => void
+  addPrivateMute: (type: 'p' | 't' | 'word', value: string) => void
+  removeLocalMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
   clearPrivateSessionMutes: () => void
 
   setDmAutoLoadMedia: (enabled: boolean) => void
@@ -558,6 +561,58 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ]),
       ],
     }))
+  },
+  setPrivateMutes: ({ pubkeys, hashtags, words }) => {
+    // SECURITY: Replaces RAM-only snapshot from authoritative decrypted Nostr kind-10000.
+    set({
+      privateMutedPubkeys: [...new Set(pubkeys.map((p) => p.toLowerCase()).filter(Boolean))],
+      privateMutedHashtags: [
+        ...new Set(hashtags.map((t) => t.trim().toLowerCase().replace(/^#+/, '')).filter(Boolean)),
+      ],
+      privateMutedWords: [
+        ...new Set(words.map((w) => w.trim().toLowerCase()).filter((w) => w.length >= 2)),
+      ],
+    })
+  },
+  addPrivateMute: (type, value) => {
+    // Optimistically hide in RAM while Nostr kind-10000 publish completes (never written to localStorage).
+    if (type === 'p') {
+      const clean = value.trim().toLowerCase()
+      if (!clean) return
+      set((s) => ({
+        privateMutedPubkeys: s.privateMutedPubkeys.includes(clean)
+          ? s.privateMutedPubkeys
+          : [...s.privateMutedPubkeys, clean],
+      }))
+    } else if (type === 't') {
+      const clean = value.trim().toLowerCase().replace(/^#+/, '')
+      if (!clean) return
+      set((s) => ({
+        privateMutedHashtags: s.privateMutedHashtags.includes(clean)
+          ? s.privateMutedHashtags
+          : [...s.privateMutedHashtags, clean],
+      }))
+    } else {
+      const clean = value.trim().toLowerCase()
+      if (clean.length < 2) return
+      set((s) => ({
+        privateMutedWords: s.privateMutedWords.includes(clean)
+          ? s.privateMutedWords
+          : [...s.privateMutedWords, clean],
+      }))
+    }
+  },
+  removeLocalMutes: ({ pubkeys = [], hashtags = [], words = [] }) => {
+    const pkSet = new Set(pubkeys.map((p) => p.toLowerCase()))
+    const tagSet = new Set(hashtags.map((t) => t.trim().toLowerCase().replace(/^#+/, '')))
+    const wordSet = new Set(words.map((w) => w.trim().toLowerCase()))
+    set((s) => ({
+      mutedPubkeys: pkSet.size > 0 ? s.mutedPubkeys.filter((p) => !pkSet.has(p)) : s.mutedPubkeys,
+      mutedHashtags:
+        tagSet.size > 0 ? s.mutedHashtags.filter((t) => !tagSet.has(t)) : s.mutedHashtags,
+      mutedWords: wordSet.size > 0 ? s.mutedWords.filter((w) => !wordSet.has(w)) : s.mutedWords,
+    }))
+    persist(get())
   },
   clearPrivateSessionMutes: () => {
     set({

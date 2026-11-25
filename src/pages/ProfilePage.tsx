@@ -53,10 +53,10 @@ export function ProfilePage() {
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const toggleFollow = useNostrStore((s) => s.toggleFollow)
+  const blockPubkey = useNostrStore((s) => s.blockPubkey)
+  const unblockPubkey = useNostrStore((s) => s.unblockPubkey)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
-  const mutePubkey = useSettingsStore((s) => s.mutePubkey)
-  const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
   const relays = useSettingsStore((s) => s.relays)
   const readRelays = useMemo(
     () =>
@@ -351,7 +351,11 @@ export function ProfilePage() {
             {!isMe && (
               <>
                 <button
-                  onClick={() => (isMuted ? unmutePubkey(hexPubkey) : mutePubkey(hexPubkey))}
+                  onClick={() =>
+                    void (isMuted
+                      ? unblockPubkey(hexPubkey, displayName)
+                      : blockPubkey(hexPubkey, displayName))
+                  }
                   className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                     isMuted
                       ? 'bg-red-600/25 border-red-500/60 text-red-200 hover:bg-red-600/35'

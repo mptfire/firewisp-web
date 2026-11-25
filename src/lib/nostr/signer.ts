@@ -22,6 +22,7 @@ export interface FireWispSigner {
   signEvent(template: EventTemplate): Promise<Event>
   nip44Encrypt(peerPubkey: string, plaintext: string): Promise<string>
   nip44Decrypt(peerPubkey: string, ciphertext: string): Promise<string>
+  nip04Encrypt?(peerPubkey: string, plaintext: string): Promise<string>
   nip04Decrypt?(peerPubkey: string, ciphertext: string): Promise<string>
   /** Only implemented by local signer for explicit user-initiated backup export */
   exportSecretKey?: () => Uint8Array
@@ -84,6 +85,11 @@ export class LocalKeySigner implements FireWispSigner {
     return nip44.v2.decrypt(ciphertext, key)
   }
 
+  async nip04Encrypt(peerPubkey: string, plaintext: string): Promise<string> {
+    this.assertAlive()
+    return nip04.encrypt(this.privkey, peerPubkey, plaintext)
+  }
+
   async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
     this.assertAlive()
     return nip04.decrypt(this.privkey, peerPubkey, ciphertext)
@@ -139,6 +145,13 @@ export class Nip07Signer implements FireWispSigner {
       throw new Error('Your browser extension does not support NIP-44 decryption')
     }
     return window.nostr.nip44.decrypt(peerPubkey, ciphertext)
+  }
+
+  async nip04Encrypt(peerPubkey: string, plaintext: string): Promise<string> {
+    if (!window.nostr?.nip04) {
+      throw new Error('Your browser extension does not support NIP-04 encryption')
+    }
+    return window.nostr.nip04.encrypt(peerPubkey, plaintext)
   }
 
   async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
@@ -270,6 +283,10 @@ export class Nip46BunkerSigner implements FireWispSigner {
 
   async nip44Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
     return this.bunker.nip44Decrypt(peerPubkey, ciphertext)
+  }
+
+  async nip04Encrypt(peerPubkey: string, plaintext: string): Promise<string> {
+    return this.bunker.nip04Encrypt(peerPubkey, plaintext)
   }
 
   async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {

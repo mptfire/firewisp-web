@@ -435,7 +435,6 @@ export function LiveStreamPage() {
   const mutedWords = useSettingsStore((s) => s.mutedWords)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
-  const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const blossomServers = useSettingsStore((s) => s.blossomServers)
 
   const primaryHostPubkey =
@@ -450,6 +449,7 @@ export function LiveStreamPage() {
   )
   const follows = useNostrStore((s) => s.follows)
   const toggleFollow = useNostrStore((s) => s.toggleFollow)
+  const blockPubkey = useNostrStore((s) => s.blockPubkey)
 
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<BlossomUploadResult[]>([])
@@ -1252,8 +1252,7 @@ export function LiveStreamPage() {
                       myPubkey={myPubkey}
                       onReply={setReplyTarget}
                       onBlock={(pk, name) => {
-                        mutePubkey(pk)
-                        useNostrStore.getState().setToast(`Blocked ${name} (undo in Settings)`)
+                        void blockPubkey(pk, name)
                       }}
                       onOpenLightbox={setLightboxMedia}
                     />

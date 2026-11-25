@@ -1264,4 +1264,223 @@ describe('Full code-audit regression & security hardening', () => {
       }
     }
   })
+
+  it('safely mutates, encrypts, serializes, and fails-closed on NIP-51 kind-10000 global mute sync', async () => {
+    const {
+      applyMuteListMutations,
+      computeNextReplaceableCreatedAt,
+      decryptMuteListContent,
+      encryptMuteListTags,
+      KIND_MUTE_LIST,
+      parsePrivateMuteTagsJson,
+    } = await import('../nostr/lists')
+    const { nostrPool } = await import('../nostr/pool')
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useNostrStore } = await import('../store/useNostrStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+
+    const pkA = 'a'.repeat(64)
+    const pkB = 'b'.repeat(64)
+    const pkC = 'c'.repeat(64)
+    const pkD = 'd'.repeat(64)
+    const threadId = 'e'.repeat(64)
+
+    // 1. Pure helper tests: preserves e/t/word/unknown tags, adds privately, removes from both
+    const mut1 = applyMuteListMutations({
+      publicTags: [
+        ['p', pkA, 'wss://relay.damus.io'],
+        ['client', 'other-app'],
+      ],
+      privateTags: [
+        ['p', pkB],
+        ['e', threadId],
+        ['t', 'spam'],
+        ['word', 'airdrop'],
+        ['custom', 'keep-me'],
+      ],
+      mutations: [
+        { op: 'add', type: 'p', value: pkC.toUpperCase() },
+        { op: 'add', type: 'p', value: pkA }, // already public — should not duplicate
+      ],
+    })
+    expect(mut1.changed).toBe(true)
+    expect(mut1.publicTags).toEqual([
+      ['p', pkA, 'wss://relay.damus.io'],
+      ['client', 'other-app'],
+    ])
+    expect(mut1.privateTags).toEqual([
+      ['p', pkB],
+      ['e', threadId],
+      ['t', 'spam'],
+      ['word', 'airdrop'],
+      ['custom', 'keep-me'],
+      ['p', pkC],
+    ])
+
+    // Removing removes from both public and private while keeping everything else
+    const mut2 = applyMuteListMutations({
+      publicTags: mut1.publicTags,
+      privateTags: mut1.privateTags,
+      mutations: [
+        { op: 'remove', type: 'p', value: pkA },
+        { op: 'remove', type: 'p', value: pkB },
+      ],
+    })
+    expect(mut2.changed).toBe(true)
+    expect(mut2.publicTags).toEqual([['client', 'other-app']])
+    expect(mut2.privateTags).toEqual([
+      ['e', threadId],
+      ['t', 'spam'],
+      ['word', 'airdrop'],
+      ['custom', 'keep-me'],
+      ['p', pkC],
+    ])
+
+    // Fail-closed JSON parsing & monotonic created_at
+    expect(parsePrivateMuteTagsJson('not-json')).toBeNull()
+    expect(parsePrivateMuteTagsJson('{"not":"array"}')).toBeNull()
+    expect(computeNextReplaceableCreatedAt({ created_at: 2_000_000_000 }, 1_700_000_000)).toBe(
+      2_000_000_001,
+    )
+
+    // 2. Real NIP-44 + NIP-04 roundtrip with LocalKeySigner
+    const sk = generateSecretKey()
+    const signer = new LocalKeySigner(sk)
+    const sampleTags: string[][] = [
+      ['p', pkB],
+      ['e', threadId],
+      ['word', 'crypto'],
+    ]
+    const nip44Cipher = await encryptMuteListTags(signer, signer.pubkey, sampleTags)
+    const nip44Dec = await decryptMuteListContent(signer, signer.pubkey, nip44Cipher)
+    expect(nip44Dec?.tags).toEqual(sampleTags)
+    expect(nip44Dec?.scheme).toBe('nip44')
+
+    const nip04Cipher = await signer.nip04Encrypt(signer.pubkey, JSON.stringify(sampleTags))
+    const nip04Dec = await decryptMuteListContent(signer, signer.pubkey, nip04Cipher)
+    expect(nip04Dec?.tags).toEqual(sampleTags)
+    expect(nip04Dec?.scheme).toBe('nip04')
+
+    // 3. End-to-end store tests with mocked nostrPool.query / publish
+    const initialPrivateTags: string[][] = [
+      ['p', pkB],
+      ['e', threadId],
+      ['word', 'scam'],
+    ]
+    const initialEvent = await signer.signEvent({
+      kind: KIND_MUTE_LIST,
+      created_at: 1_700_000_100,
+      tags: [['p', pkA]],
+      content: await encryptMuteListTags(signer, signer.pubkey, initialPrivateTags),
+    })
+
+    let latestRelayEvent = initialEvent
+    const publishedEvents: Array<typeof initialEvent> = []
+    const origQuery = nostrPool.query.bind(nostrPool)
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const prevAuth = useAuthStore.getState()
+
+    nostrPool.query = (async () => [latestRelayEvent]) as typeof nostrPool.query
+    nostrPool.publish = (async (relays, ev) => {
+      publishedEvents.push(ev)
+      latestRelayEvent = ev
+      return relays.map((relay) => ({ relay, ok: true }))
+    }) as typeof nostrPool.publish
+
+    try {
+      useNostrStore.getState().resetUserState()
+      useSettingsStore.setState({ mutedPubkeys: [], mutedHashtags: [], mutedWords: [] })
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+
+      // Rapid back-to-back blocks MUST serialize without losing either pubkey or any existing tags!
+      const [r1, r2] = await Promise.all([
+        useNostrStore.getState().blockPubkey(pkC, 'Spammer C'),
+        useNostrStore.getState().blockPubkey(pkD, 'Spammer D'),
+      ])
+      expect(r1.synced).toBe(true)
+      expect(r2.synced).toBe(true)
+      expect(publishedEvents).toHaveLength(2)
+      expect(publishedEvents[1].created_at).toBeGreaterThan(publishedEvents[0].created_at)
+
+      const finalDec = await decryptMuteListContent(signer, signer.pubkey, latestRelayEvent.content)
+      expect(finalDec?.tags).toEqual([
+        ['p', pkB],
+        ['e', threadId],
+        ['word', 'scam'],
+        ['p', pkC],
+        ['p', pkD],
+      ])
+      expect(latestRelayEvent.tags).toEqual([['p', pkA]])
+      expect(useSettingsStore.getState().privateMutedPubkeys).toContain(pkC)
+      expect(useSettingsStore.getState().privateMutedPubkeys).toContain(pkD)
+      // Private-only synced blocks must NOT leak into localStorage-persisted mutedPubkeys
+      expect(useSettingsStore.getState().mutedPubkeys).not.toContain(pkC)
+      expect(useSettingsStore.getState().mutedPubkeys).not.toContain(pkD)
+
+      // Unblocking pkA (public) and pkC (private) removes both and keeps everything else intact
+      const u1 = await useNostrStore.getState().unblockPubkey(pkA)
+      const u2 = await useNostrStore.getState().unblockPubkey(pkC)
+      expect(u1.synced).toBe(true)
+      expect(u2.synced).toBe(true)
+      expect(latestRelayEvent.tags).toEqual([])
+      const afterUnblock = await decryptMuteListContent(
+        signer,
+        signer.pubkey,
+        latestRelayEvent.content,
+      )
+      expect(afterUnblock?.tags).toEqual([
+        ['p', pkB],
+        ['e', threadId],
+        ['word', 'scam'],
+        ['p', pkD],
+      ])
+
+      // Push local-only blocks to encrypted Nostr kind-10000 and scrub them from localStorage
+      const pkLocal = 'f'.repeat(64)
+      useSettingsStore.getState().mutePubkey(pkLocal)
+      const pushRes = await useNostrStore.getState().pushLocalMutesToNostr()
+      expect(pushRes.pushedCount).toBe(1)
+      expect(pushRes.okCount).toBeGreaterThan(0)
+      expect(useSettingsStore.getState().mutedPubkeys).not.toContain(pkLocal)
+      expect(useSettingsStore.getState().privateMutedPubkeys).toContain(pkLocal)
+
+      // CRITICAL FAIL-CLOSED TEST: if signer rejects decryption on a fresh encrypted remote event,
+      // blockPubkey MUST NOT publish/overwrite the remote kind-10000 event!
+      const countBeforeLocked = publishedEvents.length
+      useNostrStore.getState().resetUserState()
+      const lockedSigner = {
+        method: 'nip07' as const,
+        pubkey: signer.pubkey,
+        canSign: true,
+        canEncrypt: true,
+        signEvent: (tpl: Parameters<typeof signer.signEvent>[0]) => signer.signEvent(tpl),
+        nip44Encrypt: (p: string, t: string) => signer.nip44Encrypt(p, t),
+        nip44Decrypt: async () => {
+          throw new Error('User rejected decryption')
+        },
+        nip04Decrypt: async () => {
+          throw new Error('User rejected decryption')
+        },
+        destroy: () => {},
+      }
+      useAuthStore.setState({ signer: lockedSigner, pubkey: signer.pubkey, method: 'nip07' })
+      const pkLocked = '1'.repeat(64)
+      const lockedRes = await useNostrStore.getState().blockPubkey(pkLocked)
+      expect(lockedRes.synced).toBe(false)
+      expect(publishedEvents).toHaveLength(countBeforeLocked)
+      // Still blocked locally so UX doesn't break
+      expect(useSettingsStore.getState().mutedPubkeys).toContain(pkLocked)
+    } finally {
+      nostrPool.query = origQuery
+      nostrPool.publish = origPublish
+      useNostrStore.getState().resetUserState()
+      useSettingsStore.setState({ mutedPubkeys: [], mutedHashtags: [], mutedWords: [] })
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      signer.destroy()
+    }
+  })
 })

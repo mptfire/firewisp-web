@@ -22,6 +22,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
+import { extractMuteItemsFromTags } from '../lib/nostr/lists'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -38,8 +39,15 @@ export function SettingsPage() {
   const publishRelayList = useNostrStore((s) => s.publishRelayList)
   const publishBlossomList = useNostrStore((s) => s.publishBlossomList)
   const syncMuteList = useNostrStore((s) => s.syncMuteList)
+  const unblockPubkey = useNostrStore((s) => s.unblockPubkey)
+  const muteHashtagGlobal = useNostrStore((s) => s.muteHashtagGlobal)
+  const unmuteHashtagGlobal = useNostrStore((s) => s.unmuteHashtagGlobal)
+  const unmuteWordGlobal = useNostrStore((s) => s.unmuteWordGlobal)
+  const pushLocalMutesToNostr = useNostrStore((s) => s.pushLocalMutesToNostr)
+  const rawMuteListEvent = useNostrStore((s) => s.rawMuteListEvent)
   const muteListSyncStatus = useNostrStore((s) => s.muteListSyncStatus)
   const muteListHasRemoteEncrypted = useNostrStore((s) => s.muteListHasRemoteEncrypted)
+  const muteListPublishing = useNostrStore((s) => s.muteListPublishing)
   const signer = useAuthStore((s) => s.signer)
   const pubkey = useAuthStore((s) => s.pubkey)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
@@ -77,6 +85,23 @@ export function SettingsPage() {
       return clean ? !localSet.has(clean) : false
     })
   }, [settings.relays, syncedNip65Relays])
+
+  const localUnsyncedMutesCount = useMemo(() => {
+    const pubRemote = extractMuteItemsFromTags(rawMuteListEvent?.tags || [])
+    const pubPks = new Set(pubRemote.pubkeys)
+    const pubTags = new Set(pubRemote.hashtags)
+    const pubWords = new Set(pubRemote.words)
+    return (
+      settings.mutedPubkeys.filter((p) => !pubPks.has(p)).length +
+      settings.mutedHashtags.filter((t) => !pubTags.has(t)).length +
+      settings.mutedWords.filter((w) => !pubWords.has(w)).length
+    )
+  }, [rawMuteListEvent, settings.mutedPubkeys, settings.mutedHashtags, settings.mutedWords])
+
+  const totalPrivateMutesCount =
+    settings.privateMutedPubkeys.length +
+    settings.privateMutedHashtags.length +
+    settings.privateMutedWords.length
 
   useEffect(() => {
     setNwcInput(settings.nwcUri)
@@ -797,46 +822,86 @@ export function SettingsPage() {
             Muted Hashtags &amp; Users
           </h2>
           {pubkey && (
-            <button
-              type="button"
-              disabled={muteListSyncStatus === 'syncing'}
-              onClick={async () => {
-                setMuteSyncMsg(null)
-                const res = await syncMuteList(pubkey)
-                if (res.status === 'locked') {
-                  setMuteSyncMsg(
-                    'Encrypted Nostr mute list found, but your signer did not decrypt it (approve NIP-44/NIP-04 in your extension or sign in with a signing key).',
-                  )
-                } else if (res.status === 'empty') {
-                  setMuteSyncMsg('No kind-10000 mute list found on your connected relays.')
-                } else {
-                  setMuteSyncMsg(
-                    `Synced from Nostr: ${res.privateCount} encrypted private + ${res.publicCount} public muted users.`,
-                  )
-                }
-              }}
-              className="px-2.5 py-1 rounded-lg bg-[#1d1f29] hover:bg-[#262936] disabled:opacity-50 border border-[#2a2d3a] text-[11px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 cursor-pointer"
-            >
-              {muteListSyncStatus === 'syncing' ? (
-                <Loader2 className="w-3 h-3 animate-spin text-[#f59f00]" />
-              ) : (
-                <RotateCcw className="w-3 h-3 text-[#f59f00]" />
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {signer?.canSign && localUnsyncedMutesCount > 0 && (
+                <button
+                  type="button"
+                  disabled={muteListPublishing || muteListSyncStatus === 'syncing'}
+                  onClick={async () => {
+                    setMuteSyncMsg(null)
+                    try {
+                      const res = await pushLocalMutesToNostr()
+                      if (res.pushedCount === 0) {
+                        setMuteSyncMsg('All local mutes are already in your Nostr kind-10000 list.')
+                      } else {
+                        setMuteSyncMsg(
+                          `Encrypted & synced ${res.pushedCount} local ${res.pushedCount === 1 ? 'entry' : 'entries'} to Nostr (${res.okCount}/${res.totalRelays} relays).`,
+                        )
+                      }
+                    } catch (err) {
+                      setMuteSyncMsg(
+                        err instanceof Error ? err.message : 'Failed to sync local mutes to Nostr',
+                      )
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  {muteListPublishing ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Send className="w-3 h-3" />
+                  )}
+                  Sync {localUnsyncedMutesCount} Local → Nostr
+                </button>
               )}
-              {muteListSyncStatus === 'syncing' ? 'Syncing…' : 'Sync Nostr Mute List'}
-            </button>
+              <button
+                type="button"
+                disabled={muteListSyncStatus === 'syncing' || muteListPublishing}
+                onClick={async () => {
+                  setMuteSyncMsg(null)
+                  const res = await syncMuteList(pubkey)
+                  if (res.status === 'locked') {
+                    setMuteSyncMsg(
+                      'Encrypted Nostr mute list found, but your signer did not decrypt it (approve NIP-44/NIP-04 in your extension or sign in with a signing key).',
+                    )
+                  } else if (res.status === 'empty') {
+                    setMuteSyncMsg('No kind-10000 mute list found on your connected relays.')
+                  } else {
+                    setMuteSyncMsg(
+                      `Synced from Nostr: ${res.privateCount} encrypted private + ${res.publicCount} public muted users.`,
+                    )
+                  }
+                }}
+                className="px-2.5 py-1 rounded-lg bg-[#1d1f29] hover:bg-[#262936] disabled:opacity-50 border border-[#2a2d3a] text-[11px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 cursor-pointer"
+              >
+                {muteListSyncStatus === 'syncing' ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-[#f59f00]" />
+                ) : (
+                  <RotateCcw className="w-3 h-3 text-[#f59f00]" />
+                )}
+                {muteListSyncStatus === 'syncing' ? 'Syncing…' : 'Sync Nostr Mute List'}
+              </button>
+            </div>
           )}
         </div>
+        <p className="text-[11px] text-[#8c8a82]">
+          {signer?.canSign
+            ? 'Global Nostr sync enabled (NIP-51 kind 10000): blocking, unblocking, and muting hashtags automatically encrypt (NIP-44) and sync across your Nostr clients while preserving all existing entries.'
+            : 'Sign in with a signing key to sync blocks & muted hashtags globally via encrypted Nostr kind 10000.'}
+        </p>
         {muteListSyncStatus === 'locked' && muteListHasRemoteEncrypted && (
           <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
-            Your Nostr account has an encrypted private mute list (kind 10000) that hasn&apos;t been decrypted yet. Click <strong>Sync Nostr Mute List</strong> and approve decryption in your signer to load it into RAM.
+            Your Nostr account has an encrypted private mute list (kind 10000) that hasn&apos;t been decrypted yet. Click <strong>Sync Nostr Mute List</strong> and approve decryption in your signer so new blocks merge safely without overwriting it.
           </p>
         )}
         {muteSyncMsg && <p className="text-xs text-[#f59f00]">{muteSyncMsg}</p>}
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            settings.muteHashtag(newMuteTag)
-            setNewMuteTag('')
+            if (newMuteTag.trim()) {
+              void muteHashtagGlobal(newMuteTag)
+              setNewMuteTag('')
+            }
           }}
           className="flex gap-2"
         >
@@ -849,7 +914,8 @@ export function SettingsPage() {
           />
           <button
             type="submit"
-            className="px-3.5 py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-xs font-semibold cursor-pointer"
+            disabled={muteListPublishing}
+            className="px-3.5 py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] disabled:opacity-50 text-xs font-semibold cursor-pointer"
           >
             Mute
           </button>
@@ -861,7 +927,7 @@ export function SettingsPage() {
               onClick={() => setMutedTagsOpen((o) => !o)}
               className="w-full px-3 py-2.5 flex items-center justify-between text-xs font-medium text-[#d4d2cb] hover:bg-white/[0.03] cursor-pointer"
             >
-              <span>Muted hashtags ({settings.mutedHashtags.length})</span>
+              <span>Muted hashtags — Local &amp; Public ({settings.mutedHashtags.length})</span>
               <ChevronDown
                 className={`w-4 h-4 text-[#8c8a82] transition-transform ${mutedTagsOpen ? 'rotate-180' : ''}`}
               />
@@ -871,7 +937,8 @@ export function SettingsPage() {
                 {settings.mutedHashtags.map((tag) => (
                   <button
                     key={tag}
-                    onClick={() => settings.unmuteHashtag(tag)}
+                    type="button"
+                    onClick={() => void unmuteHashtagGlobal(tag)}
                     className="px-2.5 py-1 rounded-full bg-[#1a1c24] border border-[#2d3040] text-xs text-[#d4d2cb] hover:border-red-400 cursor-pointer"
                   >
                     #{tag} ×
@@ -916,7 +983,8 @@ export function SettingsPage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => settings.unmutePubkey(pk)}
+                        type="button"
+                        onClick={() => void unblockPubkey(pk, label)}
                         className="text-red-400 hover:text-red-300 hover:underline shrink-0 cursor-pointer"
                       >
                         Unblock
@@ -928,7 +996,7 @@ export function SettingsPage() {
             )}
           </div>
         )}
-        {settings.privateMutedPubkeys.length > 0 && (
+        {totalPrivateMutesCount > 0 && (
           <div className="rounded-xl bg-[#15161c] border border-emerald-500/25 overflow-hidden">
             <button
               type="button"
@@ -937,17 +1005,55 @@ export function SettingsPage() {
             >
               <span className="flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                Encrypted Private Mutes — Nostr kind-10000 ({settings.privateMutedPubkeys.length})
+                Encrypted Private Mutes — Nostr kind-10000 ({totalPrivateMutesCount})
               </span>
               <ChevronDown
                 className={`w-4 h-4 text-[#8c8a82] transition-transform ${privateMutedUsersOpen ? 'rotate-180' : ''}`}
               />
             </button>
             {privateMutedUsersOpen && (
-              <div className="divide-y divide-[#20222c] border-t border-[#20222c] max-h-64 overflow-y-auto">
+              <div className="divide-y divide-[#20222c] border-t border-[#20222c] max-h-72 overflow-y-auto">
                 <div className="px-3 py-1.5 text-[11px] text-[#8c8a82] bg-[#111218]">
-                  Decrypted strictly in RAM (never saved to localStorage · cleared on Sign Out).
+                  Encrypted with NIP-44 on Nostr (kind 10000) · Decrypted in RAM only (never saved to localStorage). Unblocking syncs across all clients.
                 </div>
+                {settings.privateMutedHashtags.length > 0 && (
+                  <div className="px-3 py-2 space-y-1.5">
+                    <div className="text-[11px] text-[#9a9890] font-medium">
+                      Private muted hashtags ({settings.privateMutedHashtags.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {settings.privateMutedHashtags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => void unmuteHashtagGlobal(tag)}
+                          className="px-2 py-0.5 rounded-full bg-[#1a1c24] border border-emerald-500/25 text-[11px] text-[#d4d2cb] hover:border-red-400 cursor-pointer"
+                        >
+                          #{tag} ×
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {settings.privateMutedWords.length > 0 && (
+                  <div className="px-3 py-2 space-y-1.5">
+                    <div className="text-[11px] text-[#9a9890] font-medium">
+                      Private muted words ({settings.privateMutedWords.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {settings.privateMutedWords.map((word) => (
+                        <button
+                          key={word}
+                          type="button"
+                          onClick={() => void unmuteWordGlobal(word)}
+                          className="px-2 py-0.5 rounded-full bg-[#1a1c24] border border-emerald-500/25 text-[11px] text-[#d4d2cb] hover:border-red-400 cursor-pointer"
+                        >
+                          {word} ×
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {settings.privateMutedPubkeys.map((pk) => {
                   const p = profiles[pk]
                   let npub = pk
@@ -969,10 +1075,11 @@ export function SettingsPage() {
                         </div>
                       </div>
                       <button
-                        onClick={() => settings.unmutePubkey(pk)}
+                        type="button"
+                        onClick={() => void unblockPubkey(pk, label)}
                         className="text-red-400 hover:text-red-300 hover:underline shrink-0 cursor-pointer"
                       >
-                        Unmute (session)
+                        Unblock
                       </button>
                     </div>
                   )
@@ -991,7 +1098,7 @@ export function SettingsPage() {
                 <button
                   key={word}
                   type="button"
-                  onClick={() => settings.removeMutedWord(word)}
+                  onClick={() => void unmuteWordGlobal(word)}
                   className="px-2.5 py-1 rounded-full bg-[#1a1c24] border border-[#2d3040] text-xs text-[#d4d2cb] hover:border-red-400 cursor-pointer"
                 >
                   {word} ×

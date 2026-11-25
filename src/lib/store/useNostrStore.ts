@@ -7,10 +7,18 @@ import { sanitizePublicRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
 import {
+  applyMuteListMutations,
   buildBud03BlossomListTags,
   buildNip65RelayListTags,
+  computeNextReplaceableCreatedAt,
+  decryptMuteListContent,
+  encryptMuteListTags,
+  extractMuteItemsFromTags,
   KIND_BLOSSOM_SERVER_LIST,
+  KIND_MUTE_LIST,
   KIND_RELAY_LIST,
+  normalizeMuteValue,
+  type MuteListMutation,
 } from '../nostr/lists'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
@@ -105,6 +113,7 @@ export interface NostrState {
   followsLoaded: boolean
   rawFollowsEvent: Event | null
   rawBookmarksEvent: Event | null
+  rawMuteListEvent: Event | null
 
   // Feed UI state (persisted across route transitions so Back never resets tab!)
   activeFeedTab: FeedTab
@@ -131,6 +140,7 @@ export interface NostrState {
   readNotificationIds: Record<string, true>
   muteListSyncStatus: 'idle' | 'syncing' | 'synced' | 'locked' | 'empty'
   muteListHasRemoteEncrypted: boolean
+  muteListPublishing: boolean
   dms: DecryptedDm[]
 
   loadingFeed: boolean
@@ -174,6 +184,36 @@ export interface NostrState {
   toggleRepost: (target: Event) => Promise<void>
   toggleFollow: (targetPubkey: string) => Promise<void>
   toggleBookmark: (eventId: string) => Promise<void>
+  blockPubkey: (targetPubkey: string, displayName?: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
+  unblockPubkey: (targetPubkey: string, displayName?: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
+  muteHashtagGlobal: (tag: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
+  unmuteHashtagGlobal: (tag: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
+  unmuteWordGlobal: (word: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
+  pushLocalMutesToNostr: () => Promise<{
+    pushedCount: number
+    okCount: number
+    totalRelays: number
+  }>
   publishRelayList: (relays: RelayEntry[]) => Promise<{
     okCount: number
     totalRelays: number
@@ -283,6 +323,219 @@ const repostSeen = new Set<string>()
 const zapSeen = new Set<string>()
 const seenDmWraps = new Set<string>()
 
+// RAM-only cache of the latest decrypted NIP-51 kind-10000 private tags (wiped on Sign Out).
+// Prevents repeated NIP-07 / Bunker decrypt prompts during consecutive blocks while ALWAYS querying
+// relays first so updates made from other Nostr clients are never overwritten.
+let decryptedMuteListCache: { eventId: string; privateTags: string[][] } | null = null
+let muteMutationTail: Promise<void> = Promise.resolve()
+
+function enqueueMuteMutation<T>(task: () => Promise<T>): Promise<T> {
+  const run = muteMutationTail.then(task, task)
+  muteMutationTail = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+function applyVerifiedMuteTagsToSettings(
+  publicTags: readonly string[][],
+  privateTags: readonly string[][],
+) {
+  const pubItems = extractMuteItemsFromTags(publicTags)
+  const privItems = extractMuteItemsFromTags(privateTags)
+  const st = useSettingsStore.getState()
+  if (pubItems.pubkeys.length > 0 || pubItems.hashtags.length > 0 || pubItems.words.length > 0) {
+    st.mergeRemoteMutes(pubItems)
+  }
+  st.setPrivateMutes(privItems)
+  // Keep private-only encrypted mutes out of plaintext localStorage so they stay encrypted-only
+  // and never appear duplicated in both Settings lists.
+  const pubPkSet = new Set(pubItems.pubkeys)
+  const pubTagSet = new Set(pubItems.hashtags)
+  const pubWordSet = new Set(pubItems.words)
+  st.removeLocalMutes({
+    pubkeys: privItems.pubkeys.filter((p) => !pubPkSet.has(p)),
+    hashtags: privItems.hashtags.filter((t) => !pubTagSet.has(t)),
+    words: privItems.words.filter((w) => !pubWordSet.has(w)),
+  })
+  return { pubItems, privItems }
+}
+
+type MuteSyncOutcome = {
+  status: 'published' | 'unchanged' | 'locked' | 'no-signer' | 'no-encrypt' | 'relay-failed'
+  okCount: number
+  totalRelays: number
+  error?: string
+}
+
+async function mutateNostrMuteList(
+  mutations: MuteListMutation[],
+  get: () => NostrState,
+  set: (partial: Partial<NostrState> | ((s: NostrState) => Partial<NostrState>)) => void,
+): Promise<MuteSyncOutcome> {
+  const signer = useAuthStore.getState().signer
+  if (!signer?.canSign) {
+    return { status: 'no-signer', okCount: 0, totalRelays: 0 }
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { status: 'relay-failed', okCount: 0, totalRelays: 0, error: 'Offline' }
+  }
+
+  const pubkey = signer.pubkey.toLowerCase()
+  set({ muteListPublishing: true })
+  try {
+    const readRelays = [
+      ...new Set([
+        ...useSettingsStore.getState().getReadRelays(),
+        ...get().userReadRelays,
+        ...get().userWriteRelays,
+        ...DEFAULT_RELAYS.map((r) => r.url),
+      ]),
+    ].slice(0, 12)
+
+    const cached = get().rawMuteListEvent
+    const hasValidCached = Boolean(cached && cached.pubkey.toLowerCase() === pubkey)
+
+    // If we don't have a cached kind-10000 yet and relays are still connecting, wait briefly
+    // before querying so a freshly opened session never mistakes a cold socket for an empty list.
+    if (!hasValidCached) {
+      const statuses = nostrPool.getStatuses()
+      const knownCount = Object.keys(statuses).length
+      const hasConnected = readRelays.some((u) => statuses[u] === 'connected')
+      if (knownCount > 0 && !hasConnected) {
+        await nostrPool.ensureConnected(readRelays.slice(0, 6)).catch(() => {})
+      }
+    }
+
+    let fetched: Event[] = []
+    let queryFailed = false
+    try {
+      fetched = await nostrPool.query(
+        readRelays,
+        { kinds: [KIND_MUTE_LIST], authors: [pubkey], limit: 4 },
+        4500,
+      )
+    } catch {
+      queryFailed = true
+    }
+
+    if (queryFailed && !hasValidCached) {
+      return { status: 'relay-failed', okCount: 0, totalRelays: 0 }
+    }
+
+    const candidates = hasValidCached && cached ? [...fetched, cached] : fetched
+    const baseEvent =
+      candidates.length > 0
+        ? [...candidates].sort((a, b) => b.created_at - a.created_at)[0]
+        : null
+
+    // Fail-closed guard: if we previously detected an encrypted remote mute list for this user
+    // and relays returned nothing now, refuse to overwrite it with a fresh list.
+    if (!baseEvent && get().muteListHasRemoteEncrypted) {
+      return { status: 'locked', okCount: 0, totalRelays: 0 }
+    }
+
+    let existingPrivateTags: string[][] = []
+    if (baseEvent?.content && baseEvent.content.trim()) {
+      if (decryptedMuteListCache && decryptedMuteListCache.eventId === baseEvent.id) {
+        existingPrivateTags = decryptedMuteListCache.privateTags.map((t) => [...t])
+      } else {
+        const dec = await decryptMuteListContent(signer, pubkey, baseEvent.content)
+        if (!dec) {
+          // CRITICAL FAIL-CLOSED: Never overwrite an encrypted kind-10000 we could not decrypt!
+          set({
+            rawMuteListEvent: baseEvent,
+            muteListHasRemoteEncrypted: true,
+            muteListSyncStatus: 'locked',
+          })
+          return { status: 'locked', okCount: 0, totalRelays: 0 }
+        }
+        existingPrivateTags = dec.tags
+        decryptedMuteListCache = {
+          eventId: baseEvent.id,
+          privateTags: dec.tags.map((t) => [...t]),
+        }
+      }
+    }
+
+    const { publicTags, privateTags, changed } = applyMuteListMutations({
+      publicTags: baseEvent?.tags || [],
+      privateTags: existingPrivateTags,
+      mutations,
+    })
+
+    if (!changed) {
+      if (baseEvent) {
+        set({
+          rawMuteListEvent: baseEvent,
+          muteListSyncStatus: 'synced',
+          muteListHasRemoteEncrypted: privateTags.length > 0,
+        })
+        applyVerifiedMuteTagsToSettings(publicTags, privateTags)
+      }
+      return { status: 'unchanged', okCount: 0, totalRelays: 0 }
+    }
+
+    let encryptedContent = ''
+    try {
+      encryptedContent = await encryptMuteListTags(signer, pubkey, privateTags)
+    } catch (err) {
+      return {
+        status: 'no-encrypt',
+        okCount: 0,
+        totalRelays: 0,
+        error: err instanceof Error ? err.message : 'Encryption unavailable',
+      }
+    }
+
+    let signed: Event
+    try {
+      signed = await signer.signEvent({
+        kind: KIND_MUTE_LIST,
+        created_at: computeNextReplaceableCreatedAt(baseEvent),
+        tags: publicTags,
+        content: encryptedContent,
+      })
+    } catch (err) {
+      return {
+        status: 'locked',
+        okCount: 0,
+        totalRelays: 0,
+        error: err instanceof Error ? err.message : 'Signing declined',
+      }
+    }
+
+    const targets = [
+      ...new Set([
+        ...get().userWriteRelays,
+        ...useSettingsStore.getState().getWriteRelays(),
+        ...DEFAULT_RELAYS.map((r) => r.url),
+      ]),
+    ].slice(0, 14)
+
+    const results = await nostrPool.publish(targets, signed)
+    const okCount = results.filter((r) => r.ok).length
+    if (okCount === 0) {
+      return { status: 'relay-failed', okCount: 0, totalRelays: targets.length }
+    }
+
+    decryptedMuteListCache = {
+      eventId: signed.id,
+      privateTags: privateTags.map((t) => [...t]),
+    }
+    set({
+      rawMuteListEvent: signed,
+      muteListSyncStatus: 'synced',
+      muteListHasRemoteEncrypted: privateTags.length > 0,
+    })
+    applyVerifiedMuteTagsToSettings(publicTags, privateTags)
+    return { status: 'published', okCount, totalRelays: targets.length }
+  } finally {
+    set({ muteListPublishing: false })
+  }
+}
+
 function clipStr(val: unknown, maxLen: number): string | undefined {
   return typeof val === 'string' && val.length > 0 ? val.slice(0, maxLen) : undefined
 }
@@ -385,6 +638,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   followsLoaded: false,
   rawFollowsEvent: null,
   rawBookmarksEvent: null,
+  rawMuteListEvent: null,
 
   activeFeedTab: 'foryou',
   showRepliesInFollows: false,
@@ -426,6 +680,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   readNotificationIds: {},
   muteListSyncStatus: 'idle',
   muteListHasRemoteEncrypted: false,
+  muteListPublishing: false,
   dms: [],
 
   loadingFeed: false,
@@ -484,6 +739,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   resetUserState: () => {
     seenDmWraps.clear()
+    decryptedMuteListCache = null
     useSettingsStore.getState().clearPrivateSessionMutes()
     if (typeof localStorage !== 'undefined') {
       try {
@@ -500,6 +756,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       followsLoaded: false,
       rawFollowsEvent: null,
       rawBookmarksEvent: null,
+      rawMuteListEvent: null,
       followedHashtags: [],
       userReadRelays: [],
       userWriteRelays: [],
@@ -518,6 +775,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       readNotificationIds: {},
       muteListSyncStatus: 'idle',
       muteListHasRemoteEncrypted: false,
+      muteListPublishing: false,
       dms: [],
     }))
   },
@@ -829,78 +1087,29 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       // Public tags go to persisted settings; decrypted private tags stay strictly in RAM!
       if (allMuteEvents.length > 0) {
         const latestMute = [...allMuteEvents].sort((a, b) => b.created_at - a.created_at)[0]
-        const pubPubkeys: string[] = []
-        const pubHashtags: string[] = []
-        const pubWords: string[] = []
-        for (const t of latestMute.tags) {
-          if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubPubkeys.push(t[1].toLowerCase())
-          else if (t[0] === 't' && t[1]) pubHashtags.push(t[1])
-          else if (t[0] === 'word' && t[1]) pubWords.push(t[1])
-        }
-        if (pubPubkeys.length > 0 || pubHashtags.length > 0 || pubWords.length > 0) {
-          useSettingsStore
-            .getState()
-            .mergeRemoteMutes({ pubkeys: pubPubkeys, hashtags: pubHashtags, words: pubWords })
+        set({ rawMuteListEvent: latestMute })
+        const pubItems = extractMuteItemsFromTags(latestMute.tags)
+        if (pubItems.pubkeys.length > 0 || pubItems.hashtags.length > 0 || pubItems.words.length > 0) {
+          useSettingsStore.getState().mergeRemoteMutes(pubItems)
         }
 
-        if (latestMute.content) {
+        if (latestMute.content && latestMute.content.trim()) {
           set({ muteListHasRemoteEncrypted: true })
           const signer = useAuthStore.getState().signer
-          let decrypted: string | null = null
-          const looksNip04 = latestMute.content.includes('?iv=')
-          if (signer) {
-            if (looksNip04 && signer.nip04Decrypt) {
-              try {
-                decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
-              } catch {
-                // try NIP-44 fallback below
-              }
+          const dec = await decryptMuteListContent(signer, pubkey, latestMute.content)
+          if (dec) {
+            decryptedMuteListCache = {
+              eventId: latestMute.id,
+              privateTags: dec.tags.map((t) => [...t]),
             }
-            if (!decrypted && signer.canEncrypt) {
-              try {
-                decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
-              } catch {
-                // try NIP-04 fallback below
-              }
-            }
-            if (!decrypted && !looksNip04 && signer.nip04Decrypt) {
-              try {
-                decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
-              } catch {
-                // signer declined or incompatible format
-              }
-            }
-          }
-          if (decrypted) {
-            try {
-              const parsed = JSON.parse(decrypted) as unknown
-              if (Array.isArray(parsed)) {
-                const privPubkeys: string[] = []
-                const privHashtags: string[] = []
-                const privWords: string[] = []
-                for (const item of parsed) {
-                  if (!Array.isArray(item) || !item.every((x) => typeof x === 'string')) continue
-                  const t = item as string[]
-                  if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) privPubkeys.push(t[1].toLowerCase())
-                  else if (t[0] === 't' && t[1]) privHashtags.push(t[1])
-                  else if (t[0] === 'word' && t[1]) privWords.push(t[1])
-                }
-                if (privPubkeys.length > 0 || privHashtags.length > 0 || privWords.length > 0) {
-                  useSettingsStore
-                    .getState()
-                    .mergePrivateMutes({ pubkeys: privPubkeys, hashtags: privHashtags, words: privWords })
-                }
-                set({ muteListSyncStatus: 'synced' })
-              } else {
-                set({ muteListSyncStatus: 'synced' })
-              }
-            } catch {
-              set({ muteListSyncStatus: 'locked' })
-            }
+            applyVerifiedMuteTagsToSettings(latestMute.tags, dec.tags)
+            set({ muteListSyncStatus: 'synced' })
           } else {
             set({ muteListSyncStatus: 'locked' })
           }
         } else {
+          decryptedMuteListCache = { eventId: latestMute.id, privateTags: [] }
+          useSettingsStore.getState().setPrivateMutes({ pubkeys: [], hashtags: [], words: [] })
           set({ muteListHasRemoteEncrypted: false, muteListSyncStatus: 'synced' })
         }
       } else {
@@ -955,12 +1164,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   syncMuteList: async (pubkey) => {
     set({ muteListSyncStatus: 'syncing' })
     const relays = [
-      ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
+      ...new Set([
+        ...useSettingsStore.getState().getReadRelays(),
+        ...get().userReadRelays,
+        ...get().userWriteRelays,
+      ]),
     ].slice(0, 12)
     try {
       const muteEvents = await nostrPool.query(
         relays,
-        { kinds: [10000], authors: [pubkey], limit: 4 },
+        { kinds: [KIND_MUTE_LIST], authors: [pubkey], limit: 4 },
         4500,
       )
       if (muteEvents.length === 0) {
@@ -968,74 +1181,35 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return { publicCount: 0, privateCount: 0, status: 'empty' }
       }
       const latestMute = [...muteEvents].sort((a, b) => b.created_at - a.created_at)[0]
-      const pubPubkeys: string[] = []
-      const pubHashtags: string[] = []
-      const pubWords: string[] = []
-      for (const t of latestMute.tags) {
-        if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubPubkeys.push(t[1].toLowerCase())
-        else if (t[0] === 't' && t[1]) pubHashtags.push(t[1])
-        else if (t[0] === 'word' && t[1]) pubWords.push(t[1])
+      set({ rawMuteListEvent: latestMute })
+      const pubItems = extractMuteItemsFromTags(latestMute.tags)
+      if (pubItems.pubkeys.length > 0 || pubItems.hashtags.length > 0 || pubItems.words.length > 0) {
+        useSettingsStore.getState().mergeRemoteMutes(pubItems)
       }
-      if (pubPubkeys.length > 0 || pubHashtags.length > 0 || pubWords.length > 0) {
-        useSettingsStore
-          .getState()
-          .mergeRemoteMutes({ pubkeys: pubPubkeys, hashtags: pubHashtags, words: pubWords })
-      }
-      if (!latestMute.content) {
+      if (!latestMute.content || !latestMute.content.trim()) {
+        decryptedMuteListCache = { eventId: latestMute.id, privateTags: [] }
+        useSettingsStore.getState().setPrivateMutes({ pubkeys: [], hashtags: [], words: [] })
         set({ muteListSyncStatus: 'synced', muteListHasRemoteEncrypted: false })
-        return { publicCount: pubPubkeys.length, privateCount: 0, status: 'synced' }
+        return { publicCount: pubItems.pubkeys.length, privateCount: 0, status: 'synced' }
       }
       set({ muteListHasRemoteEncrypted: true })
       const signer = useAuthStore.getState().signer
-      let decrypted: string | null = null
-      const looksNip04 = latestMute.content.includes('?iv=')
-      if (signer) {
-        if (looksNip04 && signer.nip04Decrypt) {
-          try {
-            decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
-          } catch {
-            // try NIP-44 fallback
-          }
-        }
-        if (!decrypted && signer.canEncrypt) {
-          try {
-            decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
-          } catch {
-            // try NIP-04 fallback
-          }
-        }
-        if (!decrypted && !looksNip04 && signer.nip04Decrypt) {
-          try {
-            decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
-          } catch {
-            // signer declined
-          }
-        }
-      }
-      if (!decrypted) {
+      const dec = await decryptMuteListContent(signer, pubkey, latestMute.content)
+      if (!dec) {
         set({ muteListSyncStatus: 'locked' })
-        return { publicCount: pubPubkeys.length, privateCount: 0, status: 'locked' }
+        return { publicCount: pubItems.pubkeys.length, privateCount: 0, status: 'locked' }
       }
-      const parsed = JSON.parse(decrypted) as unknown
-      const privPubkeys: string[] = []
-      const privHashtags: string[] = []
-      const privWords: string[] = []
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (!Array.isArray(item) || !item.every((x) => typeof x === 'string')) continue
-          const t = item as string[]
-          if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) privPubkeys.push(t[1].toLowerCase())
-          else if (t[0] === 't' && t[1]) privHashtags.push(t[1])
-          else if (t[0] === 'word' && t[1]) privWords.push(t[1])
-        }
-        if (privPubkeys.length > 0 || privHashtags.length > 0 || privWords.length > 0) {
-          useSettingsStore
-            .getState()
-            .mergePrivateMutes({ pubkeys: privPubkeys, hashtags: privHashtags, words: privWords })
-        }
+      decryptedMuteListCache = {
+        eventId: latestMute.id,
+        privateTags: dec.tags.map((t) => [...t]),
       }
+      const { privItems } = applyVerifiedMuteTagsToSettings(latestMute.tags, dec.tags)
       set({ muteListSyncStatus: 'synced' })
-      return { publicCount: pubPubkeys.length, privateCount: privPubkeys.length, status: 'synced' }
+      return {
+        publicCount: pubItems.pubkeys.length,
+        privateCount: privItems.pubkeys.length,
+        status: 'synced',
+      }
     } catch {
       set({ muteListSyncStatus: 'locked' })
       return { publicCount: 0, privateCount: 0, status: 'locked' }
@@ -2234,6 +2408,202 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         // Local bookmark still saved
       }
     }
+  },
+
+  blockPubkey: async (targetPubkey, displayName) => {
+    const clean = normalizeMuteValue('p', targetPubkey)
+    if (!clean) return { synced: false, okCount: 0, totalRelays: 0 }
+    const label = displayName?.trim() || `${clean.slice(0, 8)}…`
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useSettingsStore.getState().mutePubkey(clean)
+      set({ toastMessage: `Blocked ${label} (local only — sign in to sync globally)` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    // Optimistically hide immediately in RAM (never leaked to plaintext localStorage while syncing)
+    useSettingsStore.getState().addPrivateMute('p', clean)
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'add', type: 'p', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Blocked ${label} · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `${label} is already in your Nostr mute list` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    // Safety fallback: keep blocked locally so the user stays hidden on this device
+    useSettingsStore.getState().mutePubkey(clean)
+    if (res.status === 'locked') {
+      set({
+        toastMessage: `Blocked ${label} locally — approve Nostr decryption/signing in Settings to sync globally`,
+      })
+    } else if (res.status === 'no-encrypt') {
+      set({
+        toastMessage: `Blocked ${label} locally — ${res.error || 'signer cannot encrypt mute list'}`,
+      })
+    } else {
+      set({ toastMessage: `Blocked ${label} locally — relays did not confirm Nostr sync` })
+    }
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  unblockPubkey: async (targetPubkey, displayName) => {
+    const clean = normalizeMuteValue('p', targetPubkey)
+    if (!clean) return { synced: false, okCount: 0, totalRelays: 0 }
+    const label = displayName?.trim() || `${clean.slice(0, 8)}…`
+    useSettingsStore.getState().unmutePubkey(clean)
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      set({ toastMessage: `Unblocked ${label}` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'remove', type: 'p', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Unblocked ${label} · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `Unblocked ${label}` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    if (res.status === 'locked') {
+      set({
+        toastMessage: `Unblocked ${label} for this session — approve decryption/signing to update Nostr mute list`,
+      })
+    } else {
+      set({ toastMessage: `Unblocked ${label} locally — relays did not confirm Nostr sync` })
+    }
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  muteHashtagGlobal: async (tag) => {
+    const clean = normalizeMuteValue('t', tag)
+    if (!clean) return { synced: false, okCount: 0, totalRelays: 0 }
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useSettingsStore.getState().muteHashtag(clean)
+      set({ toastMessage: `Muted #${clean} (local only)` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    useSettingsStore.getState().addPrivateMute('t', clean)
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'add', type: 't', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Muted #${clean} · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `#${clean} is already in your Nostr mute list` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    useSettingsStore.getState().muteHashtag(clean)
+    set({ toastMessage: `Muted #${clean} locally — could not sync to Nostr` })
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  unmuteHashtagGlobal: async (tag) => {
+    const clean = normalizeMuteValue('t', tag)
+    if (!clean) return { synced: false, okCount: 0, totalRelays: 0 }
+    useSettingsStore.getState().unmuteHashtag(clean)
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      set({ toastMessage: `Unmuted #${clean}` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'remove', type: 't', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Unmuted #${clean} · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `Unmuted #${clean}` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    set({ toastMessage: `Unmuted #${clean} locally — could not sync to Nostr` })
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  unmuteWordGlobal: async (word) => {
+    const clean = normalizeMuteValue('word', word)
+    if (!clean) return { synced: false, okCount: 0, totalRelays: 0 }
+    useSettingsStore.getState().removeMutedWord(clean)
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      set({ toastMessage: `Removed muted word "${clean}"` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'remove', type: 'word', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Removed muted word "${clean}" · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `Removed muted word "${clean}"` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    set({ toastMessage: `Removed muted word "${clean}" locally — could not sync to Nostr` })
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  pushLocalMutesToNostr: async () => {
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useAuthStore.getState().openAuthModal()
+      throw new Error('Sign in with a signing method (NIP-07, Bunker, or key) to sync mutes to Nostr')
+    }
+    const st = useSettingsStore.getState()
+    const pubRemote = extractMuteItemsFromTags(get().rawMuteListEvent?.tags || [])
+    const pubPkSet = new Set(pubRemote.pubkeys)
+    const pubTagSet = new Set(pubRemote.hashtags)
+    const pubWordSet = new Set(pubRemote.words)
+
+    const localPubkeys = st.mutedPubkeys.filter((p) => !pubPkSet.has(p))
+    const localTags = st.mutedHashtags.filter((t) => !pubTagSet.has(t))
+    const localWords = st.mutedWords.filter((w) => !pubWordSet.has(w))
+    const mutations: MuteListMutation[] = [
+      ...localPubkeys.map((value) => ({ op: 'add' as const, type: 'p' as const, value })),
+      ...localTags.map((value) => ({ op: 'add' as const, type: 't' as const, value })),
+      ...localWords.map((value) => ({ op: 'add' as const, type: 'word' as const, value })),
+    ]
+    if (mutations.length === 0) {
+      return { pushedCount: 0, okCount: 0, totalRelays: 0 }
+    }
+    const res = await enqueueMuteMutation(() => mutateNostrMuteList(mutations, get, set))
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Synced ${mutations.length} local ${mutations.length === 1 ? 'mute' : 'mutes'} to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { pushedCount: mutations.length, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      return { pushedCount: 0, okCount: 0, totalRelays: 0 }
+    }
+    if (res.status === 'locked') {
+      throw new Error('Approve decryption & signing in your Nostr signer first so your existing encrypted mute list is preserved')
+    }
+    if (res.status === 'no-encrypt') {
+      throw new Error(res.error || 'Your signer does not support NIP-44 or NIP-04 encryption')
+    }
+    throw new Error('Relays did not confirm your updated kind-10000 mute list — try again')
   },
 
   publishRelayList: async (relays) => {
