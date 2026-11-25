@@ -269,7 +269,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
             />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 pointer-events-none" />
-          {/* Center play controls: Big Play (normal stream) + smaller Mini Play (Mini-player) */}
+          {/* Center play controls: Big Yellow Full Play + smaller Red Mini Play (Mini-player) */}
           <div
             className={`absolute inset-0 z-20 flex items-center justify-center gap-2.5 transition pointer-events-none ${
               previewStatus === 'playing'
@@ -282,13 +282,14 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               onClick={handleActivateStream}
               title={inlineMediaPlayback ? `Play ${title}` : `Open ${title} on Live screen`}
               aria-label={inlineMediaPlayback ? `Play ${title}` : `Open ${title} on Live screen`}
-              className={`pointer-events-auto w-12 h-12 rounded-full text-white flex items-center justify-center shadow-xl transition hover:scale-105 cursor-pointer ${
+              className={`pointer-events-auto w-12 h-12 rounded-full text-black flex flex-col items-center justify-center gap-[1px] border border-yellow-200/70 shadow-xl transition hover:scale-105 cursor-pointer ${
                 previewStatus === 'playing'
-                  ? 'bg-[#e8590c]/80 hover:bg-[#e8590c] backdrop-blur-xs'
-                  : 'bg-[#e8590c]/95 hover:bg-[#e8590c]'
+                  ? 'bg-yellow-400/85 hover:bg-yellow-400 backdrop-blur-xs'
+                  : 'bg-yellow-400/95 hover:bg-yellow-300'
               }`}
             >
-              <Play className="w-5 h-5 fill-white ml-0.5" />
+              <Play className="w-4 h-4 fill-black ml-0.5" />
+              <span className="text-[9px] font-extrabold leading-none tracking-tight">Full</span>
             </button>
             <button
               type="button"
@@ -308,7 +309,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               }}
               title="Open in Mini-player"
               aria-label={`Play ${title} in mini-player`}
-              className="pointer-events-auto w-9 h-9 rounded-full bg-black/75 hover:bg-[#e8590c] border border-white/25 hover:border-[#ff922b] backdrop-blur-xs text-white flex flex-col items-center justify-center gap-[1px] shadow-xl transition hover:scale-105 cursor-pointer"
+              className="pointer-events-auto w-9 h-9 rounded-full bg-red-600/90 hover:bg-red-500 border border-red-300/50 backdrop-blur-xs text-white flex flex-col items-center justify-center gap-[1px] shadow-xl transition hover:scale-105 cursor-pointer"
             >
               <Play className="w-3 h-3 fill-white ml-0.5" />
               <span className="text-[8px] font-bold leading-none tracking-tight">Mini</span>
