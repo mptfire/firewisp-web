@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Check,
+  Headphones,
   Maximize,
   Minimize,
   Pause,
@@ -31,6 +32,7 @@ interface VideoControlBarProps {
   muted: boolean
   canBoost: boolean
   vuEnabled: boolean
+  hideVolumeSlider?: boolean
   currentTime: number
   duration: number
   bufferedEnd: number
@@ -41,6 +43,10 @@ interface VideoControlBarProps {
   selectedQuality?: number // -1 = Auto
   activeQualityHeight?: number
   activeQualityBitrate?: number
+  isSingleBitrate?: boolean
+  audioOnly?: boolean
+  canAudioOnly?: boolean
+  mobileDataSaving?: boolean
   onTogglePlay: () => void
   onToggleMute: () => void
   onVolumeChange: (nextVol: number) => void
@@ -48,6 +54,7 @@ interface VideoControlBarProps {
   onJumpToLive?: () => void
   onCycleSpeed?: () => void
   onSelectQuality?: (levelIndex: number) => void
+  onToggleAudioOnly?: () => void
   onPopOut?: () => void
   onToggleFullscreen: () => void
   onInteract?: () => void
@@ -138,6 +145,7 @@ export function VideoControlBar({
   muted,
   canBoost,
   vuEnabled,
+  hideVolumeSlider = false,
   currentTime,
   duration,
   bufferedEnd,
@@ -148,6 +156,10 @@ export function VideoControlBar({
   selectedQuality = -1,
   activeQualityHeight,
   activeQualityBitrate,
+  isSingleBitrate = false,
+  audioOnly = false,
+  canAudioOnly = false,
+  mobileDataSaving = false,
   onTogglePlay,
   onToggleMute,
   onVolumeChange,
@@ -155,6 +167,7 @@ export function VideoControlBar({
   onJumpToLive,
   onCycleSpeed,
   onSelectQuality,
+  onToggleAudioOnly,
   onPopOut,
   onToggleFullscreen,
   onInteract,
@@ -319,37 +332,39 @@ export function VideoControlBar({
                 <VolumeIcon className="w-3.5 h-3.5" />
               </button>
 
-              <div className={`relative flex items-center ${compact ? 'w-14 sm:w-16' : 'w-20 sm:w-28'}`}>
-                {canBoost && (
-                  <span
-                    aria-hidden="true"
-                    title="100% normal volume"
-                    className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[1.5px] bg-white/35 pointer-events-none z-10 rounded-full"
+              {!hideVolumeSlider && (
+                <div className={`relative flex items-center ${compact ? 'w-14 sm:w-16' : 'w-20 sm:w-28'}`}>
+                  {canBoost && (
+                    <span
+                      aria-hidden="true"
+                      title="100% normal volume"
+                      className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[1.5px] bg-white/35 pointer-events-none z-10 rounded-full"
+                    />
+                  )}
+                  <input
+                    type="range"
+                    min={0}
+                    max={sliderMax}
+                    step={2}
+                    value={sliderPct}
+                    aria-label="Volume"
+                    onChange={(e) => {
+                      const pct = Number(e.target.value)
+                      onVolumeChange(pct / 100)
+                    }}
+                    style={{
+                      background: `linear-gradient(90deg, ${
+                        isBoosted
+                          ? '#e8590c 0%, #f59f00 50%, #ffd43b ' + fillPercent + '%'
+                          : '#e8590c 0%, #ff922b ' + fillPercent + '%'
+                      }, rgba(255,255,255,0.2) ${fillPercent}%, rgba(255,255,255,0.2) 100%)`,
+                    }}
+                    className="fw-vol-slider w-full h-1.5 rounded-full appearance-none cursor-pointer"
                   />
-                )}
-                <input
-                  type="range"
-                  min={0}
-                  max={sliderMax}
-                  step={2}
-                  value={sliderPct}
-                  aria-label="Volume"
-                  onChange={(e) => {
-                    const pct = Number(e.target.value)
-                    onVolumeChange(pct / 100)
-                  }}
-                  style={{
-                    background: `linear-gradient(90deg, ${
-                      isBoosted
-                        ? '#e8590c 0%, #f59f00 50%, #ffd43b ' + fillPercent + '%'
-                        : '#e8590c 0%, #ff922b ' + fillPercent + '%'
-                    }, rgba(255,255,255,0.2) ${fillPercent}%, rgba(255,255,255,0.2) 100%)`,
-                  }}
-                  className="fw-vol-slider w-full h-1.5 rounded-full appearance-none cursor-pointer"
-                />
-              </div>
+                </div>
+              )}
 
-              {!compact && (
+              {!compact && !hideVolumeSlider && (
                 <span
                   className={`text-[10px] font-mono font-semibold tabular-nums w-8 text-right shrink-0 select-none ${
                     isBoosted
@@ -373,8 +388,50 @@ export function VideoControlBar({
             </div>
           </div>
 
-          {/* Right: Speed / Quality / Mini-player / Fullscreen */}
+          {/* Right: Live Bitrate / Audio-Only / Speed / Quality / Mini-player / Fullscreen */}
           <div className="flex items-center gap-1 shrink-0">
+            {isLive && activeQualityBitrate && activeQualityBitrate > 0 && !compact && (
+              <span
+                title={
+                  isSingleBitrate && activeQualityBitrate >= 5_000_000
+                    ? `Single-bitrate source (${formatBitrate(activeQualityBitrate)}) — broadcaster publishes no lower quality`
+                    : mobileDataSaving
+                      ? `Live stream bitrate (${formatBitrate(activeQualityBitrate)}) · Mobile Data Saving active`
+                      : `Live stream bitrate (${formatBitrate(activeQualityBitrate)})`
+                }
+                className={`hidden sm:inline-flex items-center px-1.5 py-1 rounded-lg border text-[10px] font-mono tabular-nums select-none ${
+                  isSingleBitrate && activeQualityBitrate >= 5_000_000
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : mobileDataSaving || audioOnly
+                      ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                      : 'bg-black/55 border-white/10 text-[#b8b5ad]'
+                }`}
+              >
+                {formatBitrate(activeQualityBitrate)}
+              </span>
+            )}
+
+            {isLive && canAudioOnly && onToggleAudioOnly && (
+              <button
+                type="button"
+                onClick={onToggleAudioOnly}
+                title={
+                  audioOnly
+                    ? 'Audio-Only mode ON (lowest bitrate) — click to restore video'
+                    : 'Audio-Only mode — drop to lowest stream bitrate to save data'
+                }
+                aria-label={audioOnly ? 'Exit audio-only mode' : 'Audio-only mode'}
+                className={`px-1.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  audioOnly
+                    ? 'bg-emerald-600/30 hover:bg-emerald-600/45 border-emerald-500/55 text-emerald-200'
+                    : 'bg-black/55 hover:bg-white/15 border-white/10 text-[#ece9e1]'
+                }`}
+              >
+                <Headphones className="w-3 h-3" />
+                {!compact && <span className="hidden md:inline">{audioOnly ? 'Audio Only' : 'Audio'}</span>}
+              </button>
+            )}
+
             {!isLive && !compact && onCycleSpeed && (
               <button
                 type="button"

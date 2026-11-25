@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Loader2, Play, Radio, Shield } from 'lucide-react'
+import { AlertTriangle, Headphones, Loader2, Play, Radio, Shield } from 'lucide-react'
 import type Hls from 'hls.js'
 import {
   applyVideoAudioLevel,
   claimFeedVideoFocus,
+  formatBitrate,
+  isIosDevice,
   isWebAudioAvailable,
   resumeVideoAudioGraph,
+  selectDataSaverMaxLevel,
+  selectLowestBitrateLevel,
 } from '../lib/mediaAudio'
 import { createSafeHlsConfig } from '../lib/nostr/hlsSafe'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
@@ -65,6 +69,7 @@ export function HlsVideoPlayer({
 
   const mediaVolume = useSettingsStore((s) => s.mediaVolume)
   const mediaMuted = useSettingsStore((s) => s.mediaMuted)
+  const mobileDataSaving = useSettingsStore((s) => s.mobileDataSaving)
   const setMediaVolume = useSettingsStore((s) => s.setMediaVolume)
   const setMediaMuted = useSettingsStore((s) => s.setMediaMuted)
 
@@ -89,9 +94,15 @@ export function HlsVideoPlayer({
   const [selectedQuality, setSelectedQuality] = useState(-1)
   const [activeQualityHeight, setActiveQualityHeight] = useState<number | undefined>(undefined)
   const [activeQualityBitrate, setActiveQualityBitrate] = useState<number | undefined>(undefined)
+  const [audioOnly, setAudioOnly] = useState(false)
+  const [tabHidden, setTabHidden] = useState(() =>
+    typeof document !== 'undefined' ? document.hidden : false,
+  )
 
+  const ios = useMemo(() => isIosDevice(), [])
   const effectiveMuted = forceMuted === true ? true : mediaMuted
-  const webAudioCapable = isWebAudioAvailable() && (isMseStream || nativeCorsOk)
+  // Never attach Web Audio to iOS native HLS (WebKit native AVPlayer HLS outputs silence through MediaElementSource)
+  const webAudioCapable = isWebAudioAvailable() && (isMseStream || (nativeCorsOk && !ios))
 
   const streamHost = useMemo(() => {
     if (!safeStreamUrl) return 'external stream'
@@ -113,15 +124,21 @@ export function HlsVideoPlayer({
     setSelectedQuality(-1)
     setActiveQualityHeight(undefined)
     setActiveQualityBitrate(undefined)
+    setAudioOnly(false)
   }, [safeStreamUrl])
 
   useEffect(() => {
     const onFs = () => {
       setIsFullscreen(document.fullscreenElement === containerRef.current)
     }
+    const onVis = () => {
+      setTabHidden(document.hidden)
+    }
     document.addEventListener('fullscreenchange', onFs)
+    document.addEventListener('visibilitychange', onVis)
     return () => {
       document.removeEventListener('fullscreenchange', onFs)
+      document.removeEventListener('visibilitychange', onVis)
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
     }
   }, [])
@@ -184,13 +201,15 @@ export function HlsVideoPlayer({
             setBuffering(false)
             return
           }
+          const dataSaving = useSettingsStore.getState().mobileDataSaving
           const hls = new HlsCtor(
             createSafeHlsConfig(HlsCtor, {
               lowLatencyMode: true,
               capLevelToPlayerSize: true,
-              maxBufferLength: 12,
-              maxMaxBufferLength: 24,
-              backBufferLength: 15,
+              startLevel: dataSaving ? 0 : -1,
+              maxBufferLength: dataSaving ? 12 : 30,
+              maxMaxBufferLength: dataSaving ? 24 : 60,
+              backBufferLength: dataSaving ? 10 : 30,
             }),
           )
           hlsInstance = hls
@@ -210,6 +229,10 @@ export function HlsVideoPlayer({
               }))
               .sort((a, b) => (b.height || b.bitrate) - (a.height || a.bitrate))
             setQualityLevels(opts)
+            if (hls.levels.length === 1) {
+              setActiveQualityHeight(hls.levels[0].height || undefined)
+              setActiveQualityBitrate(hls.levels[0].bitrate || undefined)
+            }
           }
 
           hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
@@ -339,6 +362,44 @@ export function HlsVideoPlayer({
     }
   }, [started, safeStreamUrl, retryNonce])
 
+  // Dynamically adapt HLS ABR ceiling for Mobile Data Saving, Audio-Only, muted Watch With/Mini-player, and hidden tabs
+  useEffect(() => {
+    const hls = hlsRef.current
+    if (!hls || !started || hls.levels.length <= 1) return
+
+    if (audioOnly) {
+      const lowest = selectLowestBitrateLevel(hls.levels)
+      hls.autoLevelCapping = lowest
+      hls.nextLevel = lowest
+      return
+    }
+
+    // Manual quality lock takes precedence unless tab is hidden or stream is force-muted behind another stream
+    if (tabHidden || forceMuted === true) {
+      const lowest = selectLowestBitrateLevel(hls.levels)
+      hls.autoLevelCapping = lowest
+      if (selectedQuality === -1) hls.nextLevel = lowest
+      return
+    }
+
+    if (selectedQuality >= 0) {
+      hls.autoLevelCapping = -1
+      hls.nextLevel = selectedQuality
+      return
+    }
+
+    if (mobileDataSaving) {
+      const cap = selectDataSaverMaxLevel(hls.levels)
+      hls.autoLevelCapping = cap
+      if (hls.currentLevel > cap && cap >= 0) {
+        hls.nextLevel = cap
+      }
+    } else {
+      hls.autoLevelCapping = -1
+      hls.nextLevel = -1
+    }
+  }, [started, qualityLevels.length, mobileDataSaving, audioOnly, tabHidden, forceMuted, selectedQuality])
+
   const prevForceMutedRef = useRef(forceMuted)
 
   // Continuously apply global volume/boost/mute + forceMuted audio focus rules
@@ -416,11 +477,17 @@ export function HlsVideoPlayer({
   }
 
   const handleSelectQuality = (levelIndex: number) => {
+    setAudioOnly(false)
     setSelectedQuality(levelIndex)
     const hls = hlsRef.current
     if (hls) {
       hls.nextLevel = levelIndex
     }
+    bumpControlsVisibility()
+  }
+
+  const handleToggleAudioOnly = () => {
+    setAudioOnly((prev) => !prev)
     bumpControlsVisibility()
   }
 
@@ -433,12 +500,25 @@ export function HlsVideoPlayer({
   }
 
   const handleToggleFullscreen = () => {
-    const el = containerRef.current
+    const el = containerRef.current as
+      | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void })
+      | null
+    const video = videoRef.current as
+      | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+      | null
     if (!el) return
     if (document.fullscreenElement === el) {
       void document.exitFullscreen().catch(() => {})
     } else if (typeof el.requestFullscreen === 'function') {
-      void el.requestFullscreen().catch(() => {})
+      void el.requestFullscreen().catch(() => {
+        if (video && typeof video.webkitEnterFullscreen === 'function') {
+          video.webkitEnterFullscreen()
+        }
+      })
+    } else if (typeof el.webkitRequestFullscreen === 'function') {
+      void el.webkitRequestFullscreen()
+    } else if (video && typeof video.webkitEnterFullscreen === 'function') {
+      video.webkitEnterFullscreen()
     }
   }
 
@@ -567,6 +647,37 @@ export function HlsVideoPlayer({
             className="w-full h-full object-contain bg-black cursor-pointer"
           />
 
+          {audioOnly && !error && (
+            <div className="absolute inset-0 z-10 bg-[#0d0e14]/95 flex flex-col items-center justify-center p-4 text-center gap-2.5">
+              {safePosterUrl && (
+                <img
+                  src={safePosterUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 w-full h-full object-cover opacity-15 blur-md pointer-events-none"
+                />
+              )}
+              <div className="relative z-10 flex flex-col items-center gap-2">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shadow-lg">
+                  <Headphones className="w-6 h-6" />
+                </div>
+                <div className="text-xs font-semibold text-white">
+                  Audio-Only Mode{activeQualityBitrate ? ` · ${formatBitrate(activeQualityBitrate)}` : ''}
+                </div>
+                <div className="text-[11px] text-[#9a9890] max-w-xs truncate">
+                  {title || 'Lowest stream bitrate active to save bandwidth'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAudioOnly(false)}
+                  className="mt-1 px-3 py-1 rounded-lg bg-[#1d202d] hover:bg-[#272b3c] border border-[#32374d] text-[11px] font-semibold text-[#ff922b] transition cursor-pointer"
+                >
+                  Show Video
+                </button>
+              </div>
+            </div>
+          )}
+
           {!error && (
             <VideoControlBar
               videoEl={videoRef.current}
@@ -578,6 +689,7 @@ export function HlsVideoPlayer({
               muted={effectiveMuted}
               canBoost={webAudioCapable}
               vuEnabled={webAudioCapable}
+              hideVolumeSlider={ios && !webAudioCapable}
               currentTime={currentTime}
               duration={duration}
               bufferedEnd={bufferedEnd}
@@ -588,6 +700,10 @@ export function HlsVideoPlayer({
               selectedQuality={selectedQuality}
               activeQualityHeight={activeQualityHeight}
               activeQualityBitrate={activeQualityBitrate}
+              isSingleBitrate={qualityLevels.length <= 1}
+              audioOnly={audioOnly}
+              canAudioOnly={qualityLevels.length > 1}
+              mobileDataSaving={mobileDataSaving}
               onTogglePlay={handleTogglePlay}
               onToggleMute={handleToggleMute}
               onVolumeChange={handleVolumeChange}
@@ -604,6 +720,7 @@ export function HlsVideoPlayer({
               onJumpToLive={isLive ? handleJumpToLive : undefined}
               onCycleSpeed={!isLive ? handleCycleSpeed : undefined}
               onSelectQuality={qualityLevels.length > 1 ? handleSelectQuality : undefined}
+              onToggleAudioOnly={qualityLevels.length > 1 ? handleToggleAudioOnly : undefined}
               onPopOut={onPopOut}
               onToggleFullscreen={handleToggleFullscreen}
               onInteract={bumpControlsVisibility}

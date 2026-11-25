@@ -175,3 +175,70 @@ export function formatBitrate(bps?: number): string {
   if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`
   return `${Math.round(bps / 1000)} kbps`
 }
+
+export function isIosDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  if (/iPad|iPhone|iPod/i.test(ua)) return true
+  // iPadOS 13+ desktop UA reports MacIntel with multi-touch points
+  return navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1
+}
+
+export function isConnectionSaveData(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const conn = (navigator as unknown as { connection?: { saveData?: boolean; effectiveType?: string } })
+    .connection
+  if (!conn) return false
+  return Boolean(conn.saveData || conn.effectiveType === '2g' || conn.effectiveType === 'slow-2g')
+}
+
+export interface HlsLevelMetrics {
+  height?: number
+  bitrate?: number
+}
+
+/**
+ * Picks the highest HLS level index allowed under Mobile Data Saving mode
+ * (<= 480p and <= 2.2 Mbps, falling back to the lowest available level 0).
+ */
+export function selectDataSaverMaxLevel(levels: readonly HlsLevelMetrics[]): number {
+  if (levels.length <= 1) return -1
+  let bestIdx = 0
+  let bestScore = -1
+  levels.forEach((lvl, idx) => {
+    const h = lvl.height || 0
+    const b = lvl.bitrate || 0
+    const withinHeight = h === 0 || h <= 480
+    const withinBitrate = b === 0 || b <= 2_200_000
+    if (withinHeight && withinBitrate) {
+      const score = h > 0 ? h : b
+      if (score >= bestScore) {
+        bestScore = score
+        bestIdx = idx
+      }
+    }
+  })
+  return bestIdx
+}
+
+/**
+ * Picks the lowest-bitrate HLS level index (used for Audio-Only, muted Watch With/Mini-player, and hidden tabs).
+ */
+export function selectLowestBitrateLevel(levels: readonly HlsLevelMetrics[]): number {
+  if (levels.length <= 1) return -1
+  let minIdx = 0
+  let minMetric = Infinity
+  levels.forEach((lvl, idx) => {
+    const metric =
+      lvl.bitrate && lvl.bitrate > 0
+        ? lvl.bitrate
+        : lvl.height && lvl.height > 0
+          ? lvl.height * 1000
+          : Infinity
+    if (metric < minMetric) {
+      minMetric = metric
+      minIdx = idx
+    }
+  })
+  return minIdx
+}

@@ -84,6 +84,7 @@ export interface SettingsState {
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
+  mobileDataSaving: boolean
   mediaVolume: number
   mediaMuted: boolean
   nwcUri: string
@@ -128,6 +129,7 @@ export interface SettingsState {
   setSidebarFeedMode: (mode: SidebarFeedMode) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
+  setMobileDataSaving: (enabled: boolean) => void
   setMediaVolume: (volume: number) => void
   setMediaMuted: (muted: boolean) => void
   setNwcUri: (uri: string, remember?: boolean) => void
@@ -162,6 +164,7 @@ interface PersistedSettings {
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
+  mobileDataSaving: boolean
   mediaVolume: number
   mediaMuted: boolean
   // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
@@ -209,6 +212,7 @@ function loadInitial(): PersistedSettings & {
     sidebarFeedMode: 'trending',
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
+    mobileDataSaving: false,
     mediaVolume: 0.85,
     mediaMuted: false,
     nwcUri: storedNwc.nwcUri,
@@ -323,6 +327,7 @@ function persist(state: SettingsState) {
     sidebarFeedMode: state.sidebarFeedMode,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
+    mobileDataSaving: state.mobileDataSaving,
     mediaVolume: state.mediaVolume,
     mediaMuted: state.mediaMuted,
   }
@@ -609,6 +614,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setInlineMediaPlayback: (inlineMediaPlayback) => {
     set({ inlineMediaPlayback })
+    persist(get())
+  },
+  setMobileDataSaving: (mobileDataSaving) => {
+    set({ mobileDataSaving })
     persist(get())
   },
   setMediaVolume: (rawVolume) => {

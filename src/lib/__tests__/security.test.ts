@@ -45,6 +45,7 @@ import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtub
 import { buildBud03BlossomListTags, buildNip65RelayListTags } from '../nostr/lists'
 import { mergeTrendingNotes } from '../nostr/trending'
 import { computeLiveZapsStats, parseLiveZapReceipt } from '../nostr/zapsFeed'
+import { selectDataSaverMaxLevel, selectLowestBitrateLevel } from '../mediaAudio'
 import { parseSharedQueryParams } from '../shareTarget'
 import { useLiveStore } from '../store/useLiveStore'
 import { useNostrStore } from '../store/useNostrStore'
@@ -1108,5 +1109,28 @@ describe('Full code-audit regression & security hardening', () => {
     })
 
     expect(merged.map((e) => e.id)).toEqual(['h1', 'h2', 't1', 'r1'])
+  })
+
+  it('caps HLS levels cleanly for Mobile Data Saving mode and Audio-Only / muted downshift', () => {
+    const zapStreamLevels = [
+      { height: 1080, bitrate: 9_830_400 },
+      { height: 720, bitrate: 5_030_400 },
+      { height: 480, bitrate: 2_030_400 },
+    ]
+    expect(selectDataSaverMaxLevel(zapStreamLevels)).toBe(2)
+    expect(selectLowestBitrateLevel(zapStreamLevels)).toBe(2)
+
+    const cfLevels = [
+      { height: 240, bitrate: 384_538 },
+      { height: 360, bitrate: 636_270 },
+      { height: 480, bitrate: 1_003_644 },
+      { height: 720, bitrate: 1_782_562 },
+    ]
+    expect(selectDataSaverMaxLevel(cfLevels)).toBe(2) // 480p <= 480 & <= 2.2 Mbps
+    expect(selectLowestBitrateLevel(cfLevels)).toBe(0) // 240p lowest for Audio-Only / muted
+
+    // Single-bitrate streams return -1 (no ABR capping possible)
+    expect(selectDataSaverMaxLevel([{ height: 720, bitrate: 11_059_200 }])).toBe(-1)
+    expect(selectLowestBitrateLevel([{ height: 720, bitrate: 11_059_200 }])).toBe(-1)
   })
 })

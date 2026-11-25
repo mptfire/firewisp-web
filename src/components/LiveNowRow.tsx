@@ -8,6 +8,7 @@ import {
   isStreamFollowed,
   sortLiveStreams,
 } from '../lib/nostr/nip53'
+import { isConnectionSaveData } from '../lib/mediaAudio'
 import { useLiveStore, type LiveStreamEntry } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -36,6 +37,7 @@ function LiveStreamPreviewCard({
   const displayPubkey = getStreamPrimaryPubkey(stream.activity)
   const profile = useNostrStore((s) => s.profiles[displayPubkey])
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
+  const mobileDataSaving = useSettingsStore((s) => s.mobileDataSaving)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const isInMiniPlayer = useLiveStore((s) => s.miniPlayer?.aTag === stream.aTagValue)
   const [imgFailed, setImgFailed] = useState(false)
@@ -68,7 +70,9 @@ function LiveStreamPreviewCard({
   }, [])
 
   const handleMouseEnter = () => {
-    if (!hoverStreamPreview || !previewUrl || isInMiniPlayer) return
+    if (!hoverStreamPreview || mobileDataSaving || isConnectionSaveData() || !previewUrl || isInMiniPlayer) {
+      return
+    }
     if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
       return
     }

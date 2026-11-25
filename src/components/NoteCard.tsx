@@ -24,6 +24,7 @@ import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib
 import { buildLiveATag, encodeLiveNaddr, isLiveStreamFresh } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
 import { verifyEventPow } from '../lib/crypto/nip13'
+import { isConnectionSaveData } from '../lib/mediaAudio'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -131,6 +132,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const setActiveInlineStream = useLiveStore((s) => s.setActiveInlineStream)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const hoverStreamPreview = useSettingsStore((s) => s.hoverStreamPreview)
+  const mobileDataSaving = useSettingsStore((s) => s.mobileDataSaving)
   const displayPk = entry?.activity.streamerPubkey || entry?.activity.hostPubkey || hostPubkey
   const profile = useNostrStore((s) => s.profiles[displayPk])
   const [thumbFailed, setThumbFailed] = useState(false)
@@ -164,7 +166,16 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const viewers = entry?.activity.currentParticipants
 
   const startHoverPreview = () => {
-    if (!hoverStreamPreview || !liveStreamUrl || playingInline || isInMiniPlayer) return
+    if (
+      !hoverStreamPreview ||
+      mobileDataSaving ||
+      isConnectionSaveData() ||
+      !liveStreamUrl ||
+      playingInline ||
+      isInMiniPlayer
+    ) {
+      return
+    }
     if (typeof window !== 'undefined' && window.matchMedia && !window.matchMedia('(hover: hover)').matches) {
       return
     }

@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Loader2, Play } from 'lucide-react'
 import {
   applyVideoAudioLevel,
   claimFeedVideoFocus,
+  isIosDevice,
   isWebAudioAvailable,
   onOtherFeedVideoFocus,
   releaseFeedVideoFocus,
@@ -58,6 +59,7 @@ export function FireWispVideoPlayer({
   const [playbackRate, setPlaybackRate] = useState(1)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
+  const ios = useMemo(() => isIosDevice(), [])
   const webAudioCapable = isWebAudioAvailable() && useCors && corsReady
 
   // Reset CORS state if video URL changes
@@ -132,12 +134,25 @@ export function FireWispVideoPlayer({
   }
 
   const toggleFullscreen = () => {
-    const el = containerRef.current
+    const el = containerRef.current as
+      | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void })
+      | null
+    const video = videoRef.current as
+      | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+      | null
     if (!el) return
     if (document.fullscreenElement === el) {
       void document.exitFullscreen().catch(() => {})
     } else if (typeof el.requestFullscreen === 'function') {
-      void el.requestFullscreen().catch(() => {})
+      void el.requestFullscreen().catch(() => {
+        if (video && typeof video.webkitEnterFullscreen === 'function') {
+          video.webkitEnterFullscreen()
+        }
+      })
+    } else if (typeof el.webkitRequestFullscreen === 'function') {
+      void el.webkitRequestFullscreen()
+    } else if (video && typeof video.webkitEnterFullscreen === 'function') {
+      video.webkitEnterFullscreen()
     }
   }
 
@@ -310,6 +325,7 @@ export function FireWispVideoPlayer({
         muted={mediaMuted}
         canBoost={webAudioCapable}
         vuEnabled={webAudioCapable}
+        hideVolumeSlider={ios && !webAudioCapable}
         currentTime={currentTime}
         duration={duration}
         bufferedEnd={bufferedEnd}

@@ -123,8 +123,8 @@ export function LiveHoverPreview({
               lowLatencyMode: true,
               startLevel: 0,
               capLevelToPlayerSize: true,
-              maxBufferLength: 6,
-              maxMaxBufferLength: 10,
+              maxBufferLength: 4,
+              maxMaxBufferLength: 6,
               backBufferLength: 0,
             }),
           )
