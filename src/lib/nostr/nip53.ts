@@ -27,6 +27,7 @@ export interface LiveActivity {
   ends?: number
   currentParticipants?: number
   participants: Array<{ pubkey: string; role?: string }>
+  hashtags?: string[]
   relayHints: string[]
   createdAt: number
 }
@@ -93,6 +94,18 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
     }
   }
 
+  const hashtags: string[] = []
+  const seenTags = new Set<string>()
+  for (const t of event.tags) {
+    if (t[0] !== 't' || !t[1]) continue
+    const clean = t[1].trim().replace(/^#+/, '').toLowerCase()
+    if (clean && clean.length <= 32 && !seenTags.has(clean)) {
+      seenTags.add(clean)
+      hashtags.push(clean)
+      if (hashtags.length >= 10) break
+    }
+  }
+
   return {
     eventId: event.id,
     dTag,
@@ -108,6 +121,7 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
     ends,
     currentParticipants,
     participants,
+    hashtags,
     relayHints: relayHints.slice(0, 8),
     createdAt: event.created_at,
   }

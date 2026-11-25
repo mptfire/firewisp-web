@@ -12,6 +12,7 @@ import { NotificationsPage } from './pages/NotificationsPage'
 import { SearchPage } from './pages/SearchPage'
 import { BookmarksPage } from './pages/BookmarksPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { LiveDirectoryPage } from './pages/LiveDirectoryPage'
 import { LiveStreamPage } from './pages/LiveStreamPage'
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
@@ -105,6 +106,7 @@ export function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/bookmarks" element={<BookmarksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/live" element={<LiveDirectoryPage />} />
             <Route path="/live/:naddr" element={<LiveStreamPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

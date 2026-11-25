@@ -335,6 +335,14 @@ export function LiveNowRow({
           <span className="text-[11px] text-[#8c8a82]">
             {activeStreams.length} {activeStreams.length === 1 ? 'stream' : 'streams'}
           </span>
+          {!forceShow && (
+            <Link
+              to="/live"
+              className="text-[11px] font-medium text-[#ff8a3d] hover:underline ml-1"
+            >
+              Browse all →
+            </Link>
+          )}
         </div>
 
         {(canScrollLeft || canScrollRight) && (

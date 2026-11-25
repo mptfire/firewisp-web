@@ -127,6 +127,21 @@ export function SettingsPage() {
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
+            <div className="font-medium text-white">Show Bookmarks in menu</div>
+            <div className="text-[#8c8a82]">
+              Shows the Bookmarks page in the navigation menu (you can still bookmark notes anytime).
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showBookmarksNav}
+            onChange={(e) => settings.setShowBookmarksNav(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
             <div className="font-medium text-white">Show Live Zaps feed</div>
             <div className="text-[#8c8a82]">
               Displays the live NIP-57 zap scoreboard in the sidebar across feeds &amp; threads (swaps with stream Top Zappers on live streams).

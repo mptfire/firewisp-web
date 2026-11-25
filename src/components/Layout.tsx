@@ -25,6 +25,7 @@ import {
   ZAPSTORE_URL,
 } from '../lib/constants'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
+import { isLiveStreamFresh } from '../lib/nostr/nip53'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -58,10 +59,19 @@ export function Layout({ children }: { children: ReactNode }) {
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
+  const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
   const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
+  const liveCount = useLiveStore((s) => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    let count = 0
+    for (const entry of Object.values(s.liveStreams)) {
+      if (isLiveStreamFresh(entry, nowSec)) count++
+    }
+    return count
+  })
   const [relaysExpanded, setRelaysExpanded] = useState(false)
   const [isDesktopMd, setIsDesktopMd] = useState(() =>
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -105,7 +115,8 @@ export function Layout({ children }: { children: ReactNode }) {
     { to: '/', label: 'Feed', icon: Flame, end: true },
     { to: '/notifications', label: 'Notifications', icon: Bell },
     { to: '/search', label: 'Search', icon: Search },
-    { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
+    { to: '/live', label: 'Live', icon: Radio, badge: liveCount > 0 ? liveCount : undefined },
+    ...(showBookmarksNav ? [{ to: '/bookmarks', label: 'Bookmarks', icon: Bookmark }] : []),
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
     { to: '/settings', label: 'Settings', icon: Settings },
   ]
@@ -129,22 +140,33 @@ export function Layout({ children }: { children: ReactNode }) {
             </Link>
 
             <nav className="space-y-1">
-              {navItems.map(({ to, label, icon: Icon, end }) => (
+              {navItems.map(({ to, label, icon: Icon, end, badge }) => (
                 <NavLink
                   key={to}
                   to={to}
                   end={end}
                   onClick={(e) => scrollTopIfCurrent(e, to)}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                    `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
                       isActive
                         ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
                         : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
                     }`
                   }
                 >
-                  <Icon className="w-4 h-4" />
-                  {label}
+                  <span className="flex items-center gap-3 min-w-0">
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        to === '/live' && badge ? 'text-red-500' : ''
+                      }`}
+                    />
+                    <span className="truncate">{label}</span>
+                  </span>
+                  {badge !== undefined && (
+                    <span className="px-1.5 py-0.5 rounded-md bg-red-600/20 border border-red-500/40 text-red-400 text-[10px] font-bold tabular-nums leading-none">
+                      {badge}
+                    </span>
+                  )}
                 </NavLink>
               ))}
             </nav>
@@ -416,8 +438,9 @@ export function Layout({ children }: { children: ReactNode }) {
         {[
           { to: '/', icon: Flame, label: 'Feed', end: true },
           { to: '/search', icon: Search, label: 'Search' },
+          { to: '/live', icon: Radio, label: 'Live' },
           { to: '/notifications', icon: Bell, label: 'Notifications' },
-          { to: '/bookmarks', icon: Bookmark, label: 'Bookmarks' },
+          ...(showBookmarksNav ? [{ to: '/bookmarks', icon: Bookmark, label: 'Bookmarks' }] : []),
           { to: '/settings', icon: Settings, label: 'Settings' },
         ].map(({ to, icon: Icon, label, end }) => (
           <NavLink
