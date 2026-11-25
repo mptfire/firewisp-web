@@ -369,14 +369,21 @@
 }
 
 .fw-flame-seg {
+  display: none;
   position: absolute;
   top: 0;
   left: 0;
   z-index: 2;
   pointer-events: none;
-  offset-path: inset(1px round var(--fw-flame-radius));
-  offset-rotate: auto;
-  animation: fw-flame-orbit 14s linear infinite;
+}
+
+@supports (offset-path: inset(1px round 1rem)) {
+  .fw-flame-seg {
+    display: block;
+    offset-path: inset(1px round var(--fw-flame-radius));
+    offset-rotate: auto;
+    animation: fw-flame-orbit 14s linear infinite;
+  }
 }
 
 .fw-flame-tip {
@@ -453,5 +460,24 @@
   }
   .fw-flame-seg {
     display: none;
+  }
+}
+
+/* iOS safe-area helpers (resolves to 0px / normal padding on desktop & Android) */
+.fw-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.fw-safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+/* Prevent iOS Safari auto-zoom when focusing compact inputs (iOS WebKit touch only — zero effect on Linux/desktop) */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    textarea,
+    select {
+      font-size: max(16px, 1em);
+    }
   }
 }

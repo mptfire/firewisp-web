@@ -7,6 +7,7 @@ import {
   formatBitrate,
   isIosDevice,
   isWebAudioAvailable,
+  reportVideoSoundActive,
   resumeVideoAudioGraph,
   selectDataSaverMaxLevel,
   selectLowestBitrateLevel,
@@ -420,6 +421,17 @@ export function HlsVideoPlayer({
     }
   }, [started, mediaVolume, effectiveMuted, webAudioCapable, playing, forceMuted, error])
 
+  // Notify global sidebar graphic equalizer whenever this player starts/stops outputting sound
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const audible = started && playing && !effectiveMuted && mediaVolume > 0 && !error
+    reportVideoSoundActive(video, audible)
+    return () => {
+      reportVideoSoundActive(video, false)
+    }
+  }, [started, playing, effectiveMuted, mediaVolume, error])
+
   useEffect(() => {
     onVideoElement?.(started ? videoRef.current : null)
     return () => onVideoElement?.(null)
@@ -608,7 +620,16 @@ export function HlsVideoPlayer({
             ref={videoRef}
             playsInline
             muted={effectiveMuted}
-            onClick={handleTogglePlay}
+            onClick={() => {
+              const isTouch =
+                typeof window !== 'undefined' &&
+                window.matchMedia?.('(pointer: coarse)').matches
+              if (isTouch && playing && !controlsVisible) {
+                bumpControlsVisibility()
+                return
+              }
+              handleTogglePlay()
+            }}
             onDoubleClick={handleToggleFullscreen}
             onPlay={() => {
               setPlaying(true)

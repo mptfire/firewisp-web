@@ -7,6 +7,7 @@ import {
   isWebAudioAvailable,
   onOtherFeedVideoFocus,
   releaseFeedVideoFocus,
+  reportVideoSoundActive,
   resumeVideoAudioGraph,
 } from '../lib/mediaAudio'
 import { useLiveStore } from '../lib/store/useLiveStore'
@@ -77,6 +78,10 @@ export function FireWispVideoPlayer({
     const video = videoRef.current
     if (!video) return
     applyVideoAudioLevel(video, mediaVolume, mediaMuted, webAudioCapable, playing && webAudioCapable)
+    reportVideoSoundActive(video, playing && !mediaMuted && mediaVolume > 0)
+    return () => {
+      reportVideoSoundActive(video, false)
+    }
   }, [mediaVolume, mediaMuted, webAudioCapable, playing])
 
   // Pause automatically if another feed video starts playing
@@ -232,7 +237,16 @@ export function FireWispVideoPlayer({
         autoPlay={autoPlay}
         playsInline
         preload="metadata"
-        onClick={togglePlay}
+        onClick={() => {
+          const isTouch =
+            typeof window !== 'undefined' &&
+            window.matchMedia?.('(pointer: coarse)').matches
+          if (isTouch && playing && !controlsVisible) {
+            bumpControlsVisibility()
+            return
+          }
+          togglePlay()
+        }}
         onDoubleClick={toggleFullscreen}
         onLoadedMetadata={(e) => {
           const v = e.currentTarget

@@ -423,7 +423,7 @@ export function FloatingStreamPlayer() {
       ref={containerRef}
       style={pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined}
       className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 max-h-[calc(100dvh-16px)] flex flex-col ${
-        pos ? '' : 'bottom-16 md:bottom-4 right-3 sm:right-4'
+        pos ? '' : 'bottom-[calc(4rem+env(safe-area-inset-bottom,0px))] md:bottom-4 right-3 sm:right-4'
       } ${
         dragging
           ? 'border-[#ff922b] select-none'

@@ -13,10 +13,49 @@ interface VideoAudioGraph {
   gain: GainNode
   analyser: AnalyserNode
   data: Uint8Array<ArrayBuffer>
+  freqData: Uint8Array<ArrayBuffer>
 }
 
 const graphByVideo = new WeakMap<HTMLVideoElement, VideoAudioGraph>()
 const failedVideos = new WeakSet<HTMLVideoElement>()
+const activeSoundVideos = new Set<HTMLVideoElement>()
+const audioActivityListeners = new Set<() => void>()
+
+function notifyAudioActivity() {
+  for (const cb of audioActivityListeners) {
+    try {
+      cb()
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
+
+export function reportVideoSoundActive(video: HTMLVideoElement | null, active: boolean): void {
+  if (!video) return
+  const had = activeSoundVideos.has(video)
+  if (active && !had) {
+    activeSoundVideos.add(video)
+    notifyAudioActivity()
+  } else if (!active && had) {
+    activeSoundVideos.delete(video)
+    notifyAudioActivity()
+  }
+}
+
+export function subscribeAudioActivity(cb: () => void): () => void {
+  audioActivityListeners.add(cb)
+  return () => {
+    audioActivityListeners.delete(cb)
+  }
+}
+
+export function hasActiveSoundPlaying(): boolean {
+  for (const v of activeSoundVideos) {
+    if (!v.paused && !v.muted) return true
+  }
+  return false
+}
 
 function getAudioContextCtor(): typeof AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -48,8 +87,8 @@ export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph 
     const source = ctx.createMediaElementSource(video)
     const gain = ctx.createGain()
     const analyser = ctx.createAnalyser()
-    analyser.fftSize = 128
-    analyser.smoothingTimeConstant = 0.72
+    analyser.fftSize = 256
+    analyser.smoothingTimeConstant = 0.76
     source.connect(gain)
     gain.connect(analyser)
     analyser.connect(ctx.destination)
@@ -59,6 +98,7 @@ export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph 
       gain,
       analyser,
       data: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
+      freqData: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
     }
     graphByVideo.set(video, graph)
     if (ctx.state === 'suspended') {
@@ -135,6 +175,57 @@ export function readVideoVuLevel(video: HTMLVideoElement): number {
   const rms = Math.sqrt(sumSq / len)
   // Boost perceptual sensitivity for typical speech/music RMS (0.02..0.35 -> 0..1)
   return Math.min(1, Math.pow(rms * 3.4, 0.78))
+}
+
+/**
+ * Reads normalized 0..1 logarithmic frequency spectrum bands from whichever video is currently outputting sound.
+ * Reuses pre-allocated typed arrays to keep 30fps equalizer rendering allocation-light.
+ */
+export function readActiveFrequencyBands(
+  outBands: number[],
+): { playing: boolean; hasSpectrum: boolean } {
+  let activeVideo: HTMLVideoElement | null = null
+  let activeGraph: VideoAudioGraph | null = null
+
+  for (const v of activeSoundVideos) {
+    if (v.paused || v.muted) continue
+    activeVideo = v
+    const g = graphByVideo.get(v)
+    if (g && g.ctx.state === 'running') {
+      activeGraph = g
+      break
+    }
+  }
+
+  if (!activeVideo) {
+    for (let i = 0; i < outBands.length; i++) outBands[i] = 0
+    return { playing: false, hasSpectrum: false }
+  }
+
+  if (!activeGraph) {
+    for (let i = 0; i < outBands.length; i++) outBands[i] = 0
+    return { playing: true, hasSpectrum: false }
+  }
+
+  const freq = activeGraph.freqData
+  activeGraph.analyser.getByteFrequencyData(freq)
+  // Map bins 1..64 (~187 Hz to ~12 kHz) logarithmically across outBands.length bars
+  const count = outBands.length
+  const maxBin = Math.min(freq.length - 1, 72)
+  for (let i = 0; i < count; i++) {
+    const startRatio = Math.pow(i / count, 1.45)
+    const endRatio = Math.pow((i + 1) / count, 1.45)
+    const lo = Math.max(1, Math.floor(1 + startRatio * (maxBin - 1)))
+    const hi = Math.max(lo, Math.min(maxBin, Math.ceil(1 + endRatio * (maxBin - 1))))
+    let peak = 0
+    for (let b = lo; b <= hi; b++) {
+      if (freq[b] > peak) peak = freq[b]
+    }
+    // Slight high-band tilt so treble bars look lively alongside strong bass
+    const tilt = 1 + (i / count) * 0.25
+    outBands[i] = Math.min(1, Math.pow((peak / 255) * tilt, 0.92))
+  }
+  return { playing: true, hasSpectrum: true }
 }
 
 /**

@@ -17,6 +17,8 @@ import {
   ChevronUp,
   UploadCloud,
   Play,
+  Share,
+  X,
 } from 'lucide-react'
 import {
   ANDROID_APP_URL,
@@ -24,6 +26,7 @@ import {
   FIREWISP_RELAY,
   ZAPSTORE_URL,
 } from '../lib/constants'
+import { isIosDevice } from '../lib/mediaAudio'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { isLiveStreamFresh } from '../lib/nostr/nip53'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -34,6 +37,7 @@ import { Avatar } from './Avatar'
 import { AuthModal } from './AuthModal'
 import { FloatingStreamPlayer } from './FloatingStreamPlayer'
 import { LiveZapsCard } from './LiveZapsCard'
+import { SidebarAudioDeck } from './SidebarAudioDeck'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
 
@@ -127,6 +131,15 @@ export function Layout({ children }: { children: ReactNode }) {
         : 'Fire Wisp — Privacy-Focused Nostr Web Client'
   }, [unreadNotificationCount])
   const [relaysExpanded, setRelaysExpanded] = useState(false)
+  const [iosInstallOpen, setIosInstallOpen] = useState(false)
+  const isIos = useMemo(() => isIosDevice(), [])
+  const isStandalonePwa = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return Boolean(
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+        (navigator as unknown as { standalone?: boolean }).standalone === true,
+    )
+  }, [])
   const [screenGoldSats, setScreenGoldSats] = useState(0)
   const screenGoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -223,10 +236,10 @@ export function Layout({ children }: { children: ReactNode }) {
   ]
 
   return (
-    <div className="min-h-screen bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
-      <div className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-screen`}>
+    <div className="min-h-dvh bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
+      <div className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-dvh`}>
         {/* Left Sidebar (desktop) */}
-        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-screen overflow-y-auto gap-3.5">
+        <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-dvh overflow-y-auto gap-3.5">
           <div>
             <Link
               to="/"
@@ -459,6 +472,12 @@ export function Layout({ children }: { children: ReactNode }) {
                 <LiveZapsCard />
               </div>
             ) : null}
+
+            {isDesktopMd && (
+              <div className="mt-3">
+                <SidebarAudioDeck />
+              </div>
+            )}
           </div>
 
           <div className="mt-auto shrink-0 p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">
@@ -494,44 +513,59 @@ export function Layout({ children }: { children: ReactNode }) {
         </aside>
 
         {/* Main Center Column */}
-        <main className="flex-1 min-w-0 border-r border-[#20222c] pb-20 md:pb-6">
+        <main className="flex-1 min-w-0 border-r border-[#20222c] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6">
           {/* Mobile top bar */}
-          <header className="md:hidden sticky top-0 z-30 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-2.5 flex items-center justify-between">
-            <Link
-              to="/"
-              onClick={(e) => scrollTopIfCurrent(e, '/')}
-              className="flex items-center gap-2"
-            >
-              <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-7 h-7 rounded-lg" />
-              <span className="font-bold text-base">Fire Wisp</span>
-            </Link>
-            <div className="flex items-center gap-2">
-              <a
-                href={ANDROID_APP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-2.5 py-1 rounded-lg bg-[#161820] border border-[#2a2d3a] text-xs text-[#f59f00] flex items-center gap-1"
+          <header className="md:hidden sticky top-0 z-30 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] fw-safe-top">
+            <div className="px-4 py-2.5 flex items-center justify-between">
+              <Link
+                to="/"
+                onClick={(e) => scrollTopIfCurrent(e, '/')}
+                className="flex items-center gap-2"
               >
-                <Smartphone className="w-3.5 h-3.5" />
-                App
-              </a>
-              {pubkey ? (
-                <Link to={`/p/${pubkey}`}>
-                  <Avatar
-                    src={profile?.picture}
-                    pubkey={pubkey}
-                    name={profile?.display_name || profile?.name}
-                    size="sm"
-                  />
-                </Link>
-              ) : (
-                <button
-                  onClick={openAuthModal}
-                  className="px-3 py-1 rounded-lg bg-[#e8590c] text-xs font-semibold cursor-pointer"
-                >
-                  Sign In
-                </button>
-              )}
+                <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-7 h-7 rounded-lg" />
+                <span className="font-bold text-base">Fire Wisp</span>
+              </Link>
+              <div className="flex items-center gap-2">
+                {isIos ? (
+                  !isStandalonePwa && (
+                    <button
+                      type="button"
+                      onClick={() => setIosInstallOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-[#161820] border border-[#2a2d3a] text-xs text-[#f59f00] flex items-center gap-1 cursor-pointer"
+                    >
+                      <Share className="w-3.5 h-3.5" />
+                      Install
+                    </button>
+                  )
+                ) : (
+                  <a
+                    href={ANDROID_APP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-[#161820] border border-[#2a2d3a] text-xs text-[#f59f00] flex items-center gap-1"
+                  >
+                    <Smartphone className="w-3.5 h-3.5" />
+                    App
+                  </a>
+                )}
+                {pubkey ? (
+                  <Link to={`/p/${pubkey}`}>
+                    <Avatar
+                      src={profile?.picture}
+                      pubkey={pubkey}
+                      name={profile?.display_name || profile?.name}
+                      size="sm"
+                    />
+                  </Link>
+                ) : (
+                  <button
+                    onClick={openAuthModal}
+                    className="px-3 py-1 rounded-lg bg-[#e8590c] text-xs font-semibold cursor-pointer"
+                  >
+                    Sign In
+                  </button>
+                )}
+              </div>
             </div>
           </header>
 
@@ -540,7 +574,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
         {/* Right Info Sidebar (large desktop only — unmounted on mobile/tablet so zero hidden trending queries run) */}
         {!isTheaterMode && isDesktopLg && (
-          <aside className="hidden lg:flex flex-col w-[340px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-screen overflow-y-auto">
+          <aside className="hidden lg:flex flex-col w-[340px] shrink-0 px-4 py-4 gap-3.5 sticky top-0 h-dvh overflow-y-auto">
             <TrendingSidebar />
 
             <footer className="text-[11px] text-[#6f6d66] px-1 space-y-1">
@@ -554,7 +588,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </div>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#0e0e11]/95 backdrop-blur-md border-t border-[#20222c] flex justify-around py-2">
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-[#0e0e11]/95 backdrop-blur-md border-t border-[#20222c] flex justify-around pt-2 fw-safe-bottom">
         {[
           { to: '/', icon: Flame, label: 'Feed', end: true, badge: undefined as string | number | undefined, tone: undefined as 'red' | 'green' | undefined },
           { to: '/search', icon: Search, label: 'Search' },
@@ -628,6 +662,56 @@ export function Layout({ children }: { children: ReactNode }) {
 
       <FloatingStreamPlayer />
       <AuthModal />
+
+      {/* iOS Safari Home-Screen PWA Install Guide (only ever opened on iOS Safari) */}
+      {iosInstallOpen && (
+        <div
+          onClick={() => setIosInstallOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Install Fire Wisp on iOS"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-[#15161c] border border-[#2a2d3d] p-4 space-y-3 shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-7 h-7 rounded-lg" />
+                <h2 className="font-bold text-sm text-white">Install Fire Wisp on iOS</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIosInstallOpen(false)}
+                aria-label="Close install instructions"
+                className="p-1 rounded-lg text-[#9a9890] hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[#c2bfb7] leading-relaxed">
+              Add Fire Wisp to your iPhone or iPad Home Screen to run it full-screen like a native app (no App Store required):
+            </p>
+            <ol className="text-xs text-[#ece9e1] space-y-2 pl-4 list-decimal">
+              <li>
+                Tap Safari&apos;s <span className="font-semibold text-[#ff922b]">Share</span> button{' '}
+                <Share className="w-3.5 h-3.5 inline-block text-[#ff922b] -mt-0.5" /> at the bottom of the screen.
+              </li>
+              <li>
+                Scroll down and tap <span className="font-semibold text-white">Add to Home Screen</span>, then tap <span className="font-semibold text-white">Add</span>.
+              </li>
+            </ol>
+            <button
+              type="button"
+              onClick={() => setIosInstallOpen(false)}
+              className="w-full py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] text-xs font-semibold text-white cursor-pointer"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Full-screen gold circuit aura on live zaps > 100 sats */}
       <div
