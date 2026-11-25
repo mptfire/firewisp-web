@@ -11,6 +11,14 @@ import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
 const STORAGE_KEY = 'firewisp_settings_v1'
 const NWC_STORAGE_KEY = 'firewisp_nwc_v1'
 
+export type SidebarFeedMode = 'trending' | 'extended' | 'global' | 'firewisp'
+const VALID_SIDEBAR_FEED_MODES: readonly SidebarFeedMode[] = [
+  'trending',
+  'extended',
+  'global',
+  'firewisp',
+]
+
 function loadStoredNwc(): { nwcUri: string; remember: boolean } {
   try {
     if (typeof localStorage !== 'undefined') {
@@ -72,6 +80,7 @@ export interface SettingsState {
   showExploreTab: boolean
   showLiveNowBar: boolean
   showLiveZaps: boolean
+  sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   nwcUri: string
@@ -112,6 +121,7 @@ export interface SettingsState {
   setShowExploreTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
   setShowLiveZaps: (enabled: boolean) => void
+  setSidebarFeedMode: (mode: SidebarFeedMode) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
   setNwcUri: (uri: string, remember?: boolean) => void
@@ -142,6 +152,7 @@ interface PersistedSettings {
   showExploreTab: boolean
   showLiveNowBar: boolean
   showLiveZaps: boolean
+  sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
@@ -185,6 +196,7 @@ function loadInitial(): PersistedSettings & {
     showExploreTab: false,
     showLiveNowBar: true,
     showLiveZaps: true,
+    sidebarFeedMode: 'trending',
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
     nwcUri: storedNwc.nwcUri,
@@ -229,11 +241,17 @@ function loadInitial(): PersistedSettings & {
             .filter((r): r is RelayEntry => Boolean(r))
         : DEFAULT_RELAYS
 
+    const sidebarFeedMode: SidebarFeedMode =
+      parsed.sidebarFeedMode && VALID_SIDEBAR_FEED_MODES.includes(parsed.sidebarFeedMode)
+        ? parsed.sidebarFeedMode
+        : 'trending'
+
     const merged = {
       ...defaults,
       ...parsed,
       relays: sanitizedRelays.length > 0 ? sanitizedRelays : DEFAULT_RELAYS,
       blossomServers,
+      sidebarFeedMode,
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
       privateMutedWords: [],
@@ -280,6 +298,7 @@ function persist(state: SettingsState) {
     showExploreTab: state.showExploreTab,
     showLiveNowBar: state.showLiveNowBar,
     showLiveZaps: state.showLiveZaps,
+    sidebarFeedMode: state.sidebarFeedMode,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
   }
@@ -549,6 +568,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowLiveZaps: (showLiveZaps) => {
     set({ showLiveZaps })
+    persist(get())
+  },
+  setSidebarFeedMode: (sidebarFeedMode) => {
+    if (!VALID_SIDEBAR_FEED_MODES.includes(sidebarFeedMode)) return
+    set({ sidebarFeedMode })
     persist(get())
   },
   setHoverStreamPreview: (hoverStreamPreview) => {

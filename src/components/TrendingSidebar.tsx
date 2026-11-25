@@ -2,17 +2,28 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Flame,
+  Globe,
   Heart,
   MessageCircle,
+  Network,
   Play,
+  Radio,
   RefreshCw,
   Repeat2,
   Zap,
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
+import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
-import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useSettingsStore, type SidebarFeedMode } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
+
+const SIDEBAR_FEED_OPTIONS: Array<{ value: SidebarFeedMode; label: string }> = [
+  { value: 'trending', label: 'Trending Posts' },
+  { value: 'extended', label: 'Extended' },
+  { value: 'global', label: 'Explore' },
+  { value: 'firewisp', label: 'Wisp Relay' },
+]
 
 function formatShortAge(unixSec: number): string {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
@@ -202,61 +213,120 @@ const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: 
 
 export function TrendingSidebar() {
   const navigate = useNavigate()
-  const trendingSidebarIds = useNostrStore((s) => s.trendingSidebarIds)
-  const loadingTrends = useNostrStore((s) => s.loadingTrends)
-  const loadTrendingSidebar = useNostrStore((s) => s.loadTrendingSidebar)
+  const pubkey = useAuthStore((s) => s.pubkey)
+  const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
+  const setSidebarFeedMode = useSettingsStore((s) => s.setSidebarFeedMode)
+  const setShowExtendedTab = useSettingsStore((s) => s.setShowExtendedTab)
+  const setShowExploreTab = useSettingsStore((s) => s.setShowExploreTab)
+  const setShowFireWispTab = useSettingsStore((s) => s.setShowFireWispTab)
+
+  const postIds = useNostrStore((s) => s.sidebarFeedIds[sidebarFeedMode])
+  const loading = useNostrStore((s) => s.sidebarFeedLoading[sidebarFeedMode])
+  const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
+  const follows = useNostrStore((s) => s.follows)
+  const followsLoaded = useNostrStore((s) => s.followsLoaded)
+  const loadSidebarFeed = useNostrStore((s) => s.loadSidebarFeed)
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
-  const didInitRef = useRef(false)
+  const attemptedKeyRef = useRef<string>('')
 
-  // Initial load once on mount (never re-trigger in a loop if relay returns 0 posts)
+  const isBusy = loading || (sidebarFeedMode === 'extended' && loadingExtendedGraph)
+
+  // Initial load whenever the user switches mode (and once follows finish loading for Extended)
   useEffect(() => {
-    if (didInitRef.current) return
-    didInitRef.current = true
-    if (useNostrStore.getState().trendingSidebarIds.length === 0) {
-      void loadTrendingSidebar()
+    if (sidebarFeedMode === 'extended' && pubkey && !followsLoaded) return
+    const attemptKey =
+      sidebarFeedMode === 'extended'
+        ? `${sidebarFeedMode}:${pubkey || 'anon'}:${follows.length}`
+        : sidebarFeedMode
+    if (attemptedKeyRef.current === attemptKey) return
+    attemptedKeyRef.current = attemptKey
+    if (useNostrStore.getState().sidebarFeedIds[sidebarFeedMode].length === 0) {
+      void loadSidebarFeed(sidebarFeedMode)
     }
-  }, [loadTrendingSidebar])
+  }, [sidebarFeedMode, pubkey, followsLoaded, follows.length, loadSidebarFeed])
 
-  // Auto-refresh trending posts every 5 minutes while the tab is visible
+  // Auto-refresh active sidebar feed every 5 minutes while the tab is visible
   useEffect(() => {
     const id = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return
-      void loadTrendingSidebar(true)
+      void loadSidebarFeed(sidebarFeedMode, true)
     }, 5 * 60_000)
     return () => clearInterval(id)
-  }, [loadTrendingSidebar])
+  }, [sidebarFeedMode, loadSidebarFeed])
+
+  const ModeIcon =
+    sidebarFeedMode === 'extended'
+      ? Network
+      : sidebarFeedMode === 'global'
+        ? Globe
+        : sidebarFeedMode === 'firewisp'
+          ? Radio
+          : Flame
+
+  const handleSeeAll = () => {
+    if (sidebarFeedMode === 'extended') setShowExtendedTab(true)
+    if (sidebarFeedMode === 'global') setShowExploreTab(true)
+    if (sidebarFeedMode === 'firewisp') setShowFireWispTab(true)
+    setActiveFeedTab(sidebarFeedMode)
+    navigate('/')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const emptyMessage =
+    sidebarFeedMode === 'extended'
+      ? !pubkey
+        ? 'Sign in to see posts from your Extended Web of Trust.'
+        : follows.length === 0
+          ? 'Follow a few accounts to populate your Extended network.'
+          : 'No Extended network posts loaded yet.'
+      : sidebarFeedMode === 'global'
+        ? 'No Explore posts loaded yet.'
+        : sidebarFeedMode === 'firewisp'
+          ? 'No recent posts on Wisp Relay yet.'
+          : 'No trending posts loaded yet.'
 
   return (
     <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
-      <div className="flex items-center justify-between mb-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
-          <Flame className="w-3.5 h-3.5 text-[#e8590c]" />
-          Trending Posts
-        </span>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 mb-2.5">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <ModeIcon className="w-3.5 h-3.5 text-[#e8590c] shrink-0" />
+          <select
+            aria-label="Sidebar feed source"
+            value={sidebarFeedMode}
+            onChange={(e) => setSidebarFeedMode(e.target.value as SidebarFeedMode)}
+            title="Switch right sidebar feed"
+            className="w-full min-w-0 px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#262938] hover:border-[#3b4057] text-xs font-semibold text-[#e4e1d8] focus:outline-none focus:border-[#e8590c] truncate cursor-pointer"
+          >
+            {SIDEBAR_FEED_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value} className="bg-[#14151e] text-white">
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={() => void loadTrendingSidebar(true)}
-            disabled={loadingTrends}
-            title="Refresh trending posts"
+            type="button"
+            onClick={() => void loadSidebarFeed(sidebarFeedMode, true)}
+            disabled={isBusy}
+            title="Refresh posts"
             className="p-1 rounded-lg text-[#8c8a82] hover:text-white hover:bg-white/5 cursor-pointer disabled:opacity-40"
           >
             <RefreshCw
-              className={`w-3 h-3 ${loadingTrends ? 'animate-spin text-[#e8590c]' : ''}`}
+              className={`w-3 h-3 ${isBusy ? 'animate-spin text-[#e8590c]' : ''}`}
             />
           </button>
           <button
-            onClick={() => {
-              setActiveFeedTab('trending')
-              navigate('/')
-            }}
-            className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
+            type="button"
+            onClick={handleSeeAll}
+            className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer whitespace-nowrap"
           >
             See all
           </button>
         </div>
       </div>
 
-      {loadingTrends && trendingSidebarIds.length === 0 ? (
+      {isBusy && postIds.length === 0 ? (
         <div className="space-y-2.5 animate-pulse">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="p-3 rounded-xl bg-[#1a1c24]/70 space-y-2">
@@ -269,11 +339,11 @@ export function TrendingSidebar() {
             </div>
           ))}
         </div>
-      ) : trendingSidebarIds.length === 0 ? (
-        <p className="text-xs text-[#6f6d66]">No trending posts loaded yet.</p>
+      ) : postIds.length === 0 ? (
+        <p className="text-xs text-[#6f6d66]">{emptyMessage}</p>
       ) : (
         <div className="space-y-2.5">
-          {trendingSidebarIds.map((id) => (
+          {postIds.map((id) => (
             <TrendingPostCard key={id} eventId={id} />
           ))}
         </div>

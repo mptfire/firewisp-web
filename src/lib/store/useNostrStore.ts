@@ -16,7 +16,7 @@ import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
-import { useSettingsStore } from './useSettingsStore'
+import { useSettingsStore, type SidebarFeedMode } from './useSettingsStore'
 
 export interface NostrProfile {
   pubkey: string
@@ -124,6 +124,8 @@ export interface NostrState {
   loadingMore: boolean
   trendingSidebarIds: string[]
   loadingTrends: boolean
+  sidebarFeedIds: Record<SidebarFeedMode, string[]>
+  sidebarFeedLoading: Record<SidebarFeedMode, boolean>
   notificationIds: string[]
   dms: DecryptedDm[]
 
@@ -139,6 +141,7 @@ export interface NostrState {
   flushPendingFeed: (tab: FeedTab) => void
   loadOlderFeed: (tab: FeedTab) => Promise<number>
   loadTrendingSidebar: (force?: boolean) => Promise<void>
+  loadSidebarFeed: (mode: SidebarFeedMode, force?: boolean) => Promise<void>
   initPoolListener: () => () => void
   ingestEvent: (event: Event) => void
   fetchProfiles: (pubkeys: string[]) => Promise<void>
@@ -310,6 +313,18 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadingMore: false,
   trendingSidebarIds: [],
   loadingTrends: false,
+  sidebarFeedIds: {
+    trending: [],
+    extended: [],
+    global: [],
+    firewisp: [],
+  },
+  sidebarFeedLoading: {
+    trending: false,
+    extended: false,
+    global: false,
+    firewisp: false,
+  },
   notificationIds: [],
   dms: [],
 
@@ -395,6 +410,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       followingFeedIds: [],
       extendedFeedIds: [],
       extendedAuthors: [],
+      sidebarFeedIds: { ...s.sidebarFeedIds, extended: [] },
       pendingFeedIds: { ...s.pendingFeedIds, foryou: [], following: [], extended: [] },
       notificationIds: [],
       dms: [],
@@ -827,76 +843,184 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   loadTrendingSidebar: async (force = false) => {
-    if (get().loadingTrends) return
-    if (!force && get().trendingSidebarIds.length > 0) return
-    set({ loadingTrends: true })
+    await get().loadSidebarFeed('trending', force)
+  },
+
+  loadSidebarFeed: async (mode, force = false) => {
+    if (get().sidebarFeedLoading[mode]) return
+    if (!force && get().sidebarFeedIds[mode].length > 0) return
+
+    set((s) => ({
+      sidebarFeedLoading: { ...s.sidebarFeedLoading, [mode]: true },
+      ...(mode === 'trending' ? { loadingTrends: true } : {}),
+    }))
+
     try {
-      const since48h = Math.floor(Date.now() / 1000) - 48 * 3600
-      const [globalBundle, relayRaw] = await Promise.all([
-        fetchGlobalTrendingEvents(4000),
-        nostrPool.query([TRENDING_RELAY], { kinds: [1], since: since48h, limit: 60 }, 4000),
-      ])
+      const settings = useSettingsStore.getState()
+      const readRelays = [...new Set([...settings.getReadRelays(), ...get().userReadRelays])].slice(0, 8)
+      const myPubkey = useAuthStore.getState().pubkey
+      const followSet = new Set(get().follows.map((p) => p.toLowerCase()))
+      const picked: Event[] = []
+      const seenIds = new Set<string>()
+      const seenContent = new Map<string, Set<string>>()
+      const authorCounts = new Map<string, number>()
 
-      for (const p of globalBundle.profiles) get().ingestEvent(p)
-      for (const z of globalBundle.zaps) get().ingestEvent(z)
-
-      const mergedCandidates = mergeTrendingNotes({
-        hotNotes: globalBundle.hotNotes,
-        trending24hNotes: globalBundle.trending24hNotes,
-        relayTrendingNotes: relayRaw,
-        maxPerAuthor: 1,
-        limit: 80,
-      })
-      if (mergedCandidates.length === 0) return
-
-      // Pick top 6 Trending Posts (distinct authors, non-spam, readable text or media)
-      const hotSeenContent = new Map<string, Set<string>>()
-      const hotAuthors = new Set<string>()
-      const hotPosts: Event[] = []
-      for (const ev of mergedCandidates) {
-        if (!isTopLevelNote(ev) || get().isEventMuted(ev)) continue
-        const pk = ev.pubkey.toLowerCase()
-        if (hotAuthors.has(pk)) continue
-        const verdict = evaluateNoteSpam(ev, { seenContentAuthors: hotSeenContent, maxPerAuthor: 1 })
-        if (verdict.isSpam) continue
+      const hasReadableContent = (ev: Event, minChars: number) => {
         const textOnly = ev.content
           .replace(/https?:\/\/[^\s]+/gi, '')
           .replace(/nostr:[0-9a-z]+/gi, '')
           .trim()
-        const hasMedia = /https?:\/\/[^\s]+\.(png|jpe?g|gif|webp|avif|mp4|webm)/i.test(ev.content)
-        if (textOnly.length < 20 && !hasMedia) continue
-        hotAuthors.add(pk)
-        hotPosts.push(ev)
-        if (hotPosts.length >= 6) break
+        const hasMedia =
+          /https?:\/\/[^\s]+\.(png|jpe?g|gif|webp|avif|mp4|webm|mov)/i.test(ev.content) ||
+          /youtu(?:\.be|be\.com)/i.test(ev.content)
+        return textOnly.length >= minChars || hasMedia
       }
 
-      for (const ev of hotPosts) get().ingestEvent(ev)
-      if (hotPosts.length > 0) {
-        const missingProfilePks = hotPosts
+      if (mode === 'trending') {
+        const since48h = Math.floor(Date.now() / 1000) - 48 * 3600
+        const [globalBundle, relayRaw] = await Promise.all([
+          fetchGlobalTrendingEvents(4000),
+          nostrPool.query([TRENDING_RELAY], { kinds: [1], since: since48h, limit: 60 }, 4000),
+        ])
+
+        for (const p of globalBundle.profiles) get().ingestEvent(p)
+        for (const z of globalBundle.zaps) get().ingestEvent(z)
+
+        const mergedCandidates = mergeTrendingNotes({
+          hotNotes: globalBundle.hotNotes,
+          trending24hNotes: globalBundle.trending24hNotes,
+          relayTrendingNotes: relayRaw,
+          maxPerAuthor: 1,
+          limit: 80,
+        })
+
+        for (const ev of mergedCandidates) {
+          if (seenIds.has(ev.id) || !isTopLevelNote(ev) || get().isEventMuted(ev)) continue
+          const pk = ev.pubkey.toLowerCase()
+          if ((authorCounts.get(pk) || 0) >= 1) continue
+          const verdict = evaluateNoteSpam(ev, { seenContentAuthors: seenContent, maxPerAuthor: 1 })
+          if (verdict.isSpam) continue
+          if (!hasReadableContent(ev, 20)) continue
+          seenIds.add(ev.id)
+          authorCounts.set(pk, 1)
+          picked.push(ev)
+          if (picked.length >= 6) break
+        }
+      } else if (mode === 'extended') {
+        let extendedAuthors = get().extendedAuthors
+        if (extendedAuthors.length === 0 && get().follows.length > 0) {
+          extendedAuthors = await get().loadExtendedNetwork()
+        }
+        if (extendedAuthors.length > 0) {
+          const allowed = new Set(extendedAuthors.map((p) => p.toLowerCase()))
+          const raw = await nostrPool.query(
+            readRelays,
+            { kinds: [1], authors: extendedAuthors.slice(0, 150), limit: 60 },
+            4000,
+          )
+          const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+          for (const ev of sorted) {
+            const pk = ev.pubkey.toLowerCase()
+            if (!allowed.has(pk) || seenIds.has(ev.id) || !isTopLevelNote(ev) || get().isEventMuted(ev)) {
+              continue
+            }
+            if ((authorCounts.get(pk) || 0) >= 1) continue
+            if (settings.spamFilterEnabled) {
+              const verdict = evaluateNoteSpam(ev, {
+                myPubkey,
+                follows: followSet,
+                seenContentAuthors: seenContent,
+                maxPerAuthor: 1,
+              })
+              if (verdict.isSpam) continue
+            }
+            if (!hasReadableContent(ev, 12)) continue
+            seenIds.add(ev.id)
+            authorCounts.set(pk, 1)
+            picked.push(ev)
+            if (picked.length >= 6) break
+          }
+        }
+      } else if (mode === 'global') {
+        const raw = await nostrPool.query(CURATED_EXPLORE_RELAYS, { kinds: [1], limit: 80 }, 4000)
+        const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+        for (const ev of sorted) {
+          if (seenIds.has(ev.id) || get().isEventMuted(ev)) continue
+          if (settings.hideRepliesInExplore && !isTopLevelNote(ev)) continue
+          const pk = ev.pubkey.toLowerCase()
+          if ((authorCounts.get(pk) || 0) >= 1) continue
+          if (settings.spamFilterEnabled) {
+            const verdict = evaluateNoteSpam(ev, {
+              myPubkey,
+              follows: followSet,
+              seenContentAuthors: seenContent,
+              maxPerAuthor: 1,
+              requirePowBits: settings.requirePowInExplore ? 12 : 0,
+            })
+            if (verdict.isSpam) continue
+          }
+          if (!hasReadableContent(ev, 15)) continue
+          seenIds.add(ev.id)
+          authorCounts.set(pk, 1)
+          picked.push(ev)
+          if (picked.length >= 6) break
+        }
+      } else {
+        // Wisp Relay (firewisp.relay.rtard.de)
+        const raw = await nostrPool.query([FIREWISP_RELAY], { kinds: [1], limit: 50 }, 4000)
+        const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+        for (const ev of sorted) {
+          if (seenIds.has(ev.id) || !isTopLevelNote(ev) || get().isEventMuted(ev)) continue
+          const pk = ev.pubkey.toLowerCase()
+          const count = authorCounts.get(pk) || 0
+          if (count >= 2) continue
+          if (!ev.content.trim()) continue
+          seenIds.add(ev.id)
+          authorCounts.set(pk, count + 1)
+          picked.push(ev)
+          if (picked.length >= 6) break
+        }
+      }
+
+      for (const ev of picked) get().ingestEvent(ev)
+      if (picked.length > 0) {
+        const missingProfilePks = picked
           .map((e) => e.pubkey)
           .filter((pk) => !get().profiles[pk])
         if (missingProfilePks.length > 0) void get().fetchProfiles(missingProfilePks)
-        const hotIds = hotPosts.map((e) => e.id)
-        const metaRelays = [...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays])].slice(0, 6)
+        const pickedIds = picked.map((e) => e.id)
+        const metaRelays = [
+          ...new Set([
+            ...(mode === 'firewisp' ? [FIREWISP_RELAY] : []),
+            ...readRelays,
+          ]),
+        ].slice(0, 6)
         void nostrPool
-          .query(metaRelays, { kinds: [1, 6, 7, 9735], '#e': hotIds, limit: 200 }, 3500)
+          .query(metaRelays, { kinds: [1, 6, 7, 9735], '#e': pickedIds, limit: 200 }, 3500)
           .then((meta) => {
             for (const m of meta) get().ingestEvent(m)
           })
       }
 
-      if (hotPosts.length > 0) {
-        set((s) => {
-          const eventsMap = { ...s.events }
-          for (const ev of hotPosts) eventsMap[ev.id] = ev
-          return {
-            events: eventsMap,
-            trendingSidebarIds: hotPosts.map((e) => e.id),
-          }
-        })
-      }
+      const nextIds = picked.map((e) => e.id)
+      set((s) => {
+        const eventsMap = { ...s.events }
+        for (const ev of picked) eventsMap[ev.id] = ev
+        const resolvedIds =
+          nextIds.length > 0 || mode === 'extended' || mode === 'firewisp'
+            ? nextIds
+            : s.sidebarFeedIds[mode]
+        return {
+          events: eventsMap,
+          sidebarFeedIds: { ...s.sidebarFeedIds, [mode]: resolvedIds },
+          ...(mode === 'trending' ? { trendingSidebarIds: resolvedIds } : {}),
+        }
+      })
     } finally {
-      set({ loadingTrends: false })
+      set((s) => ({
+        sidebarFeedLoading: { ...s.sidebarFeedLoading, [mode]: false },
+        ...(mode === 'trending' ? { loadingTrends: false } : {}),
+      }))
     }
   },
 
