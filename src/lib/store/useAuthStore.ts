@@ -12,7 +12,6 @@ import {
 import { createNewMnemonic, derivePrivkeyFromMnemonic, isLikelyMnemonic } from '../crypto/nip06'
 import { decryptNcryptsec, encryptNcryptsec, isNcryptsec } from '../crypto/nip49'
 import { isValidHex64 } from '../sanitize'
-import { useSettingsStore } from './useSettingsStore'
 import { useNostrStore } from './useNostrStore'
 
 const SESSION_META_KEY = 'firewisp_auth_meta_v1'
@@ -334,10 +333,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     get().signer?.destroy()
-    const settings = useSettingsStore.getState()
-    if (!settings.nwcRememberDevice) {
-      settings.setNwcUri('')
-    }
     useNostrStore.getState().resetUserState()
     writeMeta(null)
     set({

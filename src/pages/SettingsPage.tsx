@@ -761,7 +761,7 @@ export function SettingsPage() {
             <div className="text-[#8c8a82]">
               {settings.nwcRememberDevice
                 ? 'Stays saved across refreshes, restarts, and sign-outs until you click Remove.'
-                : 'Tab session only — survives page refreshes, clears when you close the tab or sign out.'}
+                : 'Tab session only — survives page refreshes and sign-outs, clears when you close the tab or click Remove.'}
             </div>
           </div>
           <input
