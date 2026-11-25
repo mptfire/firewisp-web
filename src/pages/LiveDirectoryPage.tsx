@@ -357,7 +357,7 @@ export function LiveDirectoryPage() {
   return (
     <div className="min-h-screen">
       {/* Sticky Header */}
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/92 backdrop-blur-md border-b border-[#20222c] px-4 py-3 space-y-2.5">
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/92 backdrop-blur-md border-b border-[#20222c] px-4 py-3 space-y-2.5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <span className="px-2 py-0.5 rounded-md bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0">

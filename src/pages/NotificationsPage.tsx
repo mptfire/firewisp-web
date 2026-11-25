@@ -107,7 +107,7 @@ export function NotificationsPage() {
 
   return (
     <div>
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5 flex items-center justify-between gap-2">
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h1 className="font-bold text-base">Notifications</h1>
           {unreadCount > 0 && (

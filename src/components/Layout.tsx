@@ -563,7 +563,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <main className="flex-1 min-w-0 border-r border-[#20222c] pb-[calc(5rem+env(safe-area-inset-bottom,0px))] md:pb-6">
           {/* Mobile top bar */}
           <header className="md:hidden sticky top-0 z-30 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] fw-safe-top">
-            <div className="px-4 py-2.5 flex items-center justify-between">
+            <div className="px-4 h-[52px] flex items-center justify-between">
               <Link
                 to="/"
                 onClick={(e) => scrollTopIfCurrent(e, '/')}
@@ -687,7 +687,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* PoW Mining Status Pill */}
       {powBusyMessage && (
-        <div className="fixed bottom-16 md:bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-[#1a1c24] border border-[#f59f00]/40 shadow-xl flex items-center gap-2 text-xs text-[#f59f00]">
+        <div className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-[#1a1c24] border border-[#f59f00]/40 shadow-xl flex items-center gap-2 text-xs text-[#f59f00]">
           <Cpu className="w-4 h-4 animate-pulse" />
           {powBusyMessage}
         </div>
@@ -699,8 +699,8 @@ export function Layout({ children }: { children: ReactNode }) {
           onClick={() => setToast(null)}
           className={`fixed z-50 px-4 py-2.5 rounded-xl bg-[#1a1c24] border border-[#2f3344] shadow-xl text-xs text-[#f4f1ea] hover:border-[#e8590c] cursor-pointer ${
             hasMiniPlayer
-              ? 'bottom-16 md:bottom-5 left-1/2 -translate-x-1/2'
-              : 'bottom-16 md:bottom-5 right-5'
+              ? 'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-5 left-1/2 -translate-x-1/2'
+              : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom,0px))] md:bottom-5 right-5'
           }`}
         >
           {toastMessage}

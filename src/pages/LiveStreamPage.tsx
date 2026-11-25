@@ -785,7 +785,7 @@ export function LiveStreamPage() {
   return (
     <div className="flex flex-col min-h-[calc(100vh-52px)] md:min-h-screen">
       {/* Top Bar */}
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/95 backdrop-blur-md border-b border-[#20222c] px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2.5">
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/95 backdrop-blur-md border-b border-[#20222c] px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2 min-w-0">
           {isLive ? (
             <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0">

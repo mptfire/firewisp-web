@@ -325,7 +325,7 @@ export function FeedPage() {
   return (
     <div>
       {/* Sticky Feed Tabs */}
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] flex overflow-x-auto text-xs sm:text-sm font-medium">
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] flex overflow-x-auto text-xs sm:text-sm font-medium">
         {visibleTabs.map(([id, label, Icon]) => (
           <button
             key={id}
@@ -521,7 +521,7 @@ export function FeedPage() {
 
       {/* Jumble-style buffered new-notes pill (zero scroll jumping while reading!) */}
       {pendingCount > 0 && (
-        <div className="sticky top-[102px] md:top-[52px] z-20 flex justify-center py-2 pointer-events-none">
+        <div className="sticky top-[calc(102px+env(safe-area-inset-top,0px))] md:top-[52px] z-20 flex justify-center py-2 pointer-events-none">
           <button
             onClick={handleShowNew}
             className="pointer-events-auto px-4 py-1.5 rounded-full bg-[#e8590c] hover:bg-[#d9480f] text-white text-xs font-semibold shadow-lg shadow-black/40 flex items-center gap-1.5 transition cursor-pointer"

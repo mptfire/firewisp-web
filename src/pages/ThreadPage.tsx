@@ -130,7 +130,7 @@ export function ThreadPage() {
 
   return (
     <div>
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3 flex items-center gap-3">
         <button
           onClick={() => navigate(-1)}
           className="p-1.5 rounded-lg hover:bg-white/5 text-[#c2bfb7] cursor-pointer"
