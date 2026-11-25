@@ -42,6 +42,7 @@ export function FireWispVideoPlayer({
   const playerId = useId()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const mediaVolume = useSettingsStore((s) => s.mediaVolume)
@@ -230,7 +231,10 @@ export function FireWispVideoPlayer({
     >
       <video
         key={`${src}:${useCors ? 'cors' : 'nocors'}`}
-        ref={videoRef}
+        ref={(el) => {
+          videoRef.current = el
+          setVideoNode((prev) => (prev === el ? prev : el))
+        }}
         src={videoSrc}
         poster={poster}
         crossOrigin={useCors ? 'anonymous' : undefined}
@@ -330,7 +334,7 @@ export function FireWispVideoPlayer({
       )}
 
       <VideoControlBar
-        videoEl={videoRef.current}
+        videoEl={videoNode}
         playing={playing}
         isLive={false}
         compact={compact}
@@ -338,7 +342,7 @@ export function FireWispVideoPlayer({
         volume={mediaVolume}
         muted={mediaMuted}
         canBoost={webAudioCapable}
-        vuEnabled={webAudioCapable}
+        vuEnabled={webAudioCapable || !ios}
         hideVolumeSlider={ios && !webAudioCapable}
         currentTime={currentTime}
         duration={duration}

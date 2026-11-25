@@ -13,7 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import { formatBitrate, readVideoVuLevel } from '../lib/mediaAudio'
+import { formatBitrate, readVideoFrequencyBands } from '../lib/mediaAudio'
 
 export interface HlsQualityOption {
   index: number
@@ -74,61 +74,79 @@ function formatTime(sec: number): string {
   return `${m}:${ss}`
 }
 
-const VU_THRESHOLDS = [0.14, 0.3, 0.5, 0.72, 0.88]
+const MINI_EQ_BANDS = 5
 
 function LiveVuMeter({
   videoEl,
   active,
   boosted,
+  volume,
 }: {
   videoEl: HTMLVideoElement | null
   active: boolean
   boosted: boolean
+  volume: number
 }) {
-  const [level, setLevel] = useState(0)
+  const [bands, setBands] = useState<number[]>(() => Array(MINI_EQ_BANDS).fill(0))
+  const scratchRef = useRef<number[]>(Array(MINI_EQ_BANDS).fill(0))
 
   useEffect(() => {
-    if (!active || !videoEl) {
-      setLevel(0)
+    if (!active) {
+      setBands(Array(MINI_EQ_BANDS).fill(0))
       return
     }
     let rafId = 0
     let lastTick = 0
     const tick = (now: number) => {
-      if (now - lastTick >= 55) {
+      if (now - lastTick >= 42) {
         lastTick = now
-        setLevel(readVideoVuLevel(videoEl))
+        const scratch = scratchRef.current
+        const hasReal = videoEl ? readVideoFrequencyBands(videoEl, scratch) : false
+        if (!hasReal) {
+          const t = now * 0.0046
+          const volScale = Math.min(1.1, Math.max(0.28, Math.min(2, volume) * 0.85))
+          for (let i = 0; i < MINI_EQ_BANDS; i++) {
+            const wave =
+              0.44 +
+              0.3 * Math.sin(t * (1.7 + i * 0.42) + i * 1.1) +
+              0.2 * Math.cos(t * (3.1 + i * 0.35) - i * 1.6)
+            scratch[i] = Math.min(0.95, Math.max(0.12, wave * volScale))
+          }
+        }
+        setBands([...scratch])
       }
       rafId = requestAnimationFrame(tick)
     }
     rafId = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafId)
-  }, [active, videoEl])
+  }, [active, videoEl, volume])
 
   return (
     <div
       aria-hidden="true"
-      title={active ? 'Live audio level' : 'Audio muted'}
+      title={active ? 'Live audio equalizer' : 'Audio muted'}
       className="flex items-end gap-[2px] h-3.5 px-1 shrink-0"
     >
-      {VU_THRESHOLDS.map((th, idx) => {
-        const lit = active && level >= th
-        const colorClass = !lit
-          ? 'bg-white/15'
-          : idx >= 4
-            ? boosted
-              ? 'bg-[#ffd43b]'
-              : 'bg-red-400'
-            : idx >= 3
-              ? 'bg-amber-400'
-              : 'bg-emerald-400'
-        const heightPct = 36 + idx * 16
+      {bands.map((val, idx) => {
+        const pct = active ? Math.max(14, Math.round(val * 100)) : 18
         return (
-          <span
-            key={th}
-            style={{ height: `${heightPct}%` }}
-            className={`w-[2.5px] rounded-full transition-colors duration-75 ${colorClass}`}
-          />
+          <div
+            key={idx}
+            className="relative w-[3px] h-full rounded-full bg-white/15 overflow-hidden"
+          >
+            {active && (
+              <div
+                style={{
+                  clipPath: `inset(${100 - pct}% 0 0 0)`,
+                  backgroundImage: boosted
+                    ? 'linear-gradient(to top, #10b981 0%, #4ade80 42%, #facc15 68%, #ff922b 86%, #fff3bf 100%)'
+                    : 'linear-gradient(to top, #10b981 0%, #4ade80 45%, #facc15 72%, #ff922b 88%, #ef4444 100%)',
+                  transition: 'clip-path 60ms linear',
+                }}
+                className="absolute inset-0"
+              />
+            )}
+          </div>
         )
       })}
     </div>
@@ -383,6 +401,7 @@ export function VideoControlBar({
                   videoEl={videoEl}
                   active={playing && !muted && sliderPct > 0}
                   boosted={isBoosted}
+                  volume={effectiveVol}
                 />
               )}
             </div>

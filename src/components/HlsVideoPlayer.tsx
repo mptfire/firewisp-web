@@ -53,6 +53,7 @@ export function HlsVideoPlayer({
 }: HlsVideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [videoNode, setVideoNode] = useState<HTMLVideoElement | null>(null)
   const hlsRef = useRef<Hls | null>(null)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -643,7 +644,10 @@ export function HlsVideoPlayer({
       ) : (
         <>
           <video
-            ref={videoRef}
+            ref={(el) => {
+              videoRef.current = el
+              setVideoNode((prev) => (prev === el ? prev : el))
+            }}
             playsInline
             muted={effectiveMuted}
             onClick={() => {
@@ -727,7 +731,7 @@ export function HlsVideoPlayer({
 
           {!error && (
             <VideoControlBar
-              videoEl={videoRef.current}
+              videoEl={videoNode}
               playing={playing}
               isLive={isLive}
               compact={compact}
@@ -735,7 +739,7 @@ export function HlsVideoPlayer({
               volume={mediaVolume}
               muted={effectiveMuted}
               canBoost={webAudioCapable}
-              vuEnabled={webAudioCapable}
+              vuEnabled={webAudioCapable || !ios}
               hideVolumeSlider={ios && !webAudioCapable}
               currentTime={currentTime}
               duration={duration}

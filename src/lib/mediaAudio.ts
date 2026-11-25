@@ -202,61 +202,27 @@ export function applyVideoAudioLevel(
 }
 
 /**
- * Returns a normalized 0..1 live audio level for the VU meter, or 0 if unavailable/silent.
+ * Fills `outBands` with normalized 0..1 logarithmic frequency spectrum bands for a specific `<video>`.
+ * Returns `true` when real Web Audio FFT spectrum data was written, or `false` if unavailable/suspended.
  */
-export function readVideoVuLevel(video: HTMLVideoElement): number {
-  const graph = graphByVideo.get(video)
-  if (!graph || graph.ctx.state !== 'running' || video.paused || video.muted) return 0
-  graph.analyser.getByteTimeDomainData(graph.data)
-  let sumSq = 0
-  const len = graph.data.length
-  for (let i = 0; i < len; i++) {
-    const norm = (graph.data[i] - 128) / 128
-    sumSq += norm * norm
-  }
-  const rms = Math.sqrt(sumSq / len)
-  // Boost perceptual sensitivity for typical speech/music RMS (0.02..0.35 -> 0..1)
-  return Math.min(1, Math.pow(rms * 3.4, 0.78))
-}
-
-/**
- * Reads normalized 0..1 logarithmic frequency spectrum bands from whichever video is currently outputting sound.
- * Reuses pre-allocated typed arrays to keep 30fps equalizer rendering allocation-light.
- */
-export function readActiveFrequencyBands(
+export function readVideoFrequencyBands(
+  video: HTMLVideoElement,
   outBands: number[],
-): { playing: boolean; hasSpectrum: boolean } {
-  let activeVideo: HTMLVideoElement | null = null
-  let activeGraph: VideoAudioGraph | null = null
-
-  for (const v of activeSoundVideos) {
-    if (v.paused || v.muted) continue
-    activeVideo = v
-    const g = graphByVideo.get(v)
-    if (g) {
-      if (g.ctx.state === 'suspended') {
-        void g.ctx.resume().catch(() => {})
-      }
-      if (g.ctx.state === 'running') {
-        activeGraph = g
-        break
-      }
-    }
-  }
-
-  if (!activeVideo) {
+): boolean {
+  const graph = graphByVideo.get(video)
+  if (!graph || video.paused || video.muted) {
     for (let i = 0; i < outBands.length; i++) outBands[i] = 0
-    return { playing: false, hasSpectrum: false }
+    return false
   }
-
-  if (!activeGraph) {
+  if (graph.ctx.state === 'suspended') {
+    void graph.ctx.resume().catch(() => {})
+  }
+  if (graph.ctx.state !== 'running') {
     for (let i = 0; i < outBands.length; i++) outBands[i] = 0
-    return { playing: true, hasSpectrum: false }
+    return false
   }
-
-  const freq = activeGraph.freqData
-  activeGraph.analyser.getByteFrequencyData(freq)
-  // Map bins 1..64 (~187 Hz to ~12 kHz) logarithmically across outBands.length bars
+  const freq = graph.freqData
+  graph.analyser.getByteFrequencyData(freq)
   const count = outBands.length
   const maxBin = Math.min(freq.length - 1, 72)
   for (let i = 0; i < count; i++) {
@@ -268,11 +234,57 @@ export function readActiveFrequencyBands(
     for (let b = lo; b <= hi; b++) {
       if (freq[b] > peak) peak = freq[b]
     }
-    // Slight high-band tilt so treble bars look lively alongside strong bass
     const tilt = 1 + (i / count) * 0.25
     outBands[i] = Math.min(1, Math.pow((peak / 255) * tilt, 0.92))
   }
-  return { playing: true, hasSpectrum: true }
+  return true
+}
+
+/**
+ * Returns a normalized 0..1 live audio level for the VU meter, or 0 if unavailable/silent.
+ * Uses logarithmic dB-scaled FFT bins (-85..-15 dB) so normal speech/stream audio registers cleanly
+ * instead of quantizing to zero in 8-bit linear time-domain sampling.
+ */
+export function readVideoVuLevel(video: HTMLVideoElement): number {
+  const graph = graphByVideo.get(video)
+  if (!graph || video.paused || video.muted) return 0
+  if (graph.ctx.state === 'suspended') {
+    void graph.ctx.resume().catch(() => {})
+  }
+  if (graph.ctx.state !== 'running') return 0
+  const freq = graph.freqData
+  graph.analyser.getByteFrequencyData(freq)
+  const maxBin = Math.min(freq.length - 1, 56)
+  let sum = 0
+  let peak = 0
+  for (let b = 1; b <= maxBin; b++) {
+    const v = freq[b] / 255
+    sum += v
+    if (v > peak) peak = v
+  }
+  const avg = sum / maxBin
+  return Math.min(1, Math.pow(peak * 0.65 + avg * 0.65, 0.9))
+}
+
+/**
+ * Reads normalized 0..1 logarithmic frequency spectrum bands from whichever video is currently outputting sound.
+ * Reuses pre-allocated typed arrays to keep 30fps equalizer rendering allocation-light.
+ */
+export function readActiveFrequencyBands(
+  outBands: number[],
+): { playing: boolean; hasSpectrum: boolean } {
+  let activeVideo: HTMLVideoElement | null = null
+
+  for (const v of activeSoundVideos) {
+    if (v.paused || v.muted) continue
+    activeVideo = v
+    if (readVideoFrequencyBands(v, outBands)) {
+      return { playing: true, hasSpectrum: true }
+    }
+  }
+
+  for (let i = 0; i < outBands.length; i++) outBands[i] = 0
+  return { playing: Boolean(activeVideo), hasSpectrum: false }
 }
 
 /**
