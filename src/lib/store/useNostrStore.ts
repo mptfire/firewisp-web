@@ -129,6 +129,8 @@ export interface NostrState {
   notificationIds: string[]
   notificationsLastSeenAt: number
   readNotificationIds: Record<string, true>
+  muteListSyncStatus: 'idle' | 'syncing' | 'synced' | 'locked' | 'empty'
+  muteListHasRemoteEncrypted: boolean
   dms: DecryptedDm[]
 
   loadingFeed: boolean
@@ -148,6 +150,11 @@ export interface NostrState {
   ingestEvent: (event: Event) => void
   fetchProfiles: (pubkeys: string[]) => Promise<void>
   loadUserGraph: (pubkey: string) => Promise<void>
+  syncMuteList: (pubkey: string) => Promise<{
+    publicCount: number
+    privateCount: number
+    status: 'synced' | 'locked' | 'empty'
+  }>
   loadExtendedNetwork: () => Promise<string[]>
   clearFeedTab: (tab: FeedTab) => void
   resetUserState: () => void
@@ -417,6 +424,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   notificationIds: [],
   notificationsLastSeenAt: 0,
   readNotificationIds: {},
+  muteListSyncStatus: 'idle',
+  muteListHasRemoteEncrypted: false,
   dms: [],
 
   loadingFeed: false,
@@ -507,6 +516,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       notificationIds: [],
       notificationsLastSeenAt: 0,
       readNotificationIds: {},
+      muteListSyncStatus: 'idle',
+      muteListHasRemoteEncrypted: false,
       dms: [],
     }))
   },
@@ -775,10 +786,49 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
       }
 
+      // Parse NIP-65 kind-10002 relays first so mute lists living on user's custom relays are never missed
+      let nip65Read: string[] = []
+      if (relayListEvents.length > 0) {
+        const latestRelayList = [...relayListEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        const readList: string[] = []
+        const writeList: string[] = []
+        for (const t of latestRelayList.tags) {
+          if (t[0] !== 'r' || !t[1]) continue
+          const clean = sanitizePublicRelayUrl(t[1])
+          if (!clean) continue
+          const marker = t[2]
+          if (!marker || marker === 'read') readList.push(clean)
+          if (!marker || marker === 'write') writeList.push(clean)
+        }
+        nip65Read = [...new Set(readList)].slice(0, 12)
+        set({
+          userReadRelays: nip65Read,
+          userWriteRelays: [...new Set(writeList)].slice(0, 12),
+        })
+      }
+
+      // If user has NIP-65 read relays beyond our initial query set, also check them for a newer kind-10000 mute list
+      let allMuteEvents = muteEvents
+      const extraMuteRelays = nip65Read.filter((r) => !relays.includes(r)).slice(0, 6)
+      if (extraMuteRelays.length > 0) {
+        try {
+          const extraMutes = await nostrPool.query(
+            extraMuteRelays,
+            { kinds: [10000], authors: [pubkey], limit: 2 },
+            3500,
+          )
+          if (extraMutes.length > 0) {
+            allMuteEvents = [...muteEvents, ...extraMutes]
+          }
+        } catch {
+          // ignore extra relay query failure
+        }
+      }
+
       // Sync NIP-51 kind-10000 mute list:
-      // Public tags go to persisted settings; NIP-44 encrypted private tags stay strictly in RAM!
-      if (muteEvents.length > 0) {
-        const latestMute = [...muteEvents].sort((a, b) => b.created_at - a.created_at)[0]
+      // Public tags go to persisted settings; decrypted private tags stay strictly in RAM!
+      if (allMuteEvents.length > 0) {
+        const latestMute = [...allMuteEvents].sort((a, b) => b.created_at - a.created_at)[0]
         const pubPubkeys: string[] = []
         const pubHashtags: string[] = []
         const pubWords: string[] = []
@@ -794,10 +844,35 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
 
         if (latestMute.content) {
+          set({ muteListHasRemoteEncrypted: true })
           const signer = useAuthStore.getState().signer
-          if (signer?.canEncrypt) {
+          let decrypted: string | null = null
+          const looksNip04 = latestMute.content.includes('?iv=')
+          if (signer) {
+            if (looksNip04 && signer.nip04Decrypt) {
+              try {
+                decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
+              } catch {
+                // try NIP-44 fallback below
+              }
+            }
+            if (!decrypted && signer.canEncrypt) {
+              try {
+                decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
+              } catch {
+                // try NIP-04 fallback below
+              }
+            }
+            if (!decrypted && !looksNip04 && signer.nip04Decrypt) {
+              try {
+                decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
+              } catch {
+                // signer declined or incompatible format
+              }
+            }
+          }
+          if (decrypted) {
             try {
-              const decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
               const parsed = JSON.parse(decrypted) as unknown
               if (Array.isArray(parsed)) {
                 const privPubkeys: string[] = []
@@ -815,12 +890,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
                     .getState()
                     .mergePrivateMutes({ pubkeys: privPubkeys, hashtags: privHashtags, words: privWords })
                 }
+                set({ muteListSyncStatus: 'synced' })
+              } else {
+                set({ muteListSyncStatus: 'synced' })
               }
             } catch {
-              // Encrypted with legacy NIP-04 or signer declined — keep public tags cleanly
+              set({ muteListSyncStatus: 'locked' })
             }
+          } else {
+            set({ muteListSyncStatus: 'locked' })
           }
+        } else {
+          set({ muteListHasRemoteEncrypted: false, muteListSyncStatus: 'synced' })
         }
+      } else {
+        set({ muteListHasRemoteEncrypted: false, muteListSyncStatus: 'empty' })
       }
 
       if (interestEvents.length > 0) {
@@ -834,24 +918,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           }
         }
         set({ followedHashtags: [...tagSet].slice(0, 40) })
-      }
-
-      if (relayListEvents.length > 0) {
-        const latestRelayList = [...relayListEvents].sort((a, b) => b.created_at - a.created_at)[0]
-        const nip65Read: string[] = []
-        const nip65Write: string[] = []
-        for (const t of latestRelayList.tags) {
-          if (t[0] !== 'r' || !t[1]) continue
-          const clean = sanitizePublicRelayUrl(t[1])
-          if (!clean) continue
-          const marker = t[2]
-          if (!marker || marker === 'read') nip65Read.push(clean)
-          if (!marker || marker === 'write') nip65Write.push(clean)
-        }
-        set({
-          userReadRelays: [...new Set(nip65Read)].slice(0, 12),
-          userWriteRelays: [...new Set(nip65Write)].slice(0, 12),
-        })
       }
 
       if (contactEvents.length > 0) {
@@ -883,6 +949,96 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }
     } finally {
       set({ followsLoaded: true })
+    }
+  },
+
+  syncMuteList: async (pubkey) => {
+    set({ muteListSyncStatus: 'syncing' })
+    const relays = [
+      ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
+    ].slice(0, 12)
+    try {
+      const muteEvents = await nostrPool.query(
+        relays,
+        { kinds: [10000], authors: [pubkey], limit: 4 },
+        4500,
+      )
+      if (muteEvents.length === 0) {
+        set({ muteListSyncStatus: 'empty', muteListHasRemoteEncrypted: false })
+        return { publicCount: 0, privateCount: 0, status: 'empty' }
+      }
+      const latestMute = [...muteEvents].sort((a, b) => b.created_at - a.created_at)[0]
+      const pubPubkeys: string[] = []
+      const pubHashtags: string[] = []
+      const pubWords: string[] = []
+      for (const t of latestMute.tags) {
+        if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) pubPubkeys.push(t[1].toLowerCase())
+        else if (t[0] === 't' && t[1]) pubHashtags.push(t[1])
+        else if (t[0] === 'word' && t[1]) pubWords.push(t[1])
+      }
+      if (pubPubkeys.length > 0 || pubHashtags.length > 0 || pubWords.length > 0) {
+        useSettingsStore
+          .getState()
+          .mergeRemoteMutes({ pubkeys: pubPubkeys, hashtags: pubHashtags, words: pubWords })
+      }
+      if (!latestMute.content) {
+        set({ muteListSyncStatus: 'synced', muteListHasRemoteEncrypted: false })
+        return { publicCount: pubPubkeys.length, privateCount: 0, status: 'synced' }
+      }
+      set({ muteListHasRemoteEncrypted: true })
+      const signer = useAuthStore.getState().signer
+      let decrypted: string | null = null
+      const looksNip04 = latestMute.content.includes('?iv=')
+      if (signer) {
+        if (looksNip04 && signer.nip04Decrypt) {
+          try {
+            decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
+          } catch {
+            // try NIP-44 fallback
+          }
+        }
+        if (!decrypted && signer.canEncrypt) {
+          try {
+            decrypted = await signer.nip44Decrypt(pubkey, latestMute.content)
+          } catch {
+            // try NIP-04 fallback
+          }
+        }
+        if (!decrypted && !looksNip04 && signer.nip04Decrypt) {
+          try {
+            decrypted = await signer.nip04Decrypt(pubkey, latestMute.content)
+          } catch {
+            // signer declined
+          }
+        }
+      }
+      if (!decrypted) {
+        set({ muteListSyncStatus: 'locked' })
+        return { publicCount: pubPubkeys.length, privateCount: 0, status: 'locked' }
+      }
+      const parsed = JSON.parse(decrypted) as unknown
+      const privPubkeys: string[] = []
+      const privHashtags: string[] = []
+      const privWords: string[] = []
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (!Array.isArray(item) || !item.every((x) => typeof x === 'string')) continue
+          const t = item as string[]
+          if (t[0] === 'p' && t[1] && /^[0-9a-f]{64}$/i.test(t[1])) privPubkeys.push(t[1].toLowerCase())
+          else if (t[0] === 't' && t[1]) privHashtags.push(t[1])
+          else if (t[0] === 'word' && t[1]) privWords.push(t[1])
+        }
+        if (privPubkeys.length > 0 || privHashtags.length > 0 || privWords.length > 0) {
+          useSettingsStore
+            .getState()
+            .mergePrivateMutes({ pubkeys: privPubkeys, hashtags: privHashtags, words: privWords })
+        }
+      }
+      set({ muteListSyncStatus: 'synced' })
+      return { publicCount: pubPubkeys.length, privateCount: privPubkeys.length, status: 'synced' }
+    } catch {
+      set({ muteListSyncStatus: 'locked' })
+      return { publicCount: 0, privateCount: 0, status: 'locked' }
     }
   },
 

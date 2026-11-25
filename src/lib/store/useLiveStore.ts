@@ -519,14 +519,15 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         ...safeNaddrRelays,
         ...LIVE_DISCOVERY_RELAYS,
         ...useSettingsStore.getState().getReadRelays(),
+        ...useNostrStore.getState().userReadRelays,
       ]),
-    ].slice(0, 10)
+    ].slice(0, 12)
 
     try {
       const evs = await nostrPool.query(
         relays,
         { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 2 },
-        4000,
+        5000,
       )
       const sorted = [...evs].sort((a, b) => b.created_at - a.created_at)
       for (const ev of sorted) {
@@ -569,13 +570,14 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             ...(cached?.relayHints || []),
             ...LIVE_DISCOVERY_RELAYS,
             ...useSettingsStore.getState().getReadRelays(),
+            ...useNostrStore.getState().userReadRelays,
           ]),
-        ].slice(0, 10)
+        ].slice(0, 12)
 
         const activityEvs = await nostrPool.query(
           baseRelays,
           { kinds: [KIND_LIVE_ACTIVITY], authors: [cleanHost], '#d': [dTag], limit: 2 },
-          4000,
+          5000,
         )
         if (!active) return
 

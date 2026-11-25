@@ -5,6 +5,7 @@ import {
   type Event,
   type EventTemplate,
 } from 'nostr-tools/pure'
+import * as nip04 from 'nostr-tools/nip04'
 import * as nip44 from 'nostr-tools/nip44'
 import { BunkerSigner, createNostrConnectURI, parseBunkerInput } from 'nostr-tools/nip46'
 import { SimplePool } from 'nostr-tools/pool'
@@ -21,6 +22,7 @@ export interface FireWispSigner {
   signEvent(template: EventTemplate): Promise<Event>
   nip44Encrypt(peerPubkey: string, plaintext: string): Promise<string>
   nip44Decrypt(peerPubkey: string, ciphertext: string): Promise<string>
+  nip04Decrypt?(peerPubkey: string, ciphertext: string): Promise<string>
   /** Only implemented by local signer for explicit user-initiated backup export */
   exportSecretKey?: () => Uint8Array
   destroy(): void
@@ -82,6 +84,11 @@ export class LocalKeySigner implements FireWispSigner {
     return nip44.v2.decrypt(ciphertext, key)
   }
 
+  async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
+    this.assertAlive()
+    return nip04.decrypt(this.privkey, peerPubkey, ciphertext)
+  }
+
   exportSecretKey(): Uint8Array {
     this.assertAlive()
     return new Uint8Array(this.privkey)
@@ -132,6 +139,13 @@ export class Nip07Signer implements FireWispSigner {
       throw new Error('Your browser extension does not support NIP-44 decryption')
     }
     return window.nostr.nip44.decrypt(peerPubkey, ciphertext)
+  }
+
+  async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
+    if (!window.nostr?.nip04) {
+      throw new Error('Your browser extension does not support NIP-04 decryption')
+    }
+    return window.nostr.nip04.decrypt(peerPubkey, ciphertext)
   }
 
   destroy(): void {
@@ -256,6 +270,10 @@ export class Nip46BunkerSigner implements FireWispSigner {
 
   async nip44Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
     return this.bunker.nip44Decrypt(peerPubkey, ciphertext)
+  }
+
+  async nip04Decrypt(peerPubkey: string, ciphertext: string): Promise<string> {
+    return this.bunker.nip04Decrypt(peerPubkey, ciphertext)
   }
 
   destroy(): void {

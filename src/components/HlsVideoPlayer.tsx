@@ -308,9 +308,15 @@ export function HlsVideoPlayer({
           }
         }
       } else {
-        // Safari native HLS or direct MP4/WebM recording (attempt CORS first, fall back cleanly on opaque hosts)
-        let triedWithoutCors = false
-        video.crossOrigin = 'anonymous'
+        // Safari native HLS or direct MP4/WebM recording.
+        // On iOS Safari, setting crossOrigin="anonymous" breaks native AVPlayer fMP4 HLS streams (e.g. streamstr.net),
+        // and we already skip Web Audio on iOS native HLS anyway — so skip crossOrigin cleanly on iOS!
+        let triedWithoutCors = ios
+        if (ios) {
+          video.removeAttribute('crossorigin')
+        } else {
+          video.crossOrigin = 'anonymous'
+        }
         video.src = safeStreamUrl
         nativeCanPlay = () => {
           if (!destroyed) {

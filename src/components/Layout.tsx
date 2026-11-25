@@ -541,6 +541,12 @@ export function Layout({ children }: { children: ReactNode }) {
               )}
             </div>
 
+            {isDesktopMd && showGlobalAudio && (
+              <div className="mt-3">
+                <SidebarAudioDeck />
+              </div>
+            )}
+
             {isDesktopMd && isTheaterMode ? (
               <div className="mt-3">
                 <StreamTopZappersCard />
@@ -550,12 +556,6 @@ export function Layout({ children }: { children: ReactNode }) {
                 <LiveZapsCard />
               </div>
             ) : null}
-
-            {isDesktopMd && showGlobalAudio && (
-              <div className="mt-3">
-                <SidebarAudioDeck />
-              </div>
-            )}
           </div>
         </aside>
 

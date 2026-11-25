@@ -51,9 +51,18 @@ export function parseLiveActivity(event: Pick<Event, 'id' | 'kind' | 'pubkey' | 
 
   const title = clip(getTag('title'), 140)
   const summary = clip(getTag('summary'), 600)
-  const image = sanitizePublicHttpsUrl(getTag('image')) || undefined
+  const image =
+    sanitizePublicHttpsUrl(getTag('image')) ||
+    sanitizePublicHttpsUrl(getTag('thumb')) ||
+    undefined
   const status = getTag('status')?.trim().toLowerCase()
-  const streamingUrl = sanitizePublicHttpsUrl(getTag('streaming')) || undefined
+  // Events may include multiple `streaming` tags (e.g., moq:// + https://.../live.m3u8); pick the first playable HTTPS URL.
+  const streamingCandidates = event.tags
+    .filter((t) => t[0] === 'streaming' && t[1])
+    .map((t) => sanitizePublicHttpsUrl(t[1]))
+    .filter((u): u is string => Boolean(u))
+  const streamingUrl =
+    streamingCandidates.find((u) => isPlayableStreamUrl(u)) || streamingCandidates[0] || undefined
   const recordingUrl = sanitizePublicHttpsUrl(getTag('recording')) || undefined
 
   const rawCount = getTag('current_participants')

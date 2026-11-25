@@ -536,6 +536,23 @@ describe('NIP-53 live streaming parser & security guards', () => {
     expect(parsed?.streamingUrl).toBeUndefined()
     expect(parsed?.image).toBeUndefined()
     expect(parsed?.recordingUrl).toBeUndefined()
+
+    // Picks playable HTTPS streaming tag even when a non-HTTPS moq:// tag comes first, and falls back to thumb
+    const multiStreaming = parseLiveActivity({
+      id: '3'.repeat(64),
+      kind: 30311,
+      pubkey: 'd'.repeat(64),
+      created_at: 1732400000,
+      tags: [
+        ['d', 'streamstr-test'],
+        ['status', 'live'],
+        ['thumb', 'https://streamstr.net/thumb.webp'],
+        ['streaming', 'moq://streamstr.net:1443/'],
+        ['streaming', 'https://streamstr.net/abc/hls/live.m3u8'],
+      ],
+    })
+    expect(multiStreaming?.streamingUrl).toBe('https://streamstr.net/abc/hls/live.m3u8')
+    expect(multiStreaming?.image).toBe('https://streamstr.net/thumb.webp')
   })
 
   it('attaches #a tag to signed kind-9734 zap requests when zapping a live stream', async () => {
