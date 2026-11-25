@@ -129,7 +129,7 @@ export function SettingsPage() {
           <div>
             <div className="font-medium text-white">Show Live Zaps feed</div>
             <div className="text-[#8c8a82]">
-              Displays the live NIP-57 zap scoreboard on the main feed page (swaps with stream Top Zappers on live streams).
+              Displays the live NIP-57 zap scoreboard in the sidebar across feeds &amp; threads (swaps with stream Top Zappers on live streams).
             </div>
           </div>
           <input

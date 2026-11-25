@@ -46,7 +46,6 @@ export function Layout({ children }: { children: ReactNode }) {
     }
   }
   const isTheaterMode = location.pathname.startsWith('/live/')
-  const isFeedPage = location.pathname === '/'
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
@@ -313,7 +312,7 @@ export function Layout({ children }: { children: ReactNode }) {
               <div className="mt-3">
                 <StreamTopZappersCard />
               </div>
-            ) : isDesktopMd && isFeedPage && showLiveZaps ? (
+            ) : isDesktopMd && showLiveZaps ? (
               <div className="mt-3">
                 <LiveZapsCard />
               </div>
