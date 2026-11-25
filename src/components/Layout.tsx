@@ -28,7 +28,7 @@ import {
 } from '../lib/constants'
 import { isIosDevice } from '../lib/mediaAudio'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
-import { isLiveStreamFresh } from '../lib/nostr/nip53'
+import { getStreamPrimaryPubkey, isLiveStreamFresh } from '../lib/nostr/nip53'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
@@ -80,14 +80,23 @@ export function Layout({ children }: { children: ReactNode }) {
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
   const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
-  const liveCount = useLiveStore((s) => {
+  const liveStreams = useLiveStore((s) => s.liveStreams)
+  const liveCount = useMemo(() => {
     const nowSec = Math.floor(Date.now() / 1000)
+    const mutedSet = new Set(
+      [...mutedPubkeys, ...privateMutedPubkeys].map((p) => p.toLowerCase()),
+    )
     let count = 0
-    for (const entry of Object.values(s.liveStreams)) {
-      if (isLiveStreamFresh(entry, nowSec)) count++
+    for (const entry of Object.values(liveStreams)) {
+      if (!isLiveStreamFresh(entry, nowSec)) continue
+      const primaryPk = getStreamPrimaryPubkey(entry.activity).toLowerCase()
+      if (mutedSet.has(primaryPk) || mutedSet.has(entry.activity.hostPubkey.toLowerCase())) {
+        continue
+      }
+      count++
     }
     return count
-  })
+  }, [liveStreams, mutedPubkeys, privateMutedPubkeys])
 
   const unreadNotificationCount = useMemo(() => {
     if (!pubkey || location.pathname === '/notifications' || notificationsLastSeenAt <= 0) return 0

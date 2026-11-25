@@ -12,7 +12,11 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 
-const MAX_LIVE_ZAPS = 80
+const MAX_LIVE_ZAPS = 600
+const MAX_VISIBLE_ROWS = 60
+const PERIOD_OPTIONS = [1, 8, 24] as const
+type PeriodHours = (typeof PERIOD_OPTIONS)[number]
+const PERIOD_QUERY_LIMIT: Record<PeriodHours, number> = { 1: 150, 8: 400, 24: 600 }
 
 function formatCompactSats(sats: number): string {
   if (sats >= 1_000_000) return `${(sats / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
@@ -36,6 +40,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
   const [rawZaps, setRawZaps] = useState<LiveZapItem[]>([])
   const [loading, setLoading] = useState(true)
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
+  const [periodHours, setPeriodHours] = useState<PeriodHours>(1)
   const [circuitActive, setCircuitActive] = useState(false)
   const [latestPulsedId, setLatestPulsedId] = useState<string | null>(null)
   const circuitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -46,6 +51,8 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
   }, [])
 
   useEffect(() => {
+    setRawZaps([])
+    setLoading(true)
     const relays = [
       ...new Set([
         ...LIVE_DISCOVERY_RELAYS,
@@ -53,7 +60,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
       ]),
     ].slice(0, 6)
     const startSec = Math.floor(Date.now() / 1000)
-    const since = startSec - 3600
+    const since = startSec - periodHours * 3600
     const seenIds = new Set<string>()
     const profileQueue = new Set<string>()
     let profileTimer: ReturnType<typeof setTimeout> | null = null
@@ -96,7 +103,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
 
     const sub = nostrPool.subscribe(
       relays,
-      { kinds: [9735], since, limit: MAX_LIVE_ZAPS },
+      { kinds: [9735], since, limit: PERIOD_QUERY_LIMIT[periodHours] },
       {
         onevent: (ev) => {
           if (!active || seenIds.has(ev.id)) return
@@ -146,7 +153,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
       if (circuitTimerRef.current) clearTimeout(circuitTimerRef.current)
       sub.close()
     }
-  }, [])
+  }, [periodHours])
 
   const visibleZaps = useMemo(() => {
     const mutedSet = new Set([...mutedPubkeys, ...privateMutedPubkeys])
@@ -177,10 +184,6 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
             Live Zaps
           </span>
           <div className="flex items-center gap-1 shrink-0">
-            <span className="px-1.5 py-0.5 rounded border bg-emerald-500/15 border-emerald-500/35 text-emerald-300 text-[9px] font-bold tracking-wider uppercase flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE
-            </span>
             <span
               className={`px-1.5 py-0.5 rounded border text-[9px] font-bold tracking-wider uppercase flex items-center gap-0.5 transition-all duration-200 ${
                 circuitActive
@@ -197,6 +200,29 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
             </span>
           </div>
         </div>
+
+      {/* Total-zaps period selector (active = green) */}
+      <div
+        role="group"
+        aria-label="Live zaps period"
+        className="flex items-center gap-1"
+      >
+        {PERIOD_OPTIONS.map((h) => (
+          <button
+            key={h}
+            type="button"
+            aria-pressed={periodHours === h}
+            onClick={() => setPeriodHours(h)}
+            className={`flex-1 py-0.5 rounded-md border text-[10px] font-semibold tabular-nums transition cursor-pointer ${
+              periodHours === h
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                : 'bg-transparent border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb] hover:border-[#3b4057]'
+            }`}
+          >
+            {h}hr
+          </button>
+        ))}
+      </div>
 
       {/* Compact Scoreboard Strip */}
       {stats.zapCount > 0 && (
@@ -239,7 +265,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
             compact ? 'max-h-56' : 'max-h-64'
           }`}
         >
-          {visibleZaps.map((z) => {
+          {visibleZaps.slice(0, MAX_VISIBLE_ROWS).map((z) => {
             const senderProf = profiles[z.senderPubkey]
             const recipientProf = profiles[z.recipientPubkey]
             const senderName =
@@ -338,7 +364,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
       )}
 
         <div className="text-[9px] text-[#6f6d66] flex items-center justify-between px-0.5">
-          <span>Past hour · NIP-57 receipts</span>
+          <span>Past {periodHours === 1 ? 'hour' : `${periodHours} hours`} · NIP-57 receipts</span>
           <span>Relay direct</span>
         </div>
       </div>

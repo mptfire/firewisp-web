@@ -52,7 +52,11 @@ export async function fetchLnurlPayMetadata(
   const url = resolveLud16ToUrl(lud16)
   if (!url) throw new Error('Invalid or unsafe Lightning Address')
 
-  const resp = await fetchImpl(url, { headers: { Accept: 'application/json' } })
+  const resp = await fetchImpl(url, {
+    headers: { Accept: 'application/json' },
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
   if (!resp.ok) throw new Error(`Lightning provider returned HTTP ${resp.status}`)
   const data = (await resp.json()) as Partial<LnurlPayMetadata> & { status?: string; reason?: string }
   if (data.status === 'ERROR') {
@@ -132,7 +136,10 @@ export async function requestZapInvoice(params: {
     cbUrl.searchParams.set('comment', params.comment.trim().slice(0, 200))
   }
 
-  const resp = await fetchFn(cbUrl.toString())
+  const resp = await fetchFn(cbUrl.toString(), {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
   if (!resp.ok) throw new Error(`Invoice fetch failed (HTTP ${resp.status})`)
   const data = (await resp.json()) as { pr?: string; status?: string; reason?: string }
   if (data.status === 'ERROR' || !data.pr) {

@@ -89,9 +89,7 @@ export function SearchPage() {
           ? { kinds: [1, 20], '#t': [cleanTag], limit: 50 }
           : { kinds: [1], search: q, limit: 40 }
 
-        const searchRelays = cleanTag
-          ? readRelays
-          : [...new Set([...readRelays, 'wss://relay.nostr.band'])]
+        const searchRelays = readRelays
 
         const evs = await nostrPool.query(searchRelays, filter, 5000)
         if (searchGenRef.current !== gen) return

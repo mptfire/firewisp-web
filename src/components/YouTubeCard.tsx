@@ -26,6 +26,7 @@ export const YouTubeCard = memo(function YouTubeCard({
   previewOnly = false,
 }: YouTubeCardProps) {
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
+  const mobileDataSaving = useSettingsStore((s) => s.mobileDataSaving)
   const [meta, setMeta] = useState<YouTubeMeta | null>(null)
   const [thumbSrc, setThumbSrc] = useState(video.thumbnailUrl)
   const [thumbFailed, setThumbFailed] = useState(false)
@@ -36,6 +37,7 @@ export const YouTubeCard = memo(function YouTubeCard({
     setThumbSrc(video.thumbnailUrl)
     setThumbFailed(false)
     setPlaying(false)
+    if (mobileDataSaving) return
     let active = true
     void fetchYouTubeMeta(video.videoId).then((res) => {
       if (active && res) setMeta(res)
@@ -43,7 +45,7 @@ export const YouTubeCard = memo(function YouTubeCard({
     return () => {
       active = false
     }
-  }, [video.videoId, video.thumbnailUrl])
+  }, [video.videoId, video.thumbnailUrl, mobileDataSaving])
 
   useEffect(() => {
     if (!inlineMediaPlayback) setPlaying(false)

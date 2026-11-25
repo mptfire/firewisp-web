@@ -49,6 +49,7 @@ import { selectDataSaverMaxLevel, selectLowestBitrateLevel } from '../mediaAudio
 import { parseSharedQueryParams } from '../shareTarget'
 import { useLiveStore } from '../store/useLiveStore'
 import { useNostrStore } from '../store/useNostrStore'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 describe('NIP-49 ncryptsec encryption & DoS guards', () => {
   // Official NIP-49 spec test vector
@@ -1132,5 +1133,93 @@ describe('Full code-audit regression & security hardening', () => {
     // Single-bitrate streams return -1 (no ABR capping possible)
     expect(selectDataSaverMaxLevel([{ height: 720, bitrate: 11_059_200 }])).toBe(-1)
     expect(selectLowestBitrateLevel([{ height: 720, bitrate: 11_059_200 }])).toBe(-1)
+  })
+
+  it('enforces credentials: omit and referrerPolicy: no-referrer on Blossom and LNURL fetches and wipes notification state on logout', async () => {
+    const signer = new LocalKeySigner(generateSecretKey())
+    const seenInits: Array<RequestInit | undefined> = []
+
+    const blossomFetch: typeof fetch = async (_input, init) => {
+      seenInits.push(init)
+      return new Response(
+        JSON.stringify({
+          url: 'https://blossom.nostr.build/ok.bin',
+          size: 4,
+          type: 'application/octet-stream',
+        }),
+        { status: 200 },
+      )
+    }
+    await uploadToBlossom(
+      new Blob(['test'], { type: 'application/octet-stream' }),
+      'application/octet-stream',
+      signer,
+      [],
+      blossomFetch,
+    )
+
+    const lnurlFetch: typeof fetch = async (input, init) => {
+      seenInits.push(init)
+      const u = String(input)
+      if (u.includes('.well-known/lnurlp')) {
+        return new Response(
+          JSON.stringify({
+            callback: 'https://ln.example/cb',
+            minSendable: 1000,
+            maxSendable: 1_000_000_000,
+            allowsNostr: false,
+          }),
+          { status: 200 },
+        )
+      }
+      return new Response(JSON.stringify({ pr: 'lnbc210n1p0privacytest' }), { status: 200 })
+    }
+    await requestZapInvoice({
+      lud16: 'alice@ln.example',
+      amountSats: 21,
+      recipientPubkey: 'a'.repeat(64),
+      relays: ['wss://firewisp.relay.rtard.de'],
+      fetchImpl: lnurlFetch,
+    })
+
+    expect(seenInits).toHaveLength(3)
+    for (const init of seenInits) {
+      expect(init?.credentials).toBe('omit')
+      expect(init?.referrerPolicy).toBe('no-referrer')
+    }
+    signer.destroy()
+
+    // Verify resetUserState wipes firewisp_notif_seen_v1, bookmarks, profiles cache, and private session mutes
+    const storeMap = new Map<string, string>([
+      ['firewisp_notif_seen_v1', JSON.stringify({ ['a'.repeat(64)]: 1700000000 })],
+      ['firewisp_bookmarks_v1', JSON.stringify(['b'.repeat(64)])],
+      ['firewisp_profiles_cache_v1', JSON.stringify({})],
+    ])
+    const prevLs = (globalThis as { localStorage?: Storage }).localStorage
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => storeMap.get(k) ?? null,
+        setItem: (k: string, v: string) => storeMap.set(k, v),
+        removeItem: (k: string) => storeMap.delete(k),
+        clear: () => storeMap.clear(),
+      },
+    })
+    try {
+      useSettingsStore.getState().mergePrivateMutes({ pubkeys: ['c'.repeat(64)] })
+      expect(useSettingsStore.getState().privateMutedPubkeys).toContain('c'.repeat(64))
+
+      useNostrStore.getState().resetUserState()
+      expect(storeMap.has('firewisp_notif_seen_v1')).toBe(false)
+      expect(storeMap.has('firewisp_bookmarks_v1')).toBe(false)
+      expect(storeMap.has('firewisp_profiles_cache_v1')).toBe(false)
+      expect(useSettingsStore.getState().privateMutedPubkeys).toEqual([])
+    } finally {
+      if (prevLs === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage
+      } else {
+        Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: prevLs })
+      }
+    }
   })
 })

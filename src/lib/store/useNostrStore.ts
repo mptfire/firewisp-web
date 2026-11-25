@@ -431,6 +431,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       try {
         localStorage.removeItem(PROFILES_CACHE_KEY)
         localStorage.removeItem(BOOKMARKS_KEY)
+        localStorage.removeItem(NOTIF_SEEN_STORAGE_KEY)
       } catch {
         // ignore
       }

@@ -252,6 +252,7 @@ export function LiveNowRow({
   const showLiveNowBarSetting = useSettingsStore((s) => s.showLiveNowBar)
   const showLiveNowBar = forceShow || showLiveNowBarSetting
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const follows = useNostrStore((s) => s.follows)
   const liveStreams = useLiveStore((s) => s.liveStreams)
   const followerCounts = useLiveStore((s) => s.streamerFollowerCounts)
@@ -272,17 +273,20 @@ export function LiveNowRow({
   )
 
   const activeStreams = useMemo(() => {
+    const mutedSet = new Set(
+      [...mutedPubkeys, ...privateMutedPubkeys].map((p) => p.toLowerCase()),
+    )
     const filtered = Object.values(liveStreams).filter((s) => {
       if (!isLiveStreamFresh(s, nowSec)) return false
       if (excludeATag && s.aTagValue === excludeATag) return false
-      const hostPk = getStreamPrimaryPubkey(s.activity)
-      if (mutedPubkeys.includes(hostPk) || mutedPubkeys.includes(s.activity.hostPubkey)) {
+      const hostPk = getStreamPrimaryPubkey(s.activity).toLowerCase()
+      if (mutedSet.has(hostPk) || mutedSet.has(s.activity.hostPubkey.toLowerCase())) {
         return false
       }
       return true
     })
     return sortLiveStreams(filtered, followSet, followerCounts).slice(0, 15)
-  }, [liveStreams, mutedPubkeys, followSet, followerCounts, nowSec, excludeATag])
+  }, [liveStreams, mutedPubkeys, privateMutedPubkeys, followSet, followerCounts, nowSec, excludeATag])
 
   const updateScrollArrows = () => {
     const el = scrollRef.current

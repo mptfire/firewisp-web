@@ -181,6 +181,8 @@ export async function uploadToBlossom(
         }
         const resp = await fetchImpl(`${server}${ep.path}`, {
           method: 'PUT',
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer',
           headers: {
             Authorization: auth,
             'Content-Type': effectiveMime || 'application/octet-stream',

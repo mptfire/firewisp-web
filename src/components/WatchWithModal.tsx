@@ -49,6 +49,7 @@ export function WatchWithModal({
   const follows = useNostrStore((s) => s.follows)
   const profiles = useNostrStore((s) => s.profiles)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
+  const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
 
   const [query, setQuery] = useState('')
   const [resolving, setResolving] = useState(false)
@@ -67,11 +68,16 @@ export function WatchWithModal({
   const candidates = useMemo(() => {
     const nowSec = Math.floor(Date.now() / 1000)
     const cleanQ = query.trim().toLowerCase()
+    const mutedSet = new Set(
+      [...mutedPubkeys, ...privateMutedPubkeys].map((p) => p.toLowerCase()),
+    )
     const list = Object.values(liveStreams).filter((s) => {
       if (s.aTagValue === primaryATag) return false
       if (!isLiveStreamFresh(s, nowSec)) return false
       const pk = getStreamPrimaryPubkey(s.activity)
-      if (mutedPubkeys.includes(pk) || mutedPubkeys.includes(s.activity.hostPubkey)) return false
+      if (mutedSet.has(pk.toLowerCase()) || mutedSet.has(s.activity.hostPubkey.toLowerCase())) {
+        return false
+      }
       if (!cleanQ) return true
       const prof = profiles[pk]
       const hay = [
@@ -87,7 +93,16 @@ export function WatchWithModal({
       return hay.includes(cleanQ)
     })
     return sortLiveStreams(list, followSet, followerCounts)
-  }, [liveStreams, primaryATag, mutedPubkeys, query, profiles, followSet, followerCounts])
+  }, [
+    liveStreams,
+    primaryATag,
+    mutedPubkeys,
+    privateMutedPubkeys,
+    query,
+    profiles,
+    followSet,
+    followerCounts,
+  ])
 
   const pastedNaddr = useMemo(() => extractNaddrFromInput(query), [query])
 
