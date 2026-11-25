@@ -384,7 +384,11 @@ export function Composer({
 
   return (
     <div
-      className={`border-b border-[#22242e] ${compact ? 'p-3' : 'p-4'} bg-[#121319]/60`}
+      className={
+        compact
+          ? 'border-b border-[#22242e] p-3 bg-[#101118]'
+          : 'border-b border-[#22242e] px-3 py-3 bg-[#0e0e11]'
+      }
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault()
@@ -407,7 +411,13 @@ export function Composer({
         }
       }}
     >
-      <div className="flex gap-3">
+      <div
+        className={`flex gap-3 ${
+          compact
+            ? ''
+            : 'rounded-2xl bg-[#13141c] border-2 border-[#040407] shadow-[0_0_0_1px_#26293b,inset_0_1px_0_rgba(255,255,255,0.03)] p-3.5'
+        }`}
+      >
         <Avatar
           src={profile?.picture}
           pubkey={pubkey || ''}
@@ -456,7 +466,7 @@ export function Composer({
                 }}
                 rows={compact ? 2 : 3}
                 placeholder={`${placeholder} (Ctrl+Enter to post)`}
-                className="w-full bg-transparent resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#6c6a63] focus:outline-none"
+                className="w-full rounded-xl bg-[#08090d] border-2 border-[#040407] ring-1 ring-[#2c3044] focus:ring-[#e8590c]/85 focus:border-[#e8590c]/45 shadow-[inset_0_2px_8px_rgba(0,0,0,0.75)] px-3.5 py-2.5 resize-none text-[15px] leading-relaxed text-[#f4f1ea] placeholder-[#78756d] focus:outline-none transition"
               />
 
               {youtubePreviews.length > 0 && (
