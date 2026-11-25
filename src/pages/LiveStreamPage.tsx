@@ -409,6 +409,11 @@ export function LiveStreamPage() {
   const markStreamOnline = useLiveStore((s) => s.markStreamOnline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
+  const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
+  const mainPlayerActive = useLiveStore((s) => s.mainPlayerActive)
+  const audioOwner = useLiveStore((s) => s.audioOwner)
+  const setAudioOwner = useLiveStore((s) => s.setAudioOwner)
+  const setMainPlayerActive = useLiveStore((s) => s.setMainPlayerActive)
   const [resumedFromMini, setResumedFromMini] = useState(() => {
     if (!decoded) return false
     const aTagInit = buildLiveATag(decoded.hostPubkey, decoded.dTag)
@@ -561,8 +566,16 @@ export function LiveStreamPage() {
       closeMiniPlayer()
     } else if (streamChanged) {
       setResumedFromMini(false)
+      setMainPlayerActive(false)
     }
-  }, [currentATagStr, closeMiniPlayer])
+  }, [currentATagStr, closeMiniPlayer, setMainPlayerActive])
+
+  // Clear mainPlayerActive when leaving the stream page so a floating mini-player automatically reclaims audio
+  useEffect(() => {
+    return () => {
+      useLiveStore.getState().setMainPlayerActive(false)
+    }
+  }, [])
 
   const messages = useMemo(() => {
     const allMutedPks =
@@ -803,6 +816,34 @@ export function LiveStreamPage() {
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {hasMiniPlayer && mainPlayerActive && !isSplitView && (
+            <button
+              type="button"
+              onClick={() => setAudioOwner(audioOwner === 'main' ? 'mini' : 'main')}
+              title={
+                audioOwner === 'main'
+                  ? 'Main stream audio is on (mini-player muted) — click to swap audio to mini-player'
+                  : 'Mini-player audio is on — click to swap audio to this stream'
+              }
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                audioOwner === 'main'
+                  ? 'bg-[#e8590c] hover:bg-[#d9480f] border-[#ff922b]/50 text-white'
+                  : 'bg-[#181a22] hover:bg-[#222533] border-[#2a2d3a] text-[#d4d2cb] hover:text-white'
+              }`}
+            >
+              {audioOwner === 'main' ? (
+                <>
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Audio On</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Audio Swap</span>
+                </>
+              )}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setWatchWithOpen(true)}
@@ -857,7 +898,7 @@ export function LiveStreamPage() {
               className={
                 isSplitView
                   ? `rounded-xl overflow-hidden border transition bg-[#12131a] ${
-                      activeAudioSlot === 'primary'
+                      audioOwner === 'main' && activeAudioSlot === 'primary'
                         ? 'border-[#e8590c] ring-1 ring-[#e8590c]/45'
                         : 'border-[#232530]'
                     }`
@@ -877,21 +918,26 @@ export function LiveStreamPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() =>
-                      setAudioSlot((prev) => (prev === 'primary' ? 'companion' : 'primary'))
-                    }
+                    onClick={() => {
+                      if (audioOwner !== 'main') {
+                        setAudioOwner('main')
+                        setAudioSlot('primary')
+                      } else {
+                        setAudioSlot((prev) => (prev === 'primary' ? 'companion' : 'primary'))
+                      }
+                    }}
                     title={
-                      activeAudioSlot === 'primary'
+                      audioOwner === 'main' && activeAudioSlot === 'primary'
                         ? 'Audio playing here — click to swap audio to the other stream'
-                        : 'Swap audio to this stream (mutes the other)'
+                        : 'Swap audio to this stream (mutes other streams)'
                     }
                     className={`px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1 shrink-0 transition cursor-pointer ${
-                      activeAudioSlot === 'primary'
+                      audioOwner === 'main' && activeAudioSlot === 'primary'
                         ? 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                         : 'bg-[#1e202c] hover:bg-[#2a2d3d] text-[#b8b5ad] hover:text-white'
                     }`}
                   >
-                    {activeAudioSlot === 'primary' ? (
+                    {audioOwner === 'main' && activeAudioSlot === 'primary' ? (
                       <>
                         <Volume2 className="w-3 h-3" />
                         Audio On
@@ -919,12 +965,28 @@ export function LiveStreamPage() {
                   isLive={isLive}
                   autoStart={resumedFromMini}
                   compact={isSplitView}
-                  forceMuted={isSplitView ? activeAudioSlot !== 'primary' : undefined}
-                  onRequestFocus={isSplitView ? () => setAudioSlot('primary') : undefined}
+                  forceMuted={
+                    hasMiniPlayer || isSplitView
+                      ? audioOwner !== 'main' || (isSplitView && activeAudioSlot !== 'primary')
+                      : undefined
+                  }
+                  onRequestFocus={
+                    hasMiniPlayer || isSplitView
+                      ? () => {
+                          setAudioOwner('main')
+                          if (isSplitView) setAudioSlot('primary')
+                        }
+                      : undefined
+                  }
                   onPlaybackStart={() => {
-                    // Stop any other stream running in mini-player or inline feed to prevent duplicate audio
-                    if (useLiveStore.getState().miniPlayer) closeMiniPlayer()
-                    useLiveStore.getState().setActiveInlineStream(null)
+                    const st = useLiveStore.getState()
+                    // Keep any different floating mini-player open, just auto-muted (1 audio at a time)
+                    if (st.miniPlayer?.aTag === aTag) {
+                      closeMiniPlayer()
+                    }
+                    st.setMainPlayerActive(true)
+                    st.setAudioOwner('main')
+                    st.setActiveInlineStream(null)
                   }}
                   onPopOut={isSplitView ? undefined : handlePopOutMiniPlayer}
                   onPlaybackReady={() => markStreamOnline(aTag)}
@@ -953,7 +1015,7 @@ export function LiveStreamPage() {
             {isSplitView && companion && (
               <div
                 className={`rounded-xl overflow-hidden border transition bg-[#12131a] ${
-                  activeAudioSlot === 'companion'
+                  audioOwner === 'main' && activeAudioSlot === 'companion'
                     ? 'border-[#e8590c] ring-1 ring-[#e8590c]/45'
                     : 'border-[#232530]'
                 }`}
@@ -973,21 +1035,26 @@ export function LiveStreamPage() {
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() =>
-                        setAudioSlot((prev) => (prev === 'companion' ? 'primary' : 'companion'))
-                      }
+                      onClick={() => {
+                        if (audioOwner !== 'main') {
+                          setAudioOwner('main')
+                          setAudioSlot('companion')
+                        } else {
+                          setAudioSlot((prev) => (prev === 'companion' ? 'primary' : 'companion'))
+                        }
+                      }}
                       title={
-                        activeAudioSlot === 'companion'
+                        audioOwner === 'main' && activeAudioSlot === 'companion'
                           ? 'Audio playing here — click to swap audio to the other stream'
-                          : 'Swap audio to this stream (mutes the other)'
+                          : 'Swap audio to this stream (mutes other streams)'
                       }
                       className={`px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition cursor-pointer ${
-                        activeAudioSlot === 'companion'
+                        audioOwner === 'main' && activeAudioSlot === 'companion'
                           ? 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
                           : 'bg-[#1e202c] hover:bg-[#2a2d3d] text-[#b8b5ad] hover:text-white'
                       }`}
                     >
-                      {activeAudioSlot === 'companion' ? (
+                      {audioOwner === 'main' && activeAudioSlot === 'companion' ? (
                         <>
                           <Volume2 className="w-3 h-3" />
                           Audio On
@@ -1042,11 +1109,18 @@ export function LiveStreamPage() {
                     isLive={companionIsLive}
                     autoStart
                     compact
-                    forceMuted={activeAudioSlot !== 'companion'}
-                    onRequestFocus={() => setAudioSlot('companion')}
+                    forceMuted={audioOwner !== 'main' || activeAudioSlot !== 'companion'}
+                    onRequestFocus={() => {
+                      setAudioOwner('main')
+                      setAudioSlot('companion')
+                    }}
                     onPlaybackStart={() => {
-                      if (useLiveStore.getState().miniPlayer) closeMiniPlayer()
-                      useLiveStore.getState().setActiveInlineStream(null)
+                      const st = useLiveStore.getState()
+                      if (st.miniPlayer?.aTag === companionATag) {
+                        closeMiniPlayer()
+                      }
+                      st.setMainPlayerActive(true)
+                      st.setActiveInlineStream(null)
                     }}
                     onPlaybackReady={() => markStreamOnline(companionATag)}
                     onStreamOffline={() => markStreamOffline(companionATag)}

@@ -62,6 +62,8 @@ interface LiveState {
   miniChatMessages: LiveChatMessage[]
   miniChatRelays: string[]
   activeInlineStreamKey: string | null
+  audioOwner: 'main' | 'mini'
+  mainPlayerActive: boolean
 
   subscribeLiveDiscovery: () => () => void
   fetchStreamerFollowerCounts: (pubkeys: string[]) => Promise<void>
@@ -75,6 +77,8 @@ interface LiveState {
   openMiniPlayer: (stream: MiniPlayerStream) => void
   closeMiniPlayer: () => void
   setActiveInlineStream: (key: string | null) => void
+  setAudioOwner: (owner: 'main' | 'mini') => void
+  setMainPlayerActive: (active: boolean) => void
   subscribeMiniChat: (
     hostPubkey: string,
     dTag: string,
@@ -213,11 +217,14 @@ export const useLiveStore = create<LiveState>((set, get) => ({
   miniChatMessages: [],
   miniChatRelays: [],
   activeInlineStreamKey: null,
+  audioOwner: 'main',
+  mainPlayerActive: false,
 
   openMiniPlayer: (stream) =>
     set((s) => ({
-      activeInlineStreamKey: null,
+      activeInlineStreamKey: s.activeInlineStreamKey === stream.aTag ? null : s.activeInlineStreamKey,
       miniPlayer: stream,
+      audioOwner: 'mini',
       miniChatMessages:
         s.focusedChatATag === stream.aTag
           ? s.currentChatMessages.slice(-120)
@@ -231,12 +238,38 @@ export const useLiveStore = create<LiveState>((set, get) => ({
             ? s.miniChatRelays
             : [],
     })),
-  closeMiniPlayer: () => set({ miniPlayer: null, miniChatMessages: [], miniChatRelays: [] }),
+  closeMiniPlayer: () =>
+    set({ miniPlayer: null, miniChatMessages: [], miniChatRelays: [], audioOwner: 'main' }),
   setActiveInlineStream: (key) =>
+    set((s) => {
+      if (!key) {
+        return {
+          activeInlineStreamKey: null,
+          ...(s.miniPlayer && !s.mainPlayerActive ? { audioOwner: 'mini' as const } : {}),
+        }
+      }
+      // If playing the same stream inline that is floating in mini-player, dock it; otherwise keep mini-player open & muted
+      if (s.miniPlayer && s.miniPlayer.aTag === key) {
+        return {
+          activeInlineStreamKey: key,
+          miniPlayer: null,
+          miniChatMessages: [],
+          miniChatRelays: [],
+          audioOwner: 'main' as const,
+        }
+      }
+      return {
+        activeInlineStreamKey: key,
+        audioOwner: 'main' as const,
+      }
+    }),
+  setAudioOwner: (audioOwner) => set({ audioOwner }),
+  setMainPlayerActive: (mainPlayerActive) =>
     set((s) => ({
-      activeInlineStreamKey: key,
-      // Starting inline playback closes floating mini-player so two streams never overlap audio
-      ...(key && s.miniPlayer ? { miniPlayer: null, miniChatMessages: [], miniChatRelays: [] } : {}),
+      mainPlayerActive,
+      ...(!mainPlayerActive && !s.activeInlineStreamKey && s.miniPlayer
+        ? { audioOwner: 'mini' as const }
+        : {}),
     })),
 
   fetchStreamerFollowerCounts: async (pubkeys) => {

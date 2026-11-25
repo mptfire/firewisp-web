@@ -10,6 +10,8 @@ import {
   PictureInPicture2,
   Radio,
   Send,
+  Volume2,
+  VolumeX,
   X,
   Zap,
 } from 'lucide-react'
@@ -177,6 +179,10 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
  */
 export function FloatingStreamPlayer() {
   const miniPlayer = useLiveStore((s) => s.miniPlayer)
+  const audioOwner = useLiveStore((s) => s.audioOwner)
+  const setAudioOwner = useLiveStore((s) => s.setAudioOwner)
+  const mainPlayerActive = useLiveStore((s) => s.mainPlayerActive)
+  const hasInlineStream = useLiveStore((s) => Boolean(s.activeInlineStreamKey))
   const rawMiniMessages = useLiveStore((s) => s.miniChatMessages)
   const closeMiniPlayer = useLiveStore((s) => s.closeMiniPlayer)
   const markStreamOffline = useLiveStore((s) => s.markStreamOffline)
@@ -409,13 +415,22 @@ export function FloatingStreamPlayer() {
     }
   }
 
+  const hasCompetingPlayer = mainPlayerActive || hasInlineStream
+  const miniHasAudio = audioOwner === 'mini'
+
   return (
     <div
       ref={containerRef}
       style={pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : undefined}
       className={`fixed z-40 rounded-2xl overflow-hidden bg-[#12131a]/95 backdrop-blur-md border shadow-2xl shadow-black/75 max-h-[calc(100dvh-16px)] flex flex-col ${
         pos ? '' : 'bottom-16 md:bottom-4 right-3 sm:right-4'
-      } ${dragging ? 'border-[#ff922b] select-none' : 'border-[#e8590c]/50 transition-[width]'} ${
+      } ${
+        dragging
+          ? 'border-[#ff922b] select-none'
+          : miniHasAudio
+            ? 'border-[#e8590c]/60 transition-[width]'
+            : 'border-[#2f3344] transition-[width]'
+      } ${
         expanded ? 'w-[calc(100vw-24px)] sm:w-[440px]' : 'w-[300px] sm:w-[350px]'
       }`}
     >
@@ -460,6 +475,35 @@ export function FloatingStreamPlayer() {
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
+          {(hasCompetingPlayer || !miniHasAudio) && (
+            <button
+              type="button"
+              onClick={() => setAudioOwner(miniHasAudio ? 'main' : 'mini')}
+              title={
+                miniHasAudio
+                  ? 'Mini-player audio is on — click to swap audio to main stream'
+                  : 'Swap audio to mini-player (mutes main stream)'
+              }
+              aria-label={miniHasAudio ? 'Swap audio to main stream' : 'Swap audio to mini-player'}
+              className={`px-1.5 py-1 rounded-lg flex items-center gap-1 text-[10px] font-semibold transition cursor-pointer ${
+                miniHasAudio
+                  ? 'bg-[#e8590c] hover:bg-[#d9480f] text-white'
+                  : 'bg-[#1e202c] hover:bg-[#2a2d3d] text-[#c7c4bc] hover:text-white'
+              }`}
+            >
+              {miniHasAudio ? (
+                <>
+                  <Volume2 className="w-3 h-3" />
+                  <span>Audio</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="w-3 h-3" />
+                  <span>Swap</span>
+                </>
+              )}
+            </button>
+          )}
           {decoded && (
             <button
               type="button"
@@ -536,6 +580,8 @@ export function FloatingStreamPlayer() {
           isLive={miniPlayer.isLive}
           autoStart
           compact
+          forceMuted={!miniHasAudio}
+          onRequestFocus={() => setAudioOwner('mini')}
           onVideoElement={handleVideoElement}
           onPlaybackReady={() => markStreamOnline(miniPlayer.aTag)}
           onStreamOffline={() => markStreamOffline(miniPlayer.aTag)}

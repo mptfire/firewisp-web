@@ -123,6 +123,9 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
   const markStreamOnline = useLiveStore((s) => s.markStreamOnline)
   const openMiniPlayer = useLiveStore((s) => s.openMiniPlayer)
   const isInMiniPlayer = useLiveStore((s) => s.miniPlayer?.aTag === aTag)
+  const hasMiniPlayer = useLiveStore((s) => Boolean(s.miniPlayer))
+  const audioOwner = useLiveStore((s) => s.audioOwner)
+  const setAudioOwner = useLiveStore((s) => s.setAudioOwner)
   const playingInline = useLiveStore((s) => s.activeInlineStreamKey === aTag)
   const setActiveInlineStream = useLiveStore((s) => s.setActiveInlineStream)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
@@ -203,6 +206,8 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           title={title}
           isLive={isLive}
           autoStart
+          forceMuted={hasMiniPlayer ? audioOwner !== 'main' : undefined}
+          onRequestFocus={hasMiniPlayer ? () => setAudioOwner('main') : undefined}
           onPopOut={() => {
             openMiniPlayer({
               aTag,
