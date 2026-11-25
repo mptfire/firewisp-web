@@ -70,7 +70,7 @@ export function ShareStreamModal({
   const shareOrigin =
     typeof window !== 'undefined' && window.location.origin.startsWith('https://')
       ? window.location.origin
-      : 'https://firewisp.rtard.de'
+      : 'https://firewisp.de'
   const webShareUrl = `${shareOrigin}/live/${naddr}`
   const nostrAddress = `nostr:${naddr}`
   const canNativeShare =

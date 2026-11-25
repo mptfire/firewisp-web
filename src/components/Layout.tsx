@@ -575,7 +575,7 @@ export function Layout({ children }: { children: ReactNode }) {
                     <span className="truncate font-mono text-[10px]">
                       {userReadRelays.length > 0
                         ? `${userReadRelays.length} NIP-65 + Fire Wisp`
-                        : 'firewisp.relay.rtard.de'}
+                        : 'relay.firewisp.de'}
                     </span>
                     <span
                       className={`w-2 h-2 rounded-full shrink-0 ${

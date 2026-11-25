@@ -259,7 +259,7 @@ export function SettingsPage() {
           <div>
             <div className="font-medium text-white">Show Fire Wisp relay tab</div>
             <div className="text-[#8c8a82]">
-              Dedicated feed for wss://firewisp.relay.rtard.de (12-bit PoW community relay).
+              Dedicated feed for wss://relay.firewisp.de (12-bit PoW community relay).
             </div>
           </div>
           <input

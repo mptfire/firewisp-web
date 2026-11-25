@@ -245,8 +245,8 @@ export class Nip46BunkerSigner implements FireWispSigner {
       relays,
       secret,
       name: 'Fire Wisp Web',
-      url: 'https://firewisp.rtard.de',
-      image: 'https://firewisp.rtard.de/firewisp-logo.png',
+      url: 'https://firewisp.de',
+      image: 'https://firewisp.de/firewisp-logo.png',
     })
     const pool = new SimplePool()
     let cancelled = false

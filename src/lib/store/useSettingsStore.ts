@@ -4,6 +4,8 @@ import {
   DEFAULT_NOTE_POW_BITS,
   DEFAULT_REACTION_POW_BITS,
   DEFAULT_RELAYS,
+  FIREWISP_RELAY,
+  LEGACY_FIREWISP_RELAY,
   type RelayEntry,
 } from '../constants'
 import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
@@ -258,15 +260,24 @@ function loadInitial(): PersistedSettings & {
       blossomServers = DEFAULT_BLOSSOM_SERVERS
     }
 
-    const sanitizedRelays =
-      Array.isArray(parsed.relays) && parsed.relays.length > 0
-        ? parsed.relays
-            .map((r) => {
-              const url = sanitizeRelayUrl(r?.url)
-              return url ? { url, read: Boolean(r.read), write: Boolean(r.write) } : null
-            })
-            .filter((r): r is RelayEntry => Boolean(r))
-        : DEFAULT_RELAYS
+    const sanitizedRelays = (() => {
+      if (!Array.isArray(parsed.relays) || parsed.relays.length === 0) return DEFAULT_RELAYS
+      const map = new Map<string, RelayEntry>()
+      for (const r of parsed.relays) {
+        const rawUrl = sanitizeRelayUrl(r?.url)
+        if (!rawUrl) continue
+        // Migrate legacy firewisp.relay.rtard.de to canonical wss://relay.firewisp.de without duplicating
+        const url = rawUrl === LEGACY_FIREWISP_RELAY ? FIREWISP_RELAY : rawUrl
+        const existing = map.get(url)
+        if (existing) {
+          existing.read = existing.read || Boolean(r.read)
+          existing.write = existing.write || Boolean(r.write)
+        } else {
+          map.set(url, { url, read: Boolean(r.read), write: Boolean(r.write) })
+        }
+      }
+      return map.size > 0 ? [...map.values()] : DEFAULT_RELAYS
+    })()
 
     const sidebarFeedMode: SidebarFeedMode =
       parsed.sidebarFeedMode && VALID_SIDEBAR_FEED_MODES.includes(parsed.sidebarFeedMode)

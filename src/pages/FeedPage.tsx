@@ -375,7 +375,7 @@ export function FeedPage() {
           ) : tab === 'firewisp' ? (
             <>
               <Flame className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
-              <span className="truncate">Fire Wisp anti-spam relay (wss://firewisp.relay.rtard.de)</span>
+              <span className="truncate">Fire Wisp anti-spam relay (wss://relay.firewisp.de)</span>
             </>
           ) : (
             <>
@@ -548,7 +548,7 @@ export function FeedPage() {
         <div className="py-16 px-6 text-center space-y-2">
           <p className="text-sm text-[#c2bfb7] font-medium">
             {tab === 'firewisp'
-              ? 'No posts on firewisp.relay.rtard.de yet — be the first to ignite it!'
+              ? 'No posts on relay.firewisp.de yet — be the first to ignite it!'
               : tab === 'following'
                 ? pubkey
                   ? 'No recent notes from your follows loaded yet.'

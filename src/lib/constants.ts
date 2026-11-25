@@ -4,7 +4,8 @@ export interface RelayEntry {
   write: boolean
 }
 
-export const FIREWISP_RELAY = 'wss://firewisp.relay.rtard.de'
+export const FIREWISP_RELAY = 'wss://relay.firewisp.de'
+export const LEGACY_FIREWISP_RELAY = 'wss://firewisp.relay.rtard.de'
 export const TRENDING_RELAY = 'wss://trending.relays.land'
 export const CURATED_EXPLORE_RELAYS = [
   FIREWISP_RELAY,
@@ -15,7 +16,7 @@ export const CURATED_EXPLORE_RELAYS = [
 export const DEFAULT_BLOSSOM_PRIMARY = 'https://blossom.nostr.build'
 export const DEFAULT_BLOSSOM_FALLBACK = 'https://blossom.primal.net'
 
-export const ANDROID_APP_URL = 'https://app.firewisp.rtard.de/'
+export const ANDROID_APP_URL = 'https://app.firewisp.de/'
 export const ZAPSTORE_URL = 'https://zapstore.dev/apps/de.rtard.wisp'
 export const SOURCE_REPO_URL = 'https://github.com/mptfire/wisp'
 
