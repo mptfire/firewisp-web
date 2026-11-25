@@ -39,7 +39,7 @@ export function LiveHoverPreview({
   const ios = useMemo(() => isIosDevice(), [])
 
   const [status, setStatus] = useState<HoverPreviewStatus>('connecting')
-  const [muted, setMuted] = useState(true)
+  const [muted, setMuted] = useState(false)
   const [isMseStream, setIsMseStream] = useState(false)
 
   const effectiveMuted = muted || mediaMuted
@@ -53,7 +53,7 @@ export function LiveHoverPreview({
   useEffect(() => {
     const video = videoRef.current
     const safeUrl = sanitizePublicHttpsUrl(streamUrl)
-    setMuted(true)
+    setMuted(false)
     setIsMseStream(false)
     if (!video || !safeUrl) {
       updateStatus('error')
@@ -106,14 +106,27 @@ export function LiveHoverPreview({
       void video.play().catch((err: unknown) => {
         if (destroyed) return
         if (err instanceof DOMException && err.name === 'AbortError') return
+        if (err instanceof DOMException && err.name === 'NotAllowedError' && !video.muted) {
+          // Browser blocked unmuted autoplay before first user interaction — fall back smoothly to muted preview
+          video.muted = true
+          setMuted(true)
+          void video.play().catch((retryErr: unknown) => {
+            if (destroyed) return
+            if (retryErr instanceof DOMException && retryErr.name === 'AbortError') return
+            teardown()
+            updateStatus('error')
+          })
+          return
+        }
         teardown()
         updateStatus('error')
       })
     }
 
     updateStatus('connecting')
-    video.muted = true
-    video.volume = Math.min(1, useSettingsStore.getState().mediaVolume)
+    const st = useSettingsStore.getState()
+    video.muted = st.mediaMuted || st.mediaVolume <= 0
+    video.volume = Math.min(1, st.mediaVolume)
     video.addEventListener('playing', markPlaying)
     video.addEventListener('loadeddata', onResize)
     video.addEventListener('resize', onResize)
@@ -238,7 +251,7 @@ export function LiveHoverPreview({
     const video = videoRef.current
     if (!video) return
     unlockSharedAudioContext()
-    const nextMuted = !muted
+    const nextMuted = !effectiveMuted
     const st = useSettingsStore.getState()
     if (!nextMuted && st.mediaMuted) {
       st.setMediaMuted(false)
@@ -287,7 +300,7 @@ export function LiveHoverPreview({
       )}
       {status === 'audio-only' && (
         <span className="absolute bottom-1.5 left-1.5 z-10 px-1.5 py-0.5 rounded bg-black/80 backdrop-blur-sm text-[9px] font-medium text-[#ff922b] pointer-events-none">
-          {muted ? 'Audio stream · Click 🔇' : 'Audio playing'}
+          {effectiveMuted ? 'Audio stream · Click 🔇' : 'Audio playing'}
         </span>
       )}
       {status === 'error' && (
