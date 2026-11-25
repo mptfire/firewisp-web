@@ -45,11 +45,55 @@ function FireWispFlameSprite({
   variant = 'ember',
 }: {
   idPrefix: string
-  variant?: 'ember' | 'white'
+  variant?: 'ember' | 'white' | 'green'
 }) {
   const outerId = `${idPrefix}-wisp-outer`
   const coreId = `${idPrefix}-wisp-core`
-  const isWhite = variant === 'white'
+  const palette =
+    variant === 'white'
+      ? {
+          o0: '#94a3b8',
+          o1: '#cbd5e1',
+          o2: '#f1f5f9',
+          o3: '#ffffff',
+          c0: '#ffffff',
+          c1: '#f8fafc',
+          c2: '#e2e8f0',
+          sideTop: '#e2e8f0',
+          sideBot: '#cbd5e1',
+          heart: '#ffffff',
+          heartOp: '0.98',
+          spark: '#f8fafc',
+        }
+      : variant === 'green'
+        ? {
+            o0: '#047857',
+            o1: '#10b981',
+            o2: '#34d399',
+            o3: '#a7f3d0',
+            c0: '#ecfdf5',
+            c1: '#6ee7b7',
+            c2: '#34d399',
+            sideTop: '#10b981',
+            sideBot: '#059669',
+            heart: '#ecfdf5',
+            heartOp: '0.95',
+            spark: '#6ee7b7',
+          }
+        : {
+            o0: '#c92a2a',
+            o1: '#e8590c',
+            o2: '#ff922b',
+            o3: '#ffd43b',
+            c0: '#fff9db',
+            c1: '#ffd43b',
+            c2: '#ff922b',
+            sideTop: '#e8590c',
+            sideBot: '#d9480f',
+            heart: '#fff9db',
+            heartOp: '0.92',
+            spark: '#ff922b',
+          }
   return (
     <svg
       viewBox="0 0 28 20"
@@ -61,25 +105,25 @@ function FireWispFlameSprite({
     >
       <defs>
         <linearGradient id={outerId} x1="2" y1="10" x2="26" y2="10" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor={isWhite ? '#94a3b8' : '#c92a2a'} />
-          <stop offset="45%" stopColor={isWhite ? '#cbd5e1' : '#e8590c'} />
-          <stop offset="82%" stopColor={isWhite ? '#f1f5f9' : '#ff922b'} />
-          <stop offset="100%" stopColor={isWhite ? '#ffffff' : '#ffd43b'} />
+          <stop offset="0%" stopColor={palette.o0} />
+          <stop offset="45%" stopColor={palette.o1} />
+          <stop offset="82%" stopColor={palette.o2} />
+          <stop offset="100%" stopColor={palette.o3} />
         </linearGradient>
         <radialGradient id={coreId} cx="76%" cy="50%" r="55%">
-          <stop offset="0%" stopColor={isWhite ? '#ffffff' : '#fff9db'} />
-          <stop offset="48%" stopColor={isWhite ? '#f8fafc' : '#ffd43b'} />
-          <stop offset="100%" stopColor={isWhite ? '#e2e8f0' : '#ff922b'} />
+          <stop offset="0%" stopColor={palette.c0} />
+          <stop offset="48%" stopColor={palette.c1} />
+          <stop offset="100%" stopColor={palette.c2} />
         </radialGradient>
       </defs>
       {/* Upper & lower curving side flame wisps matching the Fire Wisp logo */}
       <path
         d="M19.6 3.7C16.8 1.5 12.8 1.5 9.4 3.4C12.2 3.0 14.8 3.6 17.0 4.6C18.0 4.4 18.9 4.1 19.6 3.7Z"
-        fill={isWhite ? '#e2e8f0' : '#e8590c'}
+        fill={palette.sideTop}
       />
       <path
         d="M20.0 16.0C17.0 18.2 13.2 18.1 10.0 16.2C12.7 16.6 15.2 16.0 17.4 15.1C18.4 15.3 19.3 15.6 20.0 16.0Z"
-        fill={isWhite ? '#cbd5e1' : '#d9480f'}
+        fill={palette.sideBot}
       />
       {/* Main sweeping S-curved Fire Wisp body */}
       <path
@@ -97,16 +141,16 @@ function FireWispFlameSprite({
         cy="10"
         rx="2.5"
         ry="1.9"
-        fill={isWhite ? '#ffffff' : '#fff9db'}
-        fillOpacity={isWhite ? '0.98' : '0.92'}
+        fill={palette.heart}
+        fillOpacity={palette.heartOp}
       />
       <path
         d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z"
-        fill={isWhite ? '#f8fafc' : '#ff922b'}
+        fill={palette.spark}
       />
       <path
         d="M8.0 17.2C6.9 17.5 6.0 16.9 5.5 16.2C6.5 16.2 7.4 16.5 8.0 17.2Z"
-        fill={isWhite ? '#f8fafc' : '#ff922b'}
+        fill={palette.spark}
       />
     </svg>
   )
@@ -447,11 +491,11 @@ export function Layout({ children }: { children: ReactNode }) {
                   >
                     {hasNotifFlame && (
                       <>
-                        <span className="fw-notif-seg fw-notif-tail-3" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-notif-tail-2" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-notif-tail-1" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-notif-wisp" aria-hidden="true">
-                          <FireWispFlameSprite idPrefix="fw-notif" />
+                        <span className="fw-notif-seg fw-green-tail-3" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-green-tail-2" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-green-tail-1" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-notif-wisp fw-green-wisp" aria-hidden="true">
+                          <FireWispFlameSprite idPrefix="fw-notif" variant="green" />
                         </span>
                       </>
                     )}
