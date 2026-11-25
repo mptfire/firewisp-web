@@ -216,9 +216,6 @@ export function TrendingSidebar() {
   const pubkey = useAuthStore((s) => s.pubkey)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const setSidebarFeedMode = useSettingsStore((s) => s.setSidebarFeedMode)
-  const setShowExtendedTab = useSettingsStore((s) => s.setShowExtendedTab)
-  const setShowExploreTab = useSettingsStore((s) => s.setShowExploreTab)
-  const setShowFireWispTab = useSettingsStore((s) => s.setShowFireWispTab)
 
   const postIds = useNostrStore((s) => s.sidebarFeedIds[sidebarFeedMode])
   const loading = useNostrStore((s) => s.sidebarFeedLoading[sidebarFeedMode])
@@ -264,9 +261,6 @@ export function TrendingSidebar() {
           : Flame
 
   const handleSeeAll = () => {
-    if (sidebarFeedMode === 'extended') setShowExtendedTab(true)
-    if (sidebarFeedMode === 'global') setShowExploreTab(true)
-    if (sidebarFeedMode === 'firewisp') setShowFireWispTab(true)
     setActiveFeedTab(sidebarFeedMode)
     navigate('/')
     window.scrollTo({ top: 0, behavior: 'smooth' })

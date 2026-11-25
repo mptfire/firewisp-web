@@ -107,7 +107,7 @@ export function SettingsPage() {
           Feed Tabs
         </h2>
         <p className="text-xs text-[#8c8a82]">
-          For You, Follows, and Trending are always shown. Enable extra tabs below if needed.
+          For You, Follows, and your selected sidebar feed (Trending / Extended / Explore / Wisp Relay) are always shown. Enable extra tabs below to pin multiple at once.
         </p>
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">

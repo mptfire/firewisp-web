@@ -82,6 +82,7 @@ export function FeedPage() {
   const showFireWispTab = useSettingsStore((s) => s.showFireWispTab)
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
+  const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -92,23 +93,35 @@ export function FeedPage() {
   const setSpamFilterEnabled = useSettingsStore((s) => s.setSpamFilterEnabled)
 
   const visibleTabs = useMemo(() => {
+    const thirdTab: [FeedTab, string, typeof Flame] =
+      sidebarFeedMode === 'extended'
+        ? ['extended', 'Extended', Network]
+        : sidebarFeedMode === 'global'
+          ? ['global', 'Explore', Globe]
+          : sidebarFeedMode === 'firewisp'
+            ? ['firewisp', 'Wisp Relay', Flame]
+            : ['trending', 'Trending', TrendingUp]
+
     const list: [FeedTab, string, typeof Flame][] = [
       ['foryou', 'For You', Sparkles],
       ['following', 'Follows', Users],
-      ['trending', 'Trending', TrendingUp],
+      thirdTab,
     ]
-    if (showFireWispTab) list.push(['firewisp', 'Fire Wisp', Flame])
-    if (showExtendedTab) list.push(['extended', 'Extended', Network])
-    if (showExploreTab) list.push(['global', 'Explore', Globe])
+    const seen = new Set<FeedTab>(list.map(([id]) => id))
+    if (showFireWispTab && !seen.has('firewisp')) list.push(['firewisp', 'Wisp Relay', Flame])
+    if (showExtendedTab && !seen.has('extended')) list.push(['extended', 'Extended', Network])
+    if (showExploreTab && !seen.has('global')) list.push(['global', 'Explore', Globe])
     return list
-  }, [showFireWispTab, showExtendedTab, showExploreTab])
+  }, [sidebarFeedMode, showFireWispTab, showExtendedTab, showExploreTab])
 
-  // If the active tab gets hidden in Settings, fall back cleanly to For You
+  // Follow the 3rd-column feed selector cleanly when its tab swaps (or fall back to For You)
   useEffect(() => {
     if (!visibleTabs.some(([id]) => id === tab)) {
-      setTab('foryou')
+      const isThirdSlotMode =
+        tab === 'trending' || tab === 'extended' || tab === 'global' || tab === 'firewisp'
+      setTab(isThirdSlotMode ? sidebarFeedMode : 'foryou')
     }
-  }, [visibleTabs, tab, setTab])
+  }, [visibleTabs, tab, sidebarFeedMode, setTab])
 
   const PAGE_SIZE = 40
   const [refreshTick, setRefreshTick] = useState(0)
