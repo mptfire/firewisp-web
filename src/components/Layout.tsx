@@ -263,45 +263,58 @@ export function Layout({ children }: { children: ReactNode }) {
             </Link>
 
             <nav className="space-y-1">
-              {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={end}
-                  onClick={(e) => scrollTopIfCurrent(e, to)}
-                  className={({ isActive }) =>
-                    `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
-                      isActive
-                        ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
-                        : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
-                    }`
-                  }
-                >
-                  <span className="flex items-center gap-3 min-w-0">
-                    <Icon
-                      className={`w-4 h-4 shrink-0 ${
-                        badge && badgeTone === 'red'
-                          ? 'text-red-500'
-                          : badge && badgeTone === 'green'
-                            ? 'text-emerald-400'
-                            : ''
-                      }`}
-                    />
-                    <span className="truncate">{label}</span>
-                  </span>
-                  {badge !== undefined && (
-                    <span
-                      className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold tabular-nums leading-none ${
-                        badgeTone === 'green'
-                          ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
-                          : 'bg-red-600/20 border-red-500/40 text-red-400'
-                      }`}
-                    >
-                      {badge}
+              {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => {
+                const hasNotifFlame = to === '/notifications' && badge !== undefined
+                return (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={end}
+                    onClick={(e) => scrollTopIfCurrent(e, to)}
+                    className={({ isActive }) =>
+                      `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                        isActive
+                          ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
+                          : hasNotifFlame
+                            ? 'fw-notif-flame bg-[#17161e] text-white hover:bg-[#1e1d28]'
+                            : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
+                      }`
+                    }
+                  >
+                    {hasNotifFlame && (
+                      <>
+                        <span className="fw-notif-seg fw-notif-tail-3" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-notif-tail-2" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-notif-tail-1" aria-hidden="true" />
+                        <span className="fw-notif-seg fw-notif-tip" aria-hidden="true" />
+                      </>
+                    )}
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Icon
+                        className={`w-4 h-4 shrink-0 ${
+                          badge && badgeTone === 'red'
+                            ? 'text-red-500'
+                            : badge && badgeTone === 'green'
+                              ? 'text-emerald-400'
+                              : ''
+                        }`}
+                      />
+                      <span className="truncate">{label}</span>
                     </span>
-                  )}
-                </NavLink>
-              ))}
+                    {badge !== undefined && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold tabular-nums leading-none ${
+                          badgeTone === 'green'
+                            ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                            : 'bg-red-600/20 border-red-500/40 text-red-400'
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                    )}
+                  </NavLink>
+                )
+              })}
             </nav>
 
             <div className="mt-4 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
