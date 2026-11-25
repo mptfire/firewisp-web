@@ -17,6 +17,8 @@ import {
   PictureInPicture2,
   Play,
   Radio,
+  UserMinus,
+  UserPlus,
 } from 'lucide-react'
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { buildLiveATag, encodeLiveNaddr, isLiveStreamFresh } from '../lib/nostr/nip53'
@@ -595,6 +597,10 @@ export const NoteCard = memo(function NoteCard({
   const toggleLike = useNostrStore((s) => s.toggleLike)
   const toggleRepost = useNostrStore((s) => s.toggleRepost)
   const toggleBookmark = useNostrStore((s) => s.toggleBookmark)
+  const toggleFollow = useNostrStore((s) => s.toggleFollow)
+  const isFollowingAuthor = useNostrStore((s) =>
+    s.follows.includes(event.pubkey.toLowerCase()),
+  )
   const myPubkey = useAuthStore((s) => s.pubkey)
   const mutePubkey = useSettingsStore((s) => s.mutePubkey)
   const unmutePubkey = useSettingsStore((s) => s.unmutePubkey)
@@ -610,6 +616,7 @@ export const NoteCard = memo(function NoteCard({
   const [zapOpen, setZapOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [followBusy, setFollowBusy] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const npub = useMemo(() => {
@@ -801,6 +808,31 @@ export const NoteCard = memo(function NoteCard({
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              {!isMyNote && isFollowingAuthor && (
+                <button
+                  type="button"
+                  disabled={followBusy}
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    if (followBusy) return
+                    setFollowBusy(true)
+                    try {
+                      await toggleFollow(event.pubkey)
+                    } finally {
+                      setFollowBusy(false)
+                    }
+                  }}
+                  title={`Unfollow ${displayName}`}
+                  aria-label={`Unfollow ${displayName}`}
+                  className="px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer disabled:opacity-50 bg-[#1a1c26] hover:bg-amber-500/15 border-[#2d3042] hover:border-amber-500/45 text-[#c7c4bc] hover:text-amber-300"
+                >
+                  <UserMinus className="w-3 h-3" />
+                  <span className="hidden sm:inline">
+                    {followBusy ? '…' : 'Unfollow'}
+                  </span>
+                </button>
+              )}
+
               {!isMyNote && (
                 <button
                   onClick={(e) => {
@@ -838,6 +870,35 @@ export const NoteCard = memo(function NoteCard({
                 </button>
                 {menuOpen && (
                   <div className="absolute right-0 mt-1 w-44 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
+                    {!isMyNote && (
+                      <button
+                        type="button"
+                        disabled={followBusy}
+                        onClick={async () => {
+                          if (followBusy) return
+                          setFollowBusy(true)
+                          setMenuOpen(false)
+                          try {
+                            await toggleFollow(event.pubkey)
+                          } finally {
+                            setFollowBusy(false)
+                          }
+                        }}
+                        className="w-full px-3 py-2 text-left text-[#d4d2cb] hover:bg-white/5 hover:text-amber-300 font-medium flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {isFollowingAuthor ? (
+                          <>
+                            <UserMinus className="w-3.5 h-3.5 text-amber-400" />
+                            Unfollow user
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus className="w-3.5 h-3.5 text-[#ff8a3d]" />
+                            Follow user
+                          </>
+                        )}
+                      </button>
+                    )}
                     {!isMyNote && (
                       <button
                         onClick={() => {
