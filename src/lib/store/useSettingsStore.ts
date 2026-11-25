@@ -84,6 +84,8 @@ export interface SettingsState {
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
+  mediaVolume: number
+  mediaMuted: boolean
   nwcUri: string
   nwcRememberDevice: boolean
 
@@ -126,6 +128,8 @@ export interface SettingsState {
   setSidebarFeedMode: (mode: SidebarFeedMode) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
+  setMediaVolume: (volume: number) => void
+  setMediaMuted: (muted: boolean) => void
   setNwcUri: (uri: string, remember?: boolean) => void
   setNwcRememberDevice: (remember: boolean) => void
 
@@ -158,6 +162,8 @@ interface PersistedSettings {
   sidebarFeedMode: SidebarFeedMode
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
+  mediaVolume: number
+  mediaMuted: boolean
   // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
 }
 
@@ -203,6 +209,8 @@ function loadInitial(): PersistedSettings & {
     sidebarFeedMode: 'trending',
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
+    mediaVolume: 0.85,
+    mediaMuted: false,
     nwcUri: storedNwc.nwcUri,
     nwcRememberDevice: storedNwc.remember,
   }
@@ -250,12 +258,21 @@ function loadInitial(): PersistedSettings & {
         ? parsed.sidebarFeedMode
         : 'trending'
 
+    const mediaVolume =
+      typeof parsed.mediaVolume === 'number' && Number.isFinite(parsed.mediaVolume)
+        ? Math.min(2, Math.max(0, parsed.mediaVolume))
+        : defaults.mediaVolume
+    const mediaMuted =
+      typeof parsed.mediaMuted === 'boolean' ? parsed.mediaMuted : defaults.mediaMuted
+
     const merged = {
       ...defaults,
       ...parsed,
       relays: sanitizedRelays.length > 0 ? sanitizedRelays : DEFAULT_RELAYS,
       blossomServers,
       sidebarFeedMode,
+      mediaVolume,
+      mediaMuted,
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
       privateMutedWords: [],
@@ -306,6 +323,8 @@ function persist(state: SettingsState) {
     sidebarFeedMode: state.sidebarFeedMode,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
+    mediaVolume: state.mediaVolume,
+    mediaMuted: state.mediaMuted,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -590,6 +609,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setInlineMediaPlayback: (inlineMediaPlayback) => {
     set({ inlineMediaPlayback })
+    persist(get())
+  },
+  setMediaVolume: (rawVolume) => {
+    const mediaVolume = Number.isFinite(rawVolume)
+      ? Math.round(Math.min(2, Math.max(0, rawVolume)) * 100) / 100
+      : 0.85
+    set({ mediaVolume })
+    persist(get())
+  },
+  setMediaMuted: (mediaMuted) => {
+    set({ mediaMuted })
     persist(get())
   },
   setNwcUri: (nwcUri, remember) => {

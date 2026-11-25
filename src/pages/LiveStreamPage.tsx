@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft,
   ArrowLeftRight,
   Ban,
   ChevronDown,
@@ -787,32 +786,20 @@ export function LiveStreamPage() {
     <div className="flex flex-col min-h-[calc(100vh-52px)] md:min-h-screen">
       {/* Top Bar */}
       <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/95 backdrop-blur-md border-b border-[#20222c] px-3 sm:px-4 py-2.5 flex items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <button
-            type="button"
-            onClick={() => navigate('/')}
-            className="fw-edge-btn fw-edge-ember px-3.5 py-2 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2 transition shrink-0 cursor-pointer"
-            aria-label="Back to Feed"
-            title="Return to main feed"
-          >
-            <ArrowLeft className="w-5 h-5 stroke-[2.5]" />
-            <span className="hidden sm:inline">Back to Feed</span>
-          </button>
-          <div className="min-w-0 flex items-center gap-2">
-            {isLive ? (
-              <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0">
-                <Radio className="w-2.5 h-2.5 animate-pulse" />
-                LIVE
-              </span>
-            ) : activeActivity?.status === 'ended' ? (
-              <span className="px-2 py-0.5 rounded bg-[#252836] text-[#9a9890] text-[10px] font-bold uppercase shrink-0">
-                ENDED
-              </span>
-            ) : null}
-            <h1 className="font-bold text-sm sm:text-base truncate">
-              {activeActivity?.title || 'Live Stream'}
-            </h1>
-          </div>
+        <div className="flex items-center gap-2 min-w-0">
+          {isLive ? (
+            <span className="px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shrink-0">
+              <Radio className="w-2.5 h-2.5 animate-pulse" />
+              LIVE
+            </span>
+          ) : activeActivity?.status === 'ended' ? (
+            <span className="px-2 py-0.5 rounded bg-[#252836] text-[#9a9890] text-[10px] font-bold uppercase shrink-0">
+              ENDED
+            </span>
+          ) : null}
+          <h1 className="font-bold text-sm sm:text-base truncate">
+            {activeActivity?.title || 'Live Stream'}
+          </h1>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">

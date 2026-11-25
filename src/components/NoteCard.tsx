@@ -29,6 +29,7 @@ import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
+import { FireWispVideoPlayer } from './FireWispVideoPlayer'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
@@ -410,15 +411,14 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
             />
           )}
           {!firstImage && firstVideo && (
-            <video
-              src={firstVideo.poster ? firstVideo.url : `${firstVideo.url}#t=0.001`}
-              poster={firstVideo.poster}
-              controls
-              playsInline
-              preload="metadata"
-              onClick={(e) => e.stopPropagation()}
-              className="mt-2 rounded-lg max-h-64 w-full bg-black border border-[#242734]"
-            />
+            <div className="mt-2 rounded-lg overflow-hidden border border-[#242734]">
+              <FireWispVideoPlayer
+                src={firstVideo.url}
+                poster={firstVideo.poster}
+                compact
+                videoClassName="max-h-64 w-full object-contain bg-black"
+              />
+            </div>
           )}
           {!firstImage && !firstVideo && firstYoutube && (
             <div className="mt-2">
@@ -562,15 +562,14 @@ const ReplyContextLine = memo(function ReplyContextLine({
       )}
 
       {!parentImage && parentVideo && (
-        <video
-          src={parentVideo.poster ? parentVideo.url : `${parentVideo.url}#t=0.001`}
-          poster={parentVideo.poster}
-          controls
-          playsInline
-          preload="metadata"
-          onClick={(e) => e.stopPropagation()}
-          className="mt-2 rounded-lg max-h-64 w-full bg-black border border-[#242734]"
-        />
+        <div className="mt-2 rounded-lg overflow-hidden border border-[#242734]">
+          <FireWispVideoPlayer
+            src={parentVideo.url}
+            poster={parentVideo.poster}
+            compact
+            videoClassName="max-h-64 w-full object-contain bg-black"
+          />
+        </div>
       )}
 
       {!parentImage && !parentVideo && parentYoutube && (
@@ -1060,13 +1059,10 @@ export const NoteCard = memo(function NoteCard({
                     />
                   )}
                   {m.kind === 'video' && (
-                    <video
-                      src={m.poster ? m.url : `${m.url}#t=0.001`}
+                    <FireWispVideoPlayer
+                      src={m.url}
                       poster={m.poster}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="w-full max-h-[560px] bg-black"
+                      videoClassName="w-full max-h-[560px] object-contain bg-black"
                     />
                   )}
                   {m.kind === 'audio' && (

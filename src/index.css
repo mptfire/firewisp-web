@@ -31,6 +31,36 @@
   background: linear-gradient(135deg, #e8590c 0%, #f59f00 100%);
 }
 
+/* Custom Fire Wisp video audio slider thumb */
+.fw-vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: #fff9db;
+  border: 1.5px solid #e8590c;
+  box-shadow: 0 0 6px rgba(232, 89, 12, 0.7);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+.fw-vol-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.18);
+}
+.fw-vol-slider::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: #fff9db;
+  border: 1.5px solid #e8590c;
+  box-shadow: 0 0 6px rgba(232, 89, 12, 0.7);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+.fw-vol-slider:hover::-moz-range-thumb {
+  transform: scale(1.18);
+}
+
 /* Bigger, high-contrast horizontal scrollbar for the Live Now stream strip */
 .live-scroll {
   scrollbar-width: auto;

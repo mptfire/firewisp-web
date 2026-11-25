@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { X, ExternalLink } from 'lucide-react'
 import type { MediaAttachment } from '../lib/nostr/content'
+import { FireWispVideoPlayer } from './FireWispVideoPlayer'
 
 interface MediaLightboxProps {
   media: MediaAttachment | null
@@ -52,11 +53,12 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {media.kind === 'video' ? (
-          <video
+          <FireWispVideoPlayer
             src={media.url}
-            controls
+            poster={media.poster}
             autoPlay
-            className="max-h-[85vh] max-w-full rounded-xl"
+            className="rounded-xl max-w-[90vw]"
+            videoClassName="max-h-[85vh] max-w-full object-contain bg-black"
           />
         ) : (
           <img
