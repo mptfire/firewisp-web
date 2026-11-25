@@ -153,12 +153,16 @@ export function Layout({ children }: { children: ReactNode }) {
             <Link
               to="/"
               onClick={(e) => scrollTopIfCurrent(e, '/')}
-              className="flex items-center gap-2.5 px-3 py-2 mb-4"
+              className="fw-flame-box mb-4 group"
             >
-              <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl" />
-              <div>
-                <div className="font-bold text-lg leading-tight tracking-tight">Fire Wisp</div>
-                <div className="text-[11px] text-[#9a9890]">Sovereign Nostr</div>
+              <div className="fw-flame-box-inner flex items-center gap-2.5 px-3 py-2.5">
+                <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-bold text-lg leading-tight tracking-tight text-white group-hover:text-[#ffd43b] transition">
+                    Fire Wisp
+                  </div>
+                  <div className="text-[11px] text-[#9a9890]">Sovereign Nostr</div>
+                </div>
               </div>
             </Link>
 
