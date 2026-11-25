@@ -434,14 +434,14 @@ export function Layout({ children }: { children: ReactNode }) {
                     end={end}
                     onClick={(e) => scrollTopIfCurrent(e, to)}
                     className={({ isActive }) =>
-                      `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${
+                      `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition-[background-color,border-color,color] duration-500 ease-out ${
                         hasFeedNew
-                          ? 'fw-notif-flame text-[#ff922b] font-semibold hover:bg-white/5'
-                          : isActive
-                            ? 'bg-[#e8590c]/15 text-[#ff922b] border border-[#e8590c]/25'
-                            : hasNotifFlame
-                              ? 'fw-notif-flame text-white hover:bg-white/5'
-                              : 'text-[#c2bfb7] hover:bg-white/5 hover:text-white'
+                          ? 'fw-notif-flame bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
+                          : hasNotifFlame
+                            ? 'fw-notif-flame bg-transparent border-transparent text-white hover:bg-white/5'
+                            : isActive
+                              ? 'bg-[#e8590c]/15 text-[#ff922b] border-[#e8590c]/25'
+                              : 'bg-transparent border-transparent text-[#c2bfb7] hover:bg-white/5 hover:text-white'
                       }`
                     }
                   >
