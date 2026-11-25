@@ -1207,6 +1207,12 @@ describe('Full code-audit regression & security hardening', () => {
     })
     try {
       useSettingsStore.getState().mergePrivateMutes({ pubkeys: ['c'.repeat(64)] })
+      useSettingsStore
+        .getState()
+        .setNwcUri(
+          `nostr+walletconnect://${'a'.repeat(64)}?relay=wss://relay.getalby.com/v1&secret=${'b'.repeat(64)}`,
+          true,
+        )
       expect(useSettingsStore.getState().privateMutedPubkeys).toContain('c'.repeat(64))
 
       useNostrStore.getState().resetUserState()
@@ -1214,6 +1220,11 @@ describe('Full code-audit regression & security hardening', () => {
       expect(storeMap.has('firewisp_bookmarks_v1')).toBe(false)
       expect(storeMap.has('firewisp_profiles_cache_v1')).toBe(false)
       expect(useSettingsStore.getState().privateMutedPubkeys).toEqual([])
+      // Remembered NWC wallet stays stored until explicitly removed by the user
+      expect(useSettingsStore.getState().nwcUri).toContain('nostr+walletconnect://')
+      expect(storeMap.has('firewisp_nwc_v1')).toBe(true)
+      useSettingsStore.getState().setNwcUri('')
+      expect(storeMap.has('firewisp_nwc_v1')).toBe(false)
     } finally {
       if (prevLs === undefined) {
         delete (globalThis as { localStorage?: Storage }).localStorage

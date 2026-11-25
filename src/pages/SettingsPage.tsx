@@ -718,7 +718,7 @@ export function SettingsPage() {
               settings.setNwcUri(nwcInput, settings.nwcRememberDevice)
               setNwcStatus(
                 settings.nwcRememberDevice
-                  ? 'NWC wallet saved on this device (wiped automatically on Sign Out)'
+                  ? 'NWC wallet saved on this device until you remove it'
                   : 'NWC wallet saved for this browser tab session',
               )
             }}
@@ -732,11 +732,11 @@ export function SettingsPage() {
               onClick={() => {
                 settings.setNwcUri('')
                 setNwcInput('')
-                setNwcStatus('Disconnected NWC wallet')
+                setNwcStatus('Removed NWC wallet')
               }}
               className="px-3 py-2 rounded-xl bg-[#1a1c24] hover:bg-red-500/20 border border-[#2a2d3a] hover:border-red-500/40 text-xs text-red-300 cursor-pointer"
             >
-              Disconnect
+              Remove
             </button>
           )}
         </div>
@@ -745,8 +745,8 @@ export function SettingsPage() {
             <div className="font-medium text-white">Remember NWC wallet on this device</div>
             <div className="text-[#8c8a82]">
               {settings.nwcRememberDevice
-                ? 'Stays connected across refreshes and browser restarts (cleared on Sign Out).'
-                : 'Tab session only — survives page refreshes, clears when you close the tab.'}
+                ? 'Stays saved across refreshes, restarts, and sign-outs until you click Remove.'
+                : 'Tab session only — survives page refreshes, clears when you close the tab or sign out.'}
             </div>
           </div>
           <input

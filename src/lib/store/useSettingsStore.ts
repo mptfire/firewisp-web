@@ -550,12 +550,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }))
   },
   clearPrivateSessionMutes: () => {
-    saveStoredNwc('', false)
     set({
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
       privateMutedWords: [],
-      nwcUri: '',
     })
   },
 

@@ -334,7 +334,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     get().signer?.destroy()
-    useSettingsStore.getState().setNwcUri('')
+    const settings = useSettingsStore.getState()
+    if (!settings.nwcRememberDevice) {
+      settings.setNwcUri('')
+    }
     useNostrStore.getState().resetUserState()
     writeMeta(null)
     set({
