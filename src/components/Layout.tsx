@@ -155,6 +155,11 @@ export function Layout({ children }: { children: ReactNode }) {
               onClick={(e) => scrollTopIfCurrent(e, '/')}
               className="fw-flame-box mb-4 group"
             >
+              <span className="fw-flame-seg fw-flame-tail-4" aria-hidden="true" />
+              <span className="fw-flame-seg fw-flame-tail-3" aria-hidden="true" />
+              <span className="fw-flame-seg fw-flame-tail-2" aria-hidden="true" />
+              <span className="fw-flame-seg fw-flame-tail-1" aria-hidden="true" />
+              <span className="fw-flame-seg fw-flame-tip" aria-hidden="true" />
               <div className="fw-flame-box-inner flex items-center gap-2.5 px-3 py-2.5">
                 <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl shrink-0" />
                 <div className="min-w-0">
