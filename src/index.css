@@ -452,16 +452,32 @@
   background: linear-gradient(135deg, #1d1820 0%, #171822 100%);
 }
 
-/* Fire-style orbiting flame ring around Notifications nav button when unread alerts exist */
+/* Slow-moving Fire Wisp flame + short ember trail orbiting Notifications when unread alerts exist (zero static outline) */
+@keyframes fw-notif-wisp-flicker {
+  0%,
+  100% {
+    transform: scale(1, 1) rotate(0deg);
+    filter: drop-shadow(0 0 4px rgba(255, 212, 59, 0.85))
+      drop-shadow(0 0 9px rgba(232, 89, 12, 0.65));
+  }
+  35% {
+    transform: scale(1.07, 0.95) rotate(-2deg);
+    filter: drop-shadow(0 0 5px rgba(255, 224, 102, 0.95))
+      drop-shadow(0 0 11px rgba(232, 89, 12, 0.78));
+  }
+  70% {
+    transform: scale(0.96, 1.06) rotate(2deg);
+    filter: drop-shadow(0 0 3.5px rgba(255, 212, 59, 0.8))
+      drop-shadow(0 0 8px rgba(232, 89, 12, 0.6));
+  }
+}
+
 .fw-notif-flame {
   --fw-notif-radius: 0.75rem;
   position: relative;
   isolation: isolate;
   overflow: visible;
   border-radius: var(--fw-notif-radius);
-  box-shadow:
-    inset 0 0 0 1.5px rgba(232, 89, 12, 0.52),
-    0 0 14px -4px rgba(245, 159, 0, 0.55);
 }
 
 .fw-notif-seg {
@@ -478,53 +494,54 @@
     display: block;
     offset-path: inset(1px round var(--fw-notif-radius));
     offset-rotate: auto;
-    animation: fw-flame-orbit 5.8s linear infinite;
+    animation: fw-flame-orbit 24s linear infinite;
   }
 }
 
-.fw-notif-tip {
-  width: 12px;
-  height: 6.5px;
-  border-radius: 45% 65% 65% 45% / 50% 50% 50% 50%;
-  background: radial-gradient(
-    ellipse at 70% 50%,
-    #fff9db 0%,
-    #ffe066 36%,
-    #ff922b 68%,
-    rgba(232, 89, 12, 0.35) 100%
-  );
-  box-shadow:
-    0 0 7px 2px rgba(255, 212, 59, 0.85),
-    0 0 13px 3px rgba(232, 89, 12, 0.55);
+.fw-notif-wisp {
+  z-index: 3;
+  width: 24px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 70% 50%;
   animation:
-    fw-flame-orbit 5.8s linear infinite,
-    fw-flame-flicker 1.4s ease-in-out infinite;
-  animation-delay: -0.9s, 0s;
+    fw-flame-orbit 24s linear infinite,
+    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+  animation-delay: -1.4s, 0s;
+}
+
+@supports (offset-path: inset(1px round 0.75rem)) {
+  .fw-notif-wisp {
+    display: flex;
+    offset-anchor: 55% 50%;
+  }
 }
 
 .fw-notif-tail-1 {
   width: 11px;
-  height: 4.5px;
+  height: 3.5px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(232, 89, 12, 0.55), #ff922b 65%, #ffd43b);
-  box-shadow: 0 0 6px 1px rgba(255, 146, 43, 0.6);
-  animation-delay: -0.78s;
+  background: linear-gradient(90deg, rgba(232, 89, 12, 0.35), #ff922b 55%, #ffd43b);
+  box-shadow: 0 0 6px 1px rgba(255, 146, 43, 0.55);
+  animation-delay: -0.95s;
 }
 
 .fw-notif-tail-2 {
-  width: 11px;
-  height: 3px;
+  width: 9px;
+  height: 2.25px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(185, 28, 28, 0.4), #e8590c 75%, #ff922b);
-  animation-delay: -0.62s;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.12), #e8590c 65%, rgba(255, 146, 43, 0.85));
+  box-shadow: 0 0 4px 0.5px rgba(232, 89, 12, 0.4);
+  animation-delay: -0.58s;
 }
 
 .fw-notif-tail-3 {
-  width: 10px;
-  height: 2px;
+  width: 7px;
+  height: 1.5px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(153, 27, 27, 0), rgba(220, 38, 38, 0.65));
-  animation-delay: -0.44s;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0), rgba(201, 42, 42, 0.55) 70%, rgba(232, 89, 12, 0.65));
+  animation-delay: -0.26s;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -534,7 +551,8 @@
     animation: none;
   }
   .fw-flame-seg,
-  .fw-notif-seg {
+  .fw-notif-seg,
+  .fw-notif-wisp {
     display: none;
   }
 }
