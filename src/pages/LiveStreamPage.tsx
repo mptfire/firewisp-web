@@ -1347,10 +1347,10 @@ export function LiveStreamPage() {
           </div>
         </div>
 
-        {/* Stream Info & Actions — Host, inline Zap controls, Share & Follow all on one main bar */}
+        {/* Stream Info & Actions — Host left, compact Zap + Share + Follow grouped tightly on the right */}
         <div className="p-3 rounded-2xl bg-[#15161c] border border-[#232530] space-y-2">
-          <div className="flex items-center justify-between gap-2.5 flex-wrap">
-            <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 shrink-0 group">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <Link to={`/p/${hostPubkey}`} className="flex items-center gap-2.5 min-w-0 shrink-0 group mr-auto">
               <Avatar src={hostProfile?.picture} pubkey={hostPubkey} name={hostName} size="md" />
               <div className="min-w-0">
                 <div className="font-semibold text-sm text-white group-hover:text-[#ff922b] truncate">
@@ -1380,7 +1380,7 @@ export function LiveStreamPage() {
               />
             )}
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setShareOpen(true)}

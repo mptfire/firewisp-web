@@ -19,7 +19,7 @@ interface StreamZapBarProps {
   eventATag?: string
 }
 
-const STREAM_ZAP_PRESETS = [21, 100, 500, 1000]
+const STREAM_ZAP_PRESETS = [21, 58, 69, 121]
 
 export function StreamZapBar({
   recipientPubkey,
@@ -161,13 +161,13 @@ export function StreamZapBar({
 
   return (
     <>
-      {/* Sits directly inside the main bar under the video — 4 presets, larger typed amount (no arrows), note, Pay & QR */}
+      {/* Compact right-grouped zap controls on the main bar under the video */}
       <form
         onSubmit={(e) => {
           e.preventDefault()
           void handleZap(preferredMode)
         }}
-        className="flex-1 min-w-[260px] flex items-center gap-1.5 flex-wrap xl:flex-nowrap"
+        className="flex items-center justify-end gap-1 flex-wrap"
       >
         {/* 4 default preset buttons */}
         <div className="flex items-center gap-1 shrink-0">
@@ -187,7 +187,7 @@ export function StreamZapBar({
                   : 'bg-[#1b1d27] border-[#292c3b] text-[#d4d2cb] hover:border-[#f59f00]/50 hover:text-white'
               }`}
             >
-              ⚡{sats >= 1000 ? `${sats / 1000}k` : sats}
+              ⚡{sats}
             </button>
           ))}
         </div>
@@ -208,14 +208,14 @@ export function StreamZapBar({
             placeholder="Sats"
             aria-label="Custom zap amount in sats"
             title={`Zap ${recipientName} (${lud16})`}
-            className="w-28 sm:w-32 pl-3 pr-10 py-1.5 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-base font-bold text-white placeholder-[#6c6a63] focus:outline-none"
+            className="w-28 pl-2.5 pr-9 py-1.5 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-base font-bold text-white placeholder-[#6c6a63] focus:outline-none"
           />
           <span className="absolute right-2.5 text-[11px] font-medium text-[#7c7a72] pointer-events-none">
             sats
           </span>
         </div>
 
-        {/* Optional zap note */}
+        {/* Short optional zap note */}
         <input
           type="text"
           value={comment}
@@ -224,12 +224,12 @@ export function StreamZapBar({
             setInvoice(null)
           }}
           maxLength={140}
-          placeholder="Zap note…"
-          className="flex-1 min-w-[100px] px-2.5 py-2 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs text-white placeholder-[#6c6a63] focus:outline-none"
+          placeholder="Note…"
+          className="w-28 sm:w-32 px-2.5 py-2 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs text-white placeholder-[#6c6a63] focus:outline-none"
         />
 
-        {/* Direct Pay + QR buttons on the same main bar */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Direct Pay + QR buttons */}
+        <div className="flex items-center gap-1 shrink-0">
           {nwcUri && (
             <button
               type="button"
