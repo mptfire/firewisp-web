@@ -199,14 +199,47 @@ function LiveStreamPreviewCard({
           </div>
         )}
 
-        {/* Hover play icon (hidden once live video preview is rendering so stream is unobstructed) */}
-        {previewStatus !== 'playing' && (
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition pointer-events-none">
-            <div className="w-10 h-10 rounded-full bg-[#e8590c]/90 text-white flex items-center justify-center shadow-lg">
-              <Play className="w-4 h-4 fill-white ml-0.5" />
-            </div>
-          </div>
-        )}
+        {/* Center hover play controls: Big Play (Live screen) + smaller Mini Play (Mini-player) */}
+        <div className="absolute inset-0 z-20 flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition pointer-events-none">
+          <Link
+            to={`/live/${naddr}`}
+            onClick={() => handleMouseLeave()}
+            title={`Open ${title} on Live screen`}
+            aria-label={`Open ${title} on Live screen`}
+            className={`pointer-events-auto w-11 h-11 rounded-full text-white flex items-center justify-center shadow-lg transition hover:scale-105 ${
+              previewStatus === 'playing'
+                ? 'bg-[#e8590c]/80 hover:bg-[#e8590c] backdrop-blur-xs'
+                : 'bg-[#e8590c]/90 hover:bg-[#e8590c]'
+            }`}
+          >
+            <Play className="w-4 h-4 fill-white ml-0.5" />
+          </Link>
+          {previewUrl && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                handleMouseLeave()
+                openMiniPlayer({
+                  aTag: stream.aTagValue,
+                  naddr,
+                  streamUrl: previewUrl,
+                  posterUrl: thumb,
+                  title,
+                  hostName,
+                  isLive: stream.activity.status === 'live',
+                })
+              }}
+              title="Open in Mini-player"
+              aria-label={`Play ${title} in mini-player`}
+              className="pointer-events-auto w-9 h-9 rounded-full bg-black/75 hover:bg-[#e8590c] border border-white/25 hover:border-[#ff922b] backdrop-blur-xs text-white flex flex-col items-center justify-center gap-[1px] shadow-lg transition hover:scale-105 cursor-pointer"
+            >
+              <Play className="w-3 h-3 fill-white ml-0.5" />
+              <span className="text-[8px] font-bold leading-none tracking-tight">Mini</span>
+            </button>
+          )}
+        </div>
 
         {/* Bottom-right viewer/chatter pill */}
         {statLabel && (

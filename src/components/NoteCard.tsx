@@ -268,12 +268,51 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
               onStatusChange={setPreviewStatus}
             />
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 flex items-center justify-center pointer-events-none">
-            {previewStatus !== 'playing' && (
-              <span className="w-12 h-12 rounded-full bg-[#e8590c]/95 group-hover:scale-105 transition shadow-xl flex items-center justify-center text-white">
-                <Play className="w-5 h-5 fill-white ml-0.5" />
-              </span>
-            )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-black/25 pointer-events-none" />
+          {/* Center play controls: Big Play (normal stream) + smaller Mini Play (Mini-player) */}
+          <div
+            className={`absolute inset-0 z-20 flex items-center justify-center gap-2.5 transition pointer-events-none ${
+              previewStatus === 'playing'
+                ? 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+                : 'opacity-100'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={handleActivateStream}
+              title={inlineMediaPlayback ? `Play ${title}` : `Open ${title} on Live screen`}
+              aria-label={inlineMediaPlayback ? `Play ${title}` : `Open ${title} on Live screen`}
+              className={`pointer-events-auto w-12 h-12 rounded-full text-white flex items-center justify-center shadow-xl transition hover:scale-105 cursor-pointer ${
+                previewStatus === 'playing'
+                  ? 'bg-[#e8590c]/80 hover:bg-[#e8590c] backdrop-blur-xs'
+                  : 'bg-[#e8590c]/95 hover:bg-[#e8590c]'
+              }`}
+            >
+              <Play className="w-5 h-5 fill-white ml-0.5" />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                stopHoverPreview()
+                openMiniPlayer({
+                  aTag,
+                  naddr: bech32,
+                  streamUrl: liveStreamUrl,
+                  posterUrl: thumb,
+                  title,
+                  hostName,
+                  isLive,
+                })
+              }}
+              title="Open in Mini-player"
+              aria-label={`Play ${title} in mini-player`}
+              className="pointer-events-auto w-9 h-9 rounded-full bg-black/75 hover:bg-[#e8590c] border border-white/25 hover:border-[#ff922b] backdrop-blur-xs text-white flex flex-col items-center justify-center gap-[1px] shadow-xl transition hover:scale-105 cursor-pointer"
+            >
+              <Play className="w-3 h-3 fill-white ml-0.5" />
+              <span className="text-[8px] font-bold leading-none tracking-tight">Mini</span>
+            </button>
           </div>
           <span className="absolute top-2.5 left-2.5 z-10 px-2 py-0.5 rounded bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1 shadow pointer-events-none">
             <Radio className="w-2.5 h-2.5 animate-pulse" />
