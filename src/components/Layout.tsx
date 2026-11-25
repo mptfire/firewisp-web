@@ -41,6 +41,58 @@ import { SidebarAudioDeck } from './SidebarAudioDeck'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
 
+function FireWispFlameSprite({ idPrefix }: { idPrefix: string }) {
+  const outerId = `${idPrefix}-wisp-outer`
+  const coreId = `${idPrefix}-wisp-core`
+  return (
+    <svg
+      viewBox="0 0 28 20"
+      width="24"
+      height="17"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className="w-full h-full overflow-visible"
+    >
+      <defs>
+        <linearGradient id={outerId} x1="2" y1="10" x2="26" y2="10" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#c92a2a" />
+          <stop offset="45%" stopColor="#e8590c" />
+          <stop offset="82%" stopColor="#ff922b" />
+          <stop offset="100%" stopColor="#ffd43b" />
+        </linearGradient>
+        <radialGradient id={coreId} cx="76%" cy="50%" r="55%">
+          <stop offset="0%" stopColor="#fff9db" />
+          <stop offset="48%" stopColor="#ffd43b" />
+          <stop offset="100%" stopColor="#ff922b" />
+        </radialGradient>
+      </defs>
+      {/* Upper & lower curving side flame wisps matching the Fire Wisp logo */}
+      <path
+        d="M19.6 3.7C16.8 1.5 12.8 1.5 9.4 3.4C12.2 3.0 14.8 3.6 17.0 4.6C18.0 4.4 18.9 4.1 19.6 3.7Z"
+        fill="#e8590c"
+      />
+      <path
+        d="M20.0 16.0C17.0 18.2 13.2 18.1 10.0 16.2C12.7 16.6 15.2 16.0 17.4 15.1C18.4 15.3 19.3 15.6 20.0 16.0Z"
+        fill="#d9480f"
+      />
+      {/* Main sweeping S-curved Fire Wisp body */}
+      <path
+        d="M25.5 10C25.5 6.4 22.4 4.2 18.2 4.5C14.8 4.7 12.2 6.3 8.8 5.8C6.0 5.4 4.1 3.6 2.2 4.6C4.4 7.0 6.8 8.6 9.6 9.4C6.6 10.2 4.6 11.4 3.0 13.0C5.8 13.3 8.6 12.4 11.6 13.2C15.2 14.3 18.0 15.8 21.4 15.2C24.0 14.7 25.5 12.6 25.5 10Z"
+        fill={`url(#${outerId})`}
+      />
+      {/* Bright golden-yellow inner flame core */}
+      <path
+        d="M23.6 10C23.6 7.5 21.3 6.0 18.3 6.3C15.5 6.6 13.4 8.2 9.2 8.2C12.6 9.4 13.8 10.9 11.2 12.0C14.4 12.2 16.8 13.6 19.6 13.5C22.1 13.4 23.6 12.0 23.6 10Z"
+        fill={`url(#${coreId})`}
+      />
+      {/* Luminous warm-white wisp heart & floating ember sparks */}
+      <ellipse cx="20.4" cy="10" rx="2.5" ry="1.9" fill="#fff9db" fillOpacity="0.92" />
+      <path d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z" fill="#ff922b" />
+      <path d="M8.0 17.2C6.9 17.5 6.0 16.9 5.5 16.2C6.5 16.2 7.4 16.5 8.0 17.2Z" fill="#ff922b" />
+    </svg>
+  )
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   // Clicking the nav item (or logo) for the page you're already on scrolls back to the top without pushing duplicate history entries
@@ -256,11 +308,12 @@ export function Layout({ children }: { children: ReactNode }) {
               onClick={(e) => scrollTopIfCurrent(e, '/')}
               className="fw-flame-box mb-4 group"
             >
-              <span className="fw-flame-seg fw-flame-tail-4" aria-hidden="true" />
               <span className="fw-flame-seg fw-flame-tail-3" aria-hidden="true" />
               <span className="fw-flame-seg fw-flame-tail-2" aria-hidden="true" />
               <span className="fw-flame-seg fw-flame-tail-1" aria-hidden="true" />
-              <span className="fw-flame-seg fw-flame-tip" aria-hidden="true" />
+              <span className="fw-flame-seg fw-flame-wisp" aria-hidden="true">
+                <FireWispFlameSprite idPrefix="fw-brand" />
+              </span>
               <div className="fw-flame-box-inner flex items-center gap-2.5 px-3 py-2.5">
                 <img src="/firewisp-logo.png" alt="Fire Wisp" className="w-9 h-9 rounded-xl shrink-0" />
                 <div className="min-w-0">
@@ -297,51 +350,7 @@ export function Layout({ children }: { children: ReactNode }) {
                         <span className="fw-notif-seg fw-notif-tail-2" aria-hidden="true" />
                         <span className="fw-notif-seg fw-notif-tail-1" aria-hidden="true" />
                         <span className="fw-notif-seg fw-notif-wisp" aria-hidden="true">
-                          <svg
-                            viewBox="0 0 28 20"
-                            width="24"
-                            height="17"
-                            fill="none"
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="w-full h-full overflow-visible"
-                          >
-                            <defs>
-                              <linearGradient id="fw-notif-wisp-outer" x1="2" y1="10" x2="26" y2="10" gradientUnits="userSpaceOnUse">
-                                <stop offset="0%" stopColor="#c92a2a" />
-                                <stop offset="45%" stopColor="#e8590c" />
-                                <stop offset="82%" stopColor="#ff922b" />
-                                <stop offset="100%" stopColor="#ffd43b" />
-                              </linearGradient>
-                              <radialGradient id="fw-notif-wisp-core" cx="76%" cy="50%" r="55%">
-                                <stop offset="0%" stopColor="#fff9db" />
-                                <stop offset="48%" stopColor="#ffd43b" />
-                                <stop offset="100%" stopColor="#ff922b" />
-                              </radialGradient>
-                            </defs>
-                            {/* Upper & lower curving side flame wisps matching the Fire Wisp logo */}
-                            <path
-                              d="M19.6 3.7C16.8 1.5 12.8 1.5 9.4 3.4C12.2 3.0 14.8 3.6 17.0 4.6C18.0 4.4 18.9 4.1 19.6 3.7Z"
-                              fill="#e8590c"
-                            />
-                            <path
-                              d="M20.0 16.0C17.0 18.2 13.2 18.1 10.0 16.2C12.7 16.6 15.2 16.0 17.4 15.1C18.4 15.3 19.3 15.6 20.0 16.0Z"
-                              fill="#d9480f"
-                            />
-                            {/* Main sweeping S-curved Fire Wisp body */}
-                            <path
-                              d="M25.5 10C25.5 6.4 22.4 4.2 18.2 4.5C14.8 4.7 12.2 6.3 8.8 5.8C6.0 5.4 4.1 3.6 2.2 4.6C4.4 7.0 6.8 8.6 9.6 9.4C6.6 10.2 4.6 11.4 3.0 13.0C5.8 13.3 8.6 12.4 11.6 13.2C15.2 14.3 18.0 15.8 21.4 15.2C24.0 14.7 25.5 12.6 25.5 10Z"
-                              fill="url(#fw-notif-wisp-outer)"
-                            />
-                            {/* Bright golden-yellow inner flame core */}
-                            <path
-                              d="M23.6 10C23.6 7.5 21.3 6.0 18.3 6.3C15.5 6.6 13.4 8.2 9.2 8.2C12.6 9.4 13.8 10.9 11.2 12.0C14.4 12.2 16.8 13.6 19.6 13.5C22.1 13.4 23.6 12.0 23.6 10Z"
-                              fill="url(#fw-notif-wisp-core)"
-                            />
-                            {/* Luminous warm-white wisp heart & floating ember sparks */}
-                            <ellipse cx="20.4" cy="10" rx="2.5" ry="1.9" fill="#fff9db" fillOpacity="0.92" />
-                            <path d="M6.8 2.2C5.6 1.7 4.7 2.4 4.2 3.1C5.2 3.1 6.2 2.9 6.8 2.2Z" fill="#ff922b" />
-                            <path d="M8.0 17.2C6.9 17.5 6.0 16.9 5.5 16.2C6.5 16.2 7.4 16.5 8.0 17.2Z" fill="#ff922b" />
-                          </svg>
+                          <FireWispFlameSprite idPrefix="fw-notif" />
                         </span>
                       </>
                     )}

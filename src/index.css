@@ -382,62 +382,54 @@
     display: block;
     offset-path: inset(1px round var(--fw-flame-radius));
     offset-rotate: auto;
-    animation: fw-flame-orbit 14s linear infinite;
+    animation: fw-flame-orbit 24s linear infinite;
   }
 }
 
-.fw-flame-tip {
-  width: 15px;
-  height: 8.5px;
-  border-radius: 45% 65% 65% 45% / 50% 50% 50% 50%;
-  background: radial-gradient(
-    ellipse at 70% 50%,
-    #fff9db 0%,
-    #ffe066 34%,
-    #ff922b 66%,
-    rgba(232, 89, 12, 0.35) 100%
-  );
-  box-shadow:
-    0 0 8px 2px rgba(255, 212, 59, 0.85),
-    0 0 16px 4px rgba(232, 89, 12, 0.55);
+.fw-flame-wisp {
+  z-index: 3;
+  width: 26px;
+  height: 18.5px;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 70% 50%;
   animation:
-    fw-flame-orbit 14s linear infinite,
-    fw-flame-flicker 1.6s ease-in-out infinite;
-  animation-delay: -1.4s, 0s;
+    fw-flame-orbit 24s linear infinite,
+    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+  animation-delay: -1.45s, 0s;
+}
+
+@supports (offset-path: inset(1px round 1rem)) {
+  .fw-flame-wisp {
+    display: flex;
+    offset-anchor: 55% 50%;
+  }
 }
 
 .fw-flame-tail-1 {
-  width: 14px;
-  height: 5.5px;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(232, 89, 12, 0.55), #ff922b 65%, #ffd43b);
-  box-shadow: 0 0 8px 1px rgba(255, 146, 43, 0.65);
-  animation-delay: -1.22s;
-}
-
-.fw-flame-tail-2 {
-  width: 15px;
+  width: 12px;
   height: 4px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(185, 28, 28, 0.45), #e8590c 75%, #ff922b);
-  box-shadow: 0 0 6px 1px rgba(232, 89, 12, 0.45);
+  background: linear-gradient(90deg, rgba(232, 89, 12, 0.35), #ff922b 55%, #ffd43b);
+  box-shadow: 0 0 7px 1px rgba(255, 146, 43, 0.6);
   animation-delay: -0.98s;
 }
 
-.fw-flame-tail-3 {
-  width: 15px;
-  height: 3px;
+.fw-flame-tail-2 {
+  width: 10px;
+  height: 2.5px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(153, 27, 27, 0.2), rgba(220, 38, 38, 0.7), #e8590c);
-  animation-delay: -0.7s;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.14), #e8590c 65%, rgba(255, 146, 43, 0.85));
+  box-shadow: 0 0 5px 0.5px rgba(232, 89, 12, 0.42);
+  animation-delay: -0.6s;
 }
 
-.fw-flame-tail-4 {
-  width: 14px;
-  height: 2.25px;
+.fw-flame-tail-3 {
+  width: 8px;
+  height: 1.75px;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(127, 29, 29, 0), rgba(185, 28, 28, 0.55));
-  animation-delay: -0.38s;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0), rgba(201, 42, 42, 0.55) 70%, rgba(232, 89, 12, 0.65));
+  animation-delay: -0.26s;
 }
 
 .fw-flame-box-inner {
@@ -551,6 +543,7 @@
     animation: none;
   }
   .fw-flame-seg,
+  .fw-flame-wisp,
   .fw-notif-seg,
   .fw-notif-wisp {
     display: none;
