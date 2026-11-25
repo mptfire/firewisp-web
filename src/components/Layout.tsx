@@ -123,6 +123,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const notificationIds = useNostrStore((s) => s.notificationIds)
   const notificationsLastSeenAt = useNostrStore((s) => s.notificationsLastSeenAt)
+  const readNotificationIds = useNostrStore((s) => s.readNotificationIds)
   const events = useNostrStore((s) => s.events)
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
@@ -150,7 +151,7 @@ export function Layout({ children }: { children: ReactNode }) {
   }, [liveStreams, mutedPubkeys, privateMutedPubkeys])
 
   const unreadNotificationCount = useMemo(() => {
-    if (!pubkey || location.pathname === '/notifications' || notificationsLastSeenAt <= 0) return 0
+    if (!pubkey || notificationsLastSeenAt <= 0) return 0
     const allMutedPks =
       privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
     let count = 0
@@ -158,6 +159,7 @@ export function Layout({ children }: { children: ReactNode }) {
       const ev = events[id]
       if (!ev) continue
       if (ev.created_at <= notificationsLastSeenAt) break
+      if (readNotificationIds[id]) continue
       if (isEventDeleted(ev) || isEventMuted(ev)) continue
       if (ev.kind === 9735) {
         const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
@@ -168,9 +170,9 @@ export function Layout({ children }: { children: ReactNode }) {
     return count
   }, [
     pubkey,
-    location.pathname,
     notificationIds,
     notificationsLastSeenAt,
+    readNotificationIds,
     events,
     deletedByAuthor,
     isEventDeleted,

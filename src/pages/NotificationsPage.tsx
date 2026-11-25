@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
+import { Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -20,6 +20,8 @@ export function NotificationsPage() {
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const notificationIds = useNostrStore((s) => s.notificationIds)
   const notificationsLastSeenAt = useNostrStore((s) => s.notificationsLastSeenAt)
+  const readNotificationIds = useNostrStore((s) => s.readNotificationIds)
+  const markNotificationRead = useNostrStore((s) => s.markNotificationRead)
   const markNotificationsRead = useNostrStore((s) => s.markNotificationsRead)
   const events = useNostrStore((s) => s.events)
   const profiles = useNostrStore((s) => s.profiles)
@@ -33,8 +35,6 @@ export function NotificationsPage() {
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const [loading, setLoading] = useState(() => notificationIds.length === 0)
-  // Snapshot the previous last-seen timestamp on entry so newly unread rows stay highlighted while reading
-  const [unreadCutoff] = useState(() => notificationsLastSeenAt)
 
   useEffect(() => {
     if (!pubkey) return
@@ -72,14 +72,22 @@ export function NotificationsPage() {
     if (visibleNotificationIds.length > 0) setLoading(false)
   }, [visibleNotificationIds.length])
 
-  // Mark notifications as read while viewing the Notifications page
   const latestNotifCreatedAt = visibleNotificationIds[0]
     ? events[visibleNotificationIds[0]]?.created_at || 0
     : 0
-  useEffect(() => {
-    if (!pubkey) return
-    markNotificationsRead(pubkey, latestNotifCreatedAt)
-  }, [pubkey, latestNotifCreatedAt, markNotificationsRead])
+
+  const unreadCount = useMemo(() => {
+    if (notificationsLastSeenAt <= 0) return 0
+    let count = 0
+    for (const id of visibleNotificationIds) {
+      const ev = events[id]
+      if (!ev) continue
+      if (ev.created_at <= notificationsLastSeenAt) break
+      if (readNotificationIds[id]) continue
+      count++
+    }
+    return count
+  }, [visibleNotificationIds, events, notificationsLastSeenAt, readNotificationIds])
 
   if (!pubkey) {
     return (
@@ -99,8 +107,25 @@ export function NotificationsPage() {
 
   return (
     <div>
-      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5">
-        <h1 className="font-bold text-base">Notifications</h1>
+      <div className="sticky top-[52px] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h1 className="font-bold text-base">Notifications</h1>
+          {unreadCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-md border bg-emerald-500/20 border-emerald-500/45 text-emerald-300 text-[10px] font-bold tabular-nums leading-none">
+              {unreadCount} unread
+            </span>
+          )}
+        </div>
+        {unreadCount > 0 && (
+          <button
+            type="button"
+            onClick={() => markNotificationsRead(pubkey, latestNotifCreatedAt)}
+            className="px-2.5 py-1 rounded-lg bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-[11px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+            Mark all read
+          </button>
+        )}
       </div>
 
       {loading && visibleNotificationIds.length === 0 ? (
@@ -156,12 +181,21 @@ export function NotificationsPage() {
           const previewText =
             ev.kind === 9735 ? zapInfo?.comment : ev.kind === 1 || ev.kind === 1111 ? ev.content : undefined
 
-          const isUnread = unreadCutoff > 0 && ev.created_at > unreadCutoff
+          const isUnread =
+            notificationsLastSeenAt > 0 &&
+            ev.created_at > notificationsLastSeenAt &&
+            !readNotificationIds[ev.id]
 
           return (
             <Link
               key={ev.id}
               to={linkTarget}
+              onClick={() => {
+                if (isUnread) markNotificationRead(pubkey, ev.id)
+              }}
+              onAuxClick={() => {
+                if (isUnread) markNotificationRead(pubkey, ev.id)
+              }}
               className={`flex items-start gap-3 px-4 py-3 border-b border-[#20222c] hover:bg-white/[0.03] transition ${
                 isUnread ? 'bg-emerald-500/[0.06] border-l-2 border-l-emerald-400' : ''
               }`}

@@ -128,6 +128,7 @@ export interface NostrState {
   sidebarFeedLoading: Record<SidebarFeedMode, boolean>
   notificationIds: string[]
   notificationsLastSeenAt: number
+  readNotificationIds: Record<string, true>
   dms: DecryptedDm[]
 
   loadingFeed: boolean
@@ -152,6 +153,7 @@ export interface NostrState {
   resetUserState: () => void
   subscribeFeed: (tab: FeedTab) => () => void
   subscribeNotifications: (pubkey: string) => () => void
+  markNotificationRead: (pubkey: string, eventId: string) => void
   markNotificationsRead: (pubkey: string, latestSec?: number) => void
   subscribeDms: () => () => void
 
@@ -182,38 +184,84 @@ export interface NostrState {
 }
 
 const NOTIF_SEEN_STORAGE_KEY = 'firewisp_notif_seen_v1'
+const MAX_STORED_READ_NOTIF_IDS = 300
 
-function loadNotifSeenAt(pubkey: string): number {
+interface StoredNotifReadState {
+  lastSeenAt: number
+  readIds: string[]
+}
+
+function loadNotifReadState(pubkey: string): {
+  lastSeenAt: number
+  readIds: Record<string, true>
+} {
   const clean = pubkey.toLowerCase()
   const fallback = Math.floor(Date.now() / 1000) - 12 * 3600
-  if (typeof localStorage === 'undefined') return fallback
+  if (typeof localStorage === 'undefined') return { lastSeenAt: fallback, readIds: {} }
   try {
     const raw = localStorage.getItem(NOTIF_SEEN_STORAGE_KEY)
-    if (!raw) return fallback
+    if (!raw) return { lastSeenAt: fallback, readIds: {} }
     const map = JSON.parse(raw) as Record<string, unknown>
     const val = map[clean]
     if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
-      return Math.floor(val)
+      return { lastSeenAt: Math.floor(val), readIds: {} }
+    }
+    if (val && typeof val === 'object') {
+      const entry = val as Partial<StoredNotifReadState>
+      const lastSeenAt =
+        typeof entry.lastSeenAt === 'number' &&
+        Number.isFinite(entry.lastSeenAt) &&
+        entry.lastSeenAt > 0
+          ? Math.floor(entry.lastSeenAt)
+          : fallback
+      const readIds: Record<string, true> = {}
+      if (Array.isArray(entry.readIds)) {
+        for (const id of entry.readIds.slice(-MAX_STORED_READ_NOTIF_IDS)) {
+          if (typeof id === 'string' && id.length > 0) readIds[id] = true
+        }
+      }
+      return { lastSeenAt, readIds }
     }
   } catch {
     // ignore storage errors
   }
-  return fallback
+  return { lastSeenAt: fallback, readIds: {} }
 }
 
-function saveNotifSeenAt(pubkey: string, unixSec: number): void {
+function saveNotifReadState(
+  pubkey: string,
+  lastSeenAt: number,
+  readIds: Record<string, true>,
+): void {
   const clean = pubkey.toLowerCase()
   if (typeof localStorage === 'undefined') return
   try {
-    let map: Record<string, number> = {}
+    let map: Record<string, StoredNotifReadState | number> = {}
     const raw = localStorage.getItem(NOTIF_SEEN_STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>
       for (const [k, v] of Object.entries(parsed)) {
-        if (typeof v === 'number' && Number.isFinite(v)) map[k] = Math.floor(v)
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          map[k] = Math.floor(v)
+        } else if (v && typeof v === 'object') {
+          const e = v as Partial<StoredNotifReadState>
+          if (typeof e.lastSeenAt === 'number' && Number.isFinite(e.lastSeenAt)) {
+            map[k] = {
+              lastSeenAt: Math.floor(e.lastSeenAt),
+              readIds: Array.isArray(e.readIds)
+                ? e.readIds
+                    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+                    .slice(-MAX_STORED_READ_NOTIF_IDS)
+                : [],
+            }
+          }
+        }
       }
     }
-    map[clean] = Math.floor(unixSec)
+    map[clean] = {
+      lastSeenAt: Math.floor(lastSeenAt),
+      readIds: Object.keys(readIds).slice(-MAX_STORED_READ_NOTIF_IDS),
+    }
     localStorage.setItem(NOTIF_SEEN_STORAGE_KEY, JSON.stringify(map))
   } catch {
     // ignore storage errors
@@ -368,6 +416,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
   notificationIds: [],
   notificationsLastSeenAt: 0,
+  readNotificationIds: {},
   dms: [],
 
   loadingFeed: false,
@@ -457,6 +506,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       pendingFeedIds: { ...s.pendingFeedIds, foryou: [], following: [], extended: [] },
       notificationIds: [],
       notificationsLastSeenAt: 0,
+      readNotificationIds: {},
       dms: [],
     }))
   },
@@ -1629,19 +1679,41 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
   },
 
+  markNotificationRead: (pubkey, eventId) => {
+    if (!eventId) return
+    const state = get()
+    if (state.readNotificationIds[eventId]) return
+    const nextRead: Record<string, true> = { ...state.readNotificationIds, [eventId]: true }
+    const keys = Object.keys(nextRead)
+    if (keys.length > MAX_STORED_READ_NOTIF_IDS) {
+      for (const oldKey of keys.slice(0, keys.length - MAX_STORED_READ_NOTIF_IDS)) {
+        delete nextRead[oldKey]
+      }
+    }
+    const baseSeen =
+      state.notificationsLastSeenAt > 0
+        ? state.notificationsLastSeenAt
+        : loadNotifReadState(pubkey).lastSeenAt
+    saveNotifReadState(pubkey, baseSeen, nextRead)
+    set({ notificationsLastSeenAt: baseSeen, readNotificationIds: nextRead })
+  },
+
   markNotificationsRead: (pubkey, latestSec) => {
     const nowSec = Math.floor(Date.now() / 1000)
     const next = Math.max(nowSec, latestSec || 0, get().notificationsLastSeenAt)
-    saveNotifSeenAt(pubkey, next)
-    set({ notificationsLastSeenAt: next })
+    saveNotifReadState(pubkey, next, {})
+    set({ notificationsLastSeenAt: next, readNotificationIds: {} })
   },
 
   subscribeNotifications: (pubkey) => {
     const cleanPk = pubkey.toLowerCase()
-    const storedSeen = loadNotifSeenAt(cleanPk)
+    const stored = loadNotifReadState(cleanPk)
     set((s) => ({
       notificationsLastSeenAt:
-        s.notificationsLastSeenAt > storedSeen ? s.notificationsLastSeenAt : storedSeen,
+        s.notificationsLastSeenAt > stored.lastSeenAt
+          ? s.notificationsLastSeenAt
+          : stored.lastSeenAt,
+      readNotificationIds: { ...stored.readIds, ...s.readNotificationIds },
     }))
     const relays = [
       ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),

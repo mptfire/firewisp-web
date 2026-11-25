@@ -1215,10 +1215,24 @@ describe('Full code-audit regression & security hardening', () => {
         )
       expect(useSettingsStore.getState().privateMutedPubkeys).toContain('c'.repeat(64))
 
+      // Verify per-notification read tracking decrements one by one until all are read
+      const testPk = 'd'.repeat(64)
+      useNostrStore.setState({ notificationsLastSeenAt: 1_700_000_000, readNotificationIds: {} })
+      useNostrStore.getState().markNotificationRead(testPk, 'notif-1')
+      expect(useNostrStore.getState().readNotificationIds['notif-1']).toBe(true)
+      expect(useNostrStore.getState().readNotificationIds['notif-2']).toBeUndefined()
+      expect(JSON.parse(storeMap.get('firewisp_notif_seen_v1') || '{}')[testPk]?.readIds).toEqual([
+        'notif-1',
+      ])
+      useNostrStore.getState().markNotificationsRead(testPk, 1_700_000_500)
+      expect(useNostrStore.getState().readNotificationIds).toEqual({})
+      expect(useNostrStore.getState().notificationsLastSeenAt).toBeGreaterThanOrEqual(1_700_000_500)
+
       useNostrStore.getState().resetUserState()
       expect(storeMap.has('firewisp_notif_seen_v1')).toBe(false)
       expect(storeMap.has('firewisp_bookmarks_v1')).toBe(false)
       expect(storeMap.has('firewisp_profiles_cache_v1')).toBe(false)
+      expect(useNostrStore.getState().readNotificationIds).toEqual({})
       expect(useSettingsStore.getState().privateMutedPubkeys).toEqual([])
       // Remembered NWC wallet stays stored until explicitly removed by the user
       expect(useSettingsStore.getState().nwcUri).toContain('nostr+walletconnect://')
