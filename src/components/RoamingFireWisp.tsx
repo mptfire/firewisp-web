@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  createVisitedGrid,
+  getHourlyWispZone,
+  pickTargetBand,
+  readDevWispHourOverride,
+  type BoxRect,
+  type Point,
+  type VerticalBand,
+  type WispZone,
+} from '../lib/wispRoam'
 import { FireWispFlameSprite } from './FireWispFlameSprite'
-
-interface Point {
-  x: number
-  y: number
-}
 
 interface PathSample {
   x: number
@@ -12,24 +17,14 @@ interface PathSample {
   cumDist: number
 }
 
-interface BoxRect {
-  left: number
-  top: number
-  right: number
-  bottom: number
-  width: number
-  height: number
-  pane: 'left' | 'main' | 'right'
-  isBrand?: boolean
-}
-
-// Matches the original 24s brand-box orbit (~544px / 24s ≈ 22.7 px/s)
-const WISP_SPEED_PX_PER_SEC = 23
+const BASE_SPEED_PX_PER_SEC = 23
+const FRAME_INTERVAL_MS = 32 // ~30 fps cap
 const SAMPLE_STEP_PX = 3.5
 const TAIL_DIST_OFFSETS = [11, 19, 27, 35, 43] as const
 
 const BOX_SELECTOR =
   '.fw-flame-box, aside .rounded-2xl, aside .rounded-xl, aside nav, main article, main section, main .rounded-2xl, main .rounded-xl, main img, main video'
+const MAX_CANDIDATE_SCAN = 60
 
 function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v))
@@ -65,7 +60,8 @@ function discoverVisibleBoxes(bounds: BoxRect): BoxRect[] {
   const found: BoxRect[] = []
   const midX = (bounds.left + bounds.right) / 2
 
-  for (const el of candidates) {
+  for (let idx = 0; idx < candidates.length && found.length < MAX_CANDIDATE_SCAN; idx++) {
+    const el = candidates[idx]
     const r = el.getBoundingClientRect()
     if (r.width < 60 || r.height < 32) continue
     if (r.bottom <= bounds.top + 8 || r.top >= bounds.bottom - 8) continue
@@ -80,7 +76,6 @@ function discoverVisibleBoxes(bounds: BoxRect): BoxRect[] {
 
     if (width < 72 || height < 36) continue
 
-    // Deduplicate overlapping parent/child wrappers with nearly identical bounds
     const duplicate = found.some(
       (b) =>
         Math.abs(b.left - left) < 12 &&
@@ -107,25 +102,15 @@ function discoverVisibleBoxes(bounds: BoxRect): BoxRect[] {
     })
   }
 
-  if (found.length > 0) return found
+  return found
+}
 
-  // Safe fallback rectangle inside the 3-pane shell if no boxes are mounted yet
-  const pad = 18
-  const fbLeft = bounds.left + pad
-  const fbRight = Math.max(fbLeft + 120, bounds.right - pad)
-  const fbTop = bounds.top + pad
-  const fbBottom = Math.max(fbTop + 120, Math.min(bounds.bottom - pad, fbTop + 320))
-  return [
-    {
-      left: fbLeft,
-      top: fbTop,
-      right: fbRight,
-      bottom: fbBottom,
-      width: fbRight - fbLeft,
-      height: fbBottom - fbTop,
-      pane: 'main',
-    },
-  ]
+function boxKey(b: BoxRect): string {
+  return `${Math.round(b.left / 12)}:${Math.round(b.top / 12)}:${Math.round(b.right / 12)}:${Math.round(b.bottom / 12)}`
+}
+
+function overlapsBand(b: BoxRect, band: VerticalBand): boolean {
+  return b.bottom >= band.top + 12 && b.top <= band.bottom - 12
 }
 
 function buildRoundedRectLoop(rect: BoxRect): Point[] {
@@ -150,7 +135,6 @@ function buildRoundedRectLoop(rect: BoxRect): Point[] {
     }
   }
 
-  // Clockwise perimeter around the border of the box
   pushLine(rect.left + rad, rect.top, rect.right - rad, rect.top)
   pushArc(rect.right - rad, rect.top + rad, -Math.PI / 2, 0)
   pushLine(rect.right, rect.top + rad, rect.right, rect.bottom - rad)
@@ -161,42 +145,6 @@ function buildRoundedRectLoop(rect: BoxRect): Point[] {
   pushArc(rect.left + rad, rect.top + rad, Math.PI, Math.PI * 1.5)
 
   return pts
-}
-
-function isSameBox(a: BoxRect, b: BoxRect): boolean {
-  return (
-    Math.abs(a.left - b.left) < 12 &&
-    Math.abs(a.top - b.top) < 12 &&
-    Math.abs(a.right - b.right) < 12 &&
-    Math.abs(a.bottom - b.bottom) < 12
-  )
-}
-
-function pickNextBox(
-  boxes: BoxRect[],
-  currPos: Point,
-  lastBox: BoxRect | null,
-): BoxRect {
-  const candidates = lastBox ? boxes.filter((b) => !isSameBox(b, lastBox)) : boxes
-  const pool = candidates.length > 0 ? candidates : boxes
-
-  // Sometimes roam across panes (left -> main -> right); mostly explore nearby boxes calmly
-  const crossPane = Math.random() < 0.35
-  const byDist = [...pool].sort((a, b) => {
-    const da = Math.hypot((a.left + a.right) / 2 - currPos.x, (a.top + a.bottom) / 2 - currPos.y)
-    const db = Math.hypot((b.left + b.right) / 2 - currPos.x, (b.top + b.bottom) / 2 - currPos.y)
-    return da - db
-  })
-
-  if (crossPane && lastBox) {
-    const otherPane = byDist.filter((b) => b.pane !== lastBox.pane)
-    if (otherPane.length > 0) {
-      return otherPane[Math.floor(Math.random() * Math.min(3, otherPane.length))]
-    }
-  }
-
-  const nearCount = Math.min(4, byDist.length)
-  return byDist[Math.floor(Math.random() * nearCount)]
 }
 
 function appendPoint(samples: PathSample[], pt: Point, bounds: BoxRect) {
@@ -223,17 +171,21 @@ function appendBezierTransition(
   const dist = Math.hypot(p3.x - p0.x, p3.y - p0.y)
   if (dist < 4) return
 
-  const handle = Math.min(96, Math.max(16, dist * 0.36))
+  const handle = Math.min(110, Math.max(18, dist * 0.38))
+  const perp = (Math.random() - 0.5) * Math.min(36, dist * 0.14)
   const p1: Point = {
-    x: clamp(p0.x + Math.cos(exitAngleRad) * handle, bounds.left, bounds.right),
-    y: clamp(p0.y + Math.sin(exitAngleRad) * handle, bounds.top, bounds.bottom),
+    x: clamp(p0.x + Math.cos(exitAngleRad) * handle - Math.sin(exitAngleRad) * perp, bounds.left, bounds.right),
+    y: clamp(p0.y + Math.sin(exitAngleRad) * handle + Math.cos(exitAngleRad) * perp, bounds.top, bounds.bottom),
   }
   const p2: Point = {
     x: clamp(p3.x - Math.cos(entryAngleRad) * handle, bounds.left, bounds.right),
     y: clamp(p3.y - Math.sin(entryAngleRad) * handle, bounds.top, bounds.bottom),
   }
 
-  const approxLen = Math.max(dist, Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p3.x - p2.x, p3.y - p2.y))
+  const approxLen = Math.max(
+    dist,
+    Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p3.x - p2.x, p3.y - p2.y),
+  )
   const steps = Math.max(4, Math.ceil(approxLen / SAMPLE_STEP_PX))
   for (let i = 1; i <= steps; i++) {
     const t = i / steps
@@ -251,47 +203,72 @@ function appendBezierTransition(
   }
 }
 
-function samplePositionAtDist(samples: PathSample[], targetDist: number): Point {
-  if (samples.length === 0) return { x: 0, y: 0 }
-  if (targetDist <= samples[0].cumDist) return { x: samples[0].x, y: samples[0].y }
-  const last = samples[samples.length - 1]
-  if (targetDist >= last.cumDist) return { x: last.x, y: last.y }
-
-  let lo = 0
-  let hi = samples.length - 1
-  while (lo + 1 < hi) {
-    const mid = (lo + hi) >> 1
-    if (samples[mid].cumDist <= targetDist) lo = mid
-    else hi = mid
-  }
-  const a = samples[lo]
-  const b = samples[hi]
-  const span = Math.max(0.0001, b.cumDist - a.cumDist)
-  const frac = (targetDist - a.cumDist) / span
-  return {
-    x: a.x + (b.x - a.x) * frac,
-    y: a.y + (b.y - a.y) * frac,
-  }
-}
-
-function samplePoseAtDist(
+/**
+ * Computes pose for head AND all 5 tail segments in one single reverse pass
+ * from the active head index, avoiding 5 binary searches per frame.
+ */
+function sampleHeadAndTail(
   samples: PathSample[],
-  targetDist: number,
-): { x: number; y: number; angleDeg: number } {
-  const pos = samplePositionAtDist(samples, targetDist)
-  const behind = samplePositionAtDist(samples, targetDist - 4)
-  const ahead = samplePositionAtDist(samples, targetDist + 4)
-  const dx = ahead.x - behind.x
-  const dy = ahead.y - behind.y
-  const angleDeg = dx * dx + dy * dy > 0.01 ? (Math.atan2(dy, dx) * 180) / Math.PI : 0
-  return { x: pos.x, y: pos.y, angleDeg }
+  headDist: number,
+  hintIdx: number,
+): {
+  nextHintIdx: number
+  head: { x: number; y: number; angleDeg: number }
+  tails: Array<{ x: number; y: number; angleDeg: number }>
+} {
+  const n = samples.length
+  if (n === 0) {
+    const zero = { x: 0, y: 0, angleDeg: 0 }
+    return { nextHintIdx: 0, head: zero, tails: TAIL_DIST_OFFSETS.map(() => zero) }
+  }
+
+  let idx = Math.min(Math.max(0, hintIdx), n - 2)
+  while (idx < n - 2 && samples[idx + 1].cumDist <= headDist) idx++
+
+  const lerpAtIdx = (targetDist: number, startIdx: number): { pt: Point; usedIdx: number } => {
+    if (targetDist <= samples[0].cumDist) return { pt: { x: samples[0].x, y: samples[0].y }, usedIdx: 0 }
+    if (targetDist >= samples[n - 1].cumDist) {
+      return { pt: { x: samples[n - 1].x, y: samples[n - 1].y }, usedIdx: n - 2 }
+    }
+    let i = startIdx
+    while (i > 0 && samples[i].cumDist > targetDist) i--
+    while (i < n - 2 && samples[i + 1].cumDist < targetDist) i++
+    const a = samples[i]
+    const b = samples[i + 1]
+    const frac = clamp((targetDist - a.cumDist) / Math.max(0.0001, b.cumDist - a.cumDist), 0, 1)
+    return {
+      pt: { x: a.x + (b.x - a.x) * frac, y: a.y + (b.y - a.y) * frac },
+      usedIdx: i,
+    }
+  }
+
+  const poseAt = (targetDist: number, startIdx: number) => {
+    const { pt, usedIdx } = lerpAtIdx(targetDist, startIdx)
+    const ahead = lerpAtIdx(targetDist + 4, usedIdx).pt
+    const behind = lerpAtIdx(targetDist - 4, usedIdx).pt
+    const dx = ahead.x - behind.x
+    const dy = ahead.y - behind.y
+    const angleDeg = dx * dx + dy * dy > 0.01 ? (Math.atan2(dy, dx) * 180) / Math.PI : 0
+    return { pose: { x: pt.x, y: pt.y, angleDeg }, usedIdx }
+  }
+
+  const headRes = poseAt(headDist, idx)
+  const tails: Array<{ x: number; y: number; angleDeg: number }> = []
+  let walkIdx = headRes.usedIdx
+  for (let k = 0; k < TAIL_DIST_OFFSETS.length; k++) {
+    const tRes = poseAt(headDist - TAIL_DIST_OFFSETS[k], walkIdx)
+    tails.push(tRes.pose)
+    walkIdx = tRes.usedIdx
+  }
+
+  return { nextHintIdx: headRes.usedIdx, head: headRes.pose, tails }
 }
 
 /**
- * Main Orange Fire Wisp sprite that moves at the same calm speed (~23 px/s) as
- * the original brand-box orbit, carefully tracing around visible text boxes,
- * notes, sidebar panels, and images strictly within the 3-pane layout shell.
- * Sits at `z-[5]` so it glides over text while ducking under `z-[6]` media.
+ * Main Orange Fire Wisp sprite:
+ * - Hourly zone rotation across Upper / Middle / Lower screen thirds
+ * - 3 exploratory movement modes weighted toward least-visited areas inside [data-fw-shell]
+ * - Capped at ~30 fps, zero per-frame layout reads, GPU-only glow flicker, z-[5] under z-[6] media
  */
 export function RoamingFireWisp() {
   const [reducedMotion, setReducedMotion] = useState(() =>
@@ -315,15 +292,71 @@ export function RoamingFireWisp() {
   useEffect(() => {
     if (reducedMotion || typeof window === 'undefined') return
 
+    const devHour = readDevWispHourOverride()
     let bounds = getShellBounds()
+    let cachedBoxes: BoxRect[] = []
+    let boxesDirty = true
+    let lastBoxScanAt = 0
+    let activeZone: WispZone = getHourlyWispZone(new Date(), devHour)
+    let lastZoneCheckAt = performance.now()
+    let zoneJustChanged = false
+
+    const visited = createVisitedGrid(6, 3)
+    const recentBoxKeys: string[] = []
     const samples: PathSample[] = []
     let headDist = 0
-    let lastBox: BoxRect | null = null
+    let headHintIdx = 0
     let lastAngleRad = 0
-    let lastTs: number | null = null
+    let speedBreath = BASE_SPEED_PX_PER_SEC
+    let lastFrameTs: number | null = null
+    let lastRenderTs = 0
+    let scrollDebounce: ReturnType<typeof setTimeout> | null = null
+    let idleHandle: number | null = null
     let rafId = 0
 
-    const enqueueBoxTrace = (box: BoxRect, isInitial = false) => {
+    const scheduleBoxRefresh = () => {
+      const run = () => {
+        bounds = getShellBounds()
+        cachedBoxes = discoverVisibleBoxes(bounds)
+        boxesDirty = false
+        lastBoxScanAt = performance.now()
+      }
+      if ('requestIdleCallback' in window) {
+        if (idleHandle !== null && 'cancelIdleCallback' in window) {
+          ;(window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+            idleHandle,
+          )
+        }
+        idleHandle = (
+          window as Window & {
+            requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number
+          }
+        ).requestIdleCallback(run, { timeout: 300 })
+      } else {
+        run()
+      }
+    }
+
+    const getBoxes = (nowMs: number): BoxRect[] => {
+      if (boxesDirty || cachedBoxes.length === 0 || nowMs - lastBoxScanAt > 4000) {
+        bounds = getShellBounds()
+        cachedBoxes = discoverVisibleBoxes(bounds)
+        boxesDirty = false
+        lastBoxScanAt = nowMs
+      }
+      return cachedBoxes
+    }
+
+    const pushSampleWithVisit = (pt: Point) => {
+      const before = samples.length
+      appendPoint(samples, pt, bounds)
+      if (samples.length > before && samples.length % 10 === 0) {
+        const last = samples[samples.length - 1]
+        visited.markVisited(last.x, last.y, bounds)
+      }
+    }
+
+    const enqueueBoxTrace = (box: BoxRect, isInitial: boolean) => {
       const loop = buildRoundedRectLoop(box)
       if (loop.length < 4) return
 
@@ -344,7 +377,7 @@ export function RoamingFireWisp() {
       const totalPerimeter = loop.length * SAMPLE_STEP_PX
       const traceLength = isInitial
         ? Math.min(totalPerimeter * 0.55, 220)
-        : Math.min(totalPerimeter * 0.78, 160 + Math.random() * 240)
+        : Math.min(totalPerimeter * 0.78, 150 + Math.random() * 230)
       const stepCount = Math.max(12, Math.round(traceLength / SAMPLE_STEP_PX))
 
       const entryPt = loop[startIdx]
@@ -357,7 +390,7 @@ export function RoamingFireWisp() {
 
       for (let k = 0; k < stepCount; k++) {
         const idx = (startIdx + dir * k + loop.length * 4) % loop.length
-        appendPoint(samples, loop[idx], bounds)
+        pushSampleWithVisit(loop[idx])
       }
 
       const endIdx = (startIdx + dir * (stepCount - 1) + loop.length * 4) % loop.length
@@ -366,91 +399,208 @@ export function RoamingFireWisp() {
         loop[endIdx].y - loop[prevEndIdx].y,
         loop[endIdx].x - loop[prevEndIdx].x,
       )
-      lastBox = box
+
+      const key = boxKey(box)
+      recentBoxKeys.push(key)
+      if (recentBoxKeys.length > 6) recentBoxKeys.shift()
     }
 
-    const ensurePathAhead = () => {
-      bounds = getShellBounds()
-      const totalDist = samples[samples.length - 1]?.cumDist ?? 0
-      if (totalDist - headDist >= 110) return
+    const enqueueOpenWander = (band: VerticalBand) => {
+      const start = samples[samples.length - 1] || {
+        x: bounds.left + bounds.width * 0.3,
+        y: (band.top + band.bottom) / 2,
+      }
+      const target = visited.pickLeastVisitedPoint(bounds, band)
+      const dx = target.x - start.x
+      const dy = target.y - start.y
+      const exitAngle =
+        Math.hypot(dx, dy) > 40 ? Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.7 : lastAngleRad
+      appendBezierTransition(samples, start, lastAngleRad, target, exitAngle, bounds)
+      lastAngleRad = exitAngle
+    }
 
-      const boxes = discoverVisibleBoxes(bounds)
-      if (!lastBox) {
-        const brandBox = boxes.find((b) => b.isBrand) || boxes[0]
-        enqueueBoxTrace(brandBox, true)
+    const enqueueCornerLoop = (band: VerticalBand, boxes: BoxRect[]) => {
+      const inBand = boxes.filter((b) => overlapsBand(b, band))
+      const pick =
+        inBand.length > 0 ? inBand[Math.floor(Math.random() * inBand.length)] : null
+      const cx = clamp(
+        pick ? (Math.random() > 0.5 ? pick.right - 8 : pick.left + 8) : bounds.left + bounds.width * (0.2 + Math.random() * 0.6),
+        bounds.left + 32,
+        bounds.right - 32,
+      )
+      const cy = clamp(
+        pick
+          ? clamp((pick.top + pick.bottom) / 2, band.top + 26, band.bottom - 26)
+          : (band.top + band.bottom) / 2,
+        band.top + 24,
+        band.bottom - 24,
+      )
+      const rx = 22 + Math.random() * 14
+      const ry = 16 + Math.random() * 12
+      const start = samples[samples.length - 1] || { x: cx + rx, y: cy }
+      const dir = Math.random() > 0.5 ? 1 : -1
+      const entryPt = { x: cx + rx, y: cy }
+      const entryAngle = dir > 0 ? Math.PI / 2 : -Math.PI / 2
+      appendBezierTransition(samples, start, lastAngleRad, entryPt, entryAngle, bounds)
+
+      const steps = 32
+      for (let i = 1; i <= steps; i++) {
+        const a = dir * ((Math.PI * 2 * i) / steps)
+        pushSampleWithVisit({ x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry })
+      }
+      lastAngleRad = entryAngle
+    }
+
+    const planNextLeg = (nowMs: number, isInitial = false) => {
+      bounds = getShellBounds()
+      if (nowMs - lastZoneCheckAt >= 60_000) {
+        lastZoneCheckAt = nowMs
+        const nextZone = getHourlyWispZone(new Date(), devHour)
+        if (nextZone !== activeZone) {
+          activeZone = nextZone
+          zoneJustChanged = true
+        }
+      }
+
+      const boxes = getBoxes(nowMs)
+      if (isInitial) {
+        const band = getHourlyWispZone(new Date(), devHour) === 'upper'
+          ? { top: bounds.top, bottom: bounds.bottom }
+          : pickTargetBand(bounds.top, bounds.bottom, activeZone, 0)
+        const inZone = boxes.filter((b) => overlapsBand(b, band))
+        const first = (activeZone === 'upper' ? boxes.find((b) => b.isBrand) : null) || inZone[0] || boxes[0]
+        if (first) {
+          enqueueBoxTrace(first, true)
+        } else {
+          enqueueOpenWander(band)
+        }
         return
       }
 
-      const currPos = samples[samples.length - 1] || {
-        x: bounds.left + bounds.width * 0.25,
-        y: bounds.top + 80,
+      visited.decay()
+      speedBreath = 22 + Math.random() * 2 // gentle 22-24 px/s
+
+      const band = pickTargetBand(bounds.top, bounds.bottom, activeZone, zoneJustChanged ? 0 : Math.random())
+      if (zoneJustChanged) {
+        zoneJustChanged = false
+        enqueueOpenWander(band)
+        return
       }
-      const next = pickNextBox(boxes, currPos, lastBox)
-      enqueueBoxTrace(next, false)
+
+      const modeRoll = Math.random()
+      const zoneBoxes = boxes.filter(
+        (b) => overlapsBand(b, band) && !recentBoxKeys.includes(boxKey(b)),
+      )
+
+      if (modeRoll < 0.45 && zoneBoxes.length > 0) {
+        // Mode 1: Box/note/image edge trace weighted toward least-visited cells
+        const ranked = [...zoneBoxes].sort(
+          (a, b) => visited.scoreRect(a, bounds) - visited.scoreRect(b, bounds),
+        )
+        const chosen = ranked[Math.floor(Math.random() * Math.min(3, ranked.length))]
+        enqueueBoxTrace(chosen, false)
+      } else if (modeRoll < 0.8) {
+        // Mode 2: Smooth curved wander across gaps/panes toward least-visited grid cells
+        enqueueOpenWander(band)
+      } else {
+        // Mode 3: Lazy corner/margin loop
+        enqueueCornerLoop(band, boxes)
+      }
+    }
+
+    const ensurePathAhead = (nowMs: number) => {
+      const totalDist = samples[samples.length - 1]?.cumDist ?? 0
+      if (totalDist - headDist >= 110) return
+      planNextLeg(nowMs, samples.length === 0)
     }
 
     const onResize = () => {
       bounds = getShellBounds()
+      boxesDirty = true
+    }
+
+    const onScroll = () => {
+      boxesDirty = true
+      if (scrollDebounce) clearTimeout(scrollDebounce)
+      scrollDebounce = setTimeout(() => {
+        scrollDebounce = null
+        scheduleBoxRefresh()
+      }, 180)
     }
 
     const onVisibility = () => {
-      if (!document.hidden) lastTs = null
+      if (!document.hidden) lastFrameTs = null
     }
 
-    ensurePathAhead()
+    planNextLeg(performance.now(), true)
 
     const renderFrame = (ts: number) => {
       if (document.hidden) {
-        lastTs = null
+        lastFrameTs = null
         rafId = requestAnimationFrame(renderFrame)
         return
       }
 
-      if (lastTs === null) lastTs = ts
-      const dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000))
-      lastTs = ts
-
-      headDist += WISP_SPEED_PX_PER_SEC * dt
-      ensurePathAhead()
-
-      // Keep path bounded strictly inside current 3-pane horizontal edges on resize
-      const head = samplePoseAtDist(samples, headDist)
-      const hx = clamp(head.x, bounds.left, bounds.right)
-      const hy = clamp(head.y, bounds.top, bounds.bottom)
-
-      if (headRef.current) {
-        headRef.current.style.transform = `translate3d(${(hx - 14).toFixed(1)}px, ${(hy - 10).toFixed(1)}px, 0) rotate(${head.angleDeg.toFixed(1)}deg)`
+      if (lastFrameTs === null) {
+        lastFrameTs = ts
+        lastRenderTs = ts
       }
 
-      for (let i = 0; i < TAIL_DIST_OFFSETS.length; i++) {
-        const el = tailRefs.current[i]
-        if (!el) continue
-        const tailPose = samplePoseAtDist(samples, headDist - TAIL_DIST_OFFSETS[i])
-        const tx = clamp(tailPose.x, bounds.left, bounds.right)
-        const ty = clamp(tailPose.y, bounds.top, bounds.bottom)
-        el.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) translate(-50%, -50%) rotate(${tailPose.angleDeg.toFixed(1)}deg)`
-      }
+      const dt = Math.min(0.05, Math.max(0, (ts - lastFrameTs) / 1000))
+      lastFrameTs = ts
+      headDist += speedBreath * dt
+      ensurePathAhead(ts)
 
-      // Prune old path history well behind the tail to keep memory tiny
-      const keepFrom = headDist - 90
-      if (samples.length > 60 && samples[16].cumDist < keepFrom) {
-        let drop = 0
-        while (drop < samples.length - 40 && samples[drop + 1].cumDist < keepFrom) {
-          drop++
+      // Cap DOM transform writes to ~30 fps while distance still advances accurately
+      if (ts - lastRenderTs >= FRAME_INTERVAL_MS || lastRenderTs === ts) {
+        lastRenderTs = ts
+        const { nextHintIdx, head, tails } = sampleHeadAndTail(samples, headDist, headHintIdx)
+        headHintIdx = nextHintIdx
+
+        const hx = clamp(head.x, bounds.left, bounds.right)
+        const hy = clamp(head.y, bounds.top, bounds.bottom)
+        if (headRef.current) {
+          headRef.current.style.transform = `translate3d(${(hx - 14).toFixed(1)}px, ${(hy - 10).toFixed(1)}px, 0) rotate(${head.angleDeg.toFixed(1)}deg)`
         }
-        if (drop > 0) samples.splice(0, drop)
+
+        for (let i = 0; i < TAIL_DIST_OFFSETS.length; i++) {
+          const el = tailRefs.current[i]
+          if (!el) continue
+          const t = tails[i]
+          const tx = clamp(t.x, bounds.left, bounds.right)
+          const ty = clamp(t.y, bounds.top, bounds.bottom)
+          el.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) translate(-50%, -50%) rotate(${t.angleDeg.toFixed(1)}deg)`
+        }
+
+        const keepFrom = headDist - 90
+        if (samples.length > 60 && samples[16].cumDist < keepFrom) {
+          let drop = 0
+          while (drop < samples.length - 40 && samples[drop + 1].cumDist < keepFrom) drop++
+          if (drop > 0) {
+            samples.splice(0, drop)
+            headHintIdx = Math.max(0, headHintIdx - drop)
+          }
+        }
       }
 
       rafId = requestAnimationFrame(renderFrame)
     }
 
     window.addEventListener('resize', onResize, { passive: true })
+    window.addEventListener('scroll', onScroll, { passive: true })
     document.addEventListener('visibilitychange', onVisibility)
     rafId = requestAnimationFrame(renderFrame)
 
     return () => {
       cancelAnimationFrame(rafId)
+      if (scrollDebounce) clearTimeout(scrollDebounce)
+      if (idleHandle !== null && 'cancelIdleCallback' in window) {
+        ;(window as Window & { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(
+          idleHandle,
+        )
+      }
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('scroll', onScroll)
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [reducedMotion])

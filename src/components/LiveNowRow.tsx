@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Columns2, PictureInPicture2, Play, Radio } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Columns2,
+  PictureInPicture2,
+  Play,
+  Radio,
+} from 'lucide-react'
 import {
   encodeLiveNaddr,
   getStreamPrimaryPubkey,
@@ -337,6 +346,7 @@ export function LiveNowRow({
 } = {}) {
   const showLiveNowBarSetting = useSettingsStore((s) => s.showLiveNowBar)
   const liveBarExpandedSetting = useSettingsStore((s) => s.liveBarExpanded)
+  const setLiveBarExpanded = useSettingsStore((s) => s.setLiveBarExpanded)
   const showLiveNowBar = forceShow || showLiveNowBarSetting
   const isExpanded = forceShow || liveBarExpandedSetting
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
@@ -424,6 +434,18 @@ export function LiveNowRow({
           <Radio className="w-3 h-3 animate-pulse" />
           LIVE
         </Link>
+        {!forceShow && (
+          <button
+            type="button"
+            aria-expanded={false}
+            aria-label="Expand Live Now to full stream cards"
+            title="Expand to full stream cards"
+            onClick={() => setLiveBarExpanded(true)}
+            className="p-1 rounded-lg bg-[#1a1c26] hover:bg-[#e8590c] border border-[#2d3042] text-white transition cursor-pointer shrink-0"
+          >
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        )}
         <div
           ref={scrollRef}
           onScroll={updateScrollArrows}
@@ -471,7 +493,7 @@ export function LiveNowRow({
           : 'mx-2.5 my-2.5 rounded-2xl bg-[#090a0e] border-2 border-[#040407] shadow-[0_0_0_1px_#232635,inset_0_2px_10px_rgba(0,0,0,0.75)] px-3 pt-2.5 pb-2 space-y-2'
       }
     >
-      {/* Header Row: LIVE NOW count + scroll arrows */}
+      {/* Header Row: LIVE NOW count + compact toggle + scroll arrows */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded-md bg-red-600 text-white text-[10px] font-bold tracking-wider uppercase flex items-center gap-1">
@@ -481,6 +503,18 @@ export function LiveNowRow({
           <span className="text-[11px] text-[#8c8a82]">
             {activeStreams.length} {activeStreams.length === 1 ? 'stream' : 'streams'}
           </span>
+          {!forceShow && (
+            <button
+              type="button"
+              aria-expanded={true}
+              aria-label="Collapse Live Now to compact bar"
+              title="Collapse to compact bar"
+              onClick={() => setLiveBarExpanded(false)}
+              className="p-1 rounded-lg bg-[#1a1c26] hover:bg-[#e8590c] border border-[#2d3042] text-white transition cursor-pointer shrink-0"
+            >
+              <ChevronUp className="w-3.5 h-3.5" />
+            </button>
+          )}
           {!forceShow && (
             <Link
               to="/live"

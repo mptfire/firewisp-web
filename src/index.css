@@ -465,18 +465,15 @@
   0%,
   100% {
     transform: scale(1, 1) rotate(0deg);
-    filter: drop-shadow(0 0 4px rgba(255, 212, 59, 0.85))
-      drop-shadow(0 0 9px rgba(232, 89, 12, 0.65));
+    opacity: 0.92;
   }
   35% {
     transform: scale(1.07, 0.95) rotate(-2deg);
-    filter: drop-shadow(0 0 5px rgba(255, 224, 102, 0.95))
-      drop-shadow(0 0 11px rgba(232, 89, 12, 0.78));
+    opacity: 1;
   }
   70% {
     transform: scale(0.96, 1.06) rotate(2deg);
-    filter: drop-shadow(0 0 3.5px rgba(255, 212, 59, 0.8))
-      drop-shadow(0 0 8px rgba(232, 89, 12, 0.6));
+    opacity: 0.88;
   }
 }
 
@@ -502,6 +499,7 @@
     display: block;
     offset-path: inset(1px round var(--fw-notif-radius));
     offset-rotate: auto;
+    will-change: offset-distance;
     animation: fw-flame-orbit 24s linear infinite;
   }
 }
@@ -513,6 +511,9 @@
   align-items: center;
   justify-content: center;
   transform-origin: 70% 50%;
+  filter: drop-shadow(0 0 4px rgba(255, 212, 59, 0.85))
+    drop-shadow(0 0 9px rgba(232, 89, 12, 0.65));
+  will-change: offset-distance, transform, opacity;
   animation:
     fw-flame-orbit 24s linear infinite,
     fw-notif-wisp-flicker 2.2s ease-in-out infinite;
@@ -553,29 +554,12 @@
 }
 
 /* White luminous wisp variant orbiting Feed when new notes arrive (zero highlight box/outline) */
-@keyframes fw-white-wisp-flicker {
-  0%,
-  100% {
-    transform: scale(1, 1) rotate(0deg);
-    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
-      drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
-  }
-  35% {
-    transform: scale(1.07, 0.95) rotate(-2deg);
-    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 1))
-      drop-shadow(0 0 11px rgba(241, 245, 249, 0.8));
-  }
-  70% {
-    transform: scale(0.96, 1.06) rotate(2deg);
-    filter: drop-shadow(0 0 3.5px rgba(255, 255, 255, 0.85))
-      drop-shadow(0 0 8px rgba(203, 213, 225, 0.6));
-  }
-}
-
 .fw-white-wisp {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+    drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
   animation:
     fw-flame-orbit 24s linear infinite,
-    fw-white-wisp-flicker 2.2s ease-in-out infinite;
+    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
   animation-delay: -1.4s, 0s;
 }
 
@@ -606,29 +590,12 @@
 }
 
 /* Emerald green luminous wisp variant orbiting Notifications when unread alerts exist */
-@keyframes fw-green-wisp-flicker {
-  0%,
-  100% {
-    transform: scale(1, 1) rotate(0deg);
-    filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.9))
-      drop-shadow(0 0 9px rgba(16, 185, 129, 0.68));
-  }
-  35% {
-    transform: scale(1.07, 0.95) rotate(-2deg);
-    filter: drop-shadow(0 0 5px rgba(167, 243, 208, 0.98))
-      drop-shadow(0 0 11px rgba(16, 185, 129, 0.82));
-  }
-  70% {
-    transform: scale(0.96, 1.06) rotate(2deg);
-    filter: drop-shadow(0 0 3.5px rgba(110, 231, 183, 0.84))
-      drop-shadow(0 0 8px rgba(5, 150, 105, 0.62));
-  }
-}
-
 .fw-green-wisp {
+  filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.9))
+    drop-shadow(0 0 9px rgba(16, 185, 129, 0.68));
   animation:
     fw-flame-orbit 24s linear infinite,
-    fw-green-wisp-flicker 2.2s ease-in-out infinite;
+    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
   animation-delay: -1.4s, 0s;
 }
 
@@ -674,7 +641,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  filter: drop-shadow(0 0 4px rgba(255, 212, 59, 0.85))
+    drop-shadow(0 0 9px rgba(232, 89, 12, 0.65));
+  will-change: transform, opacity;
   animation: fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+}
+
+.fw-tab-hidden .fw-notif-seg,
+.fw-tab-hidden .fw-notif-wisp,
+.fw-tab-hidden .fw-roam-wisp {
+  animation-play-state: paused !important;
 }
 
 .fw-roam-tail {

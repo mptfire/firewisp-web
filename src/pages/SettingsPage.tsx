@@ -239,7 +239,7 @@ export function SettingsPage() {
           <div>
             <div className="font-medium text-white">Show Live Now streaming bar</div>
             <div className="text-[#8c8a82]">
-              Displays active NIP-53 Nostr live streams at the top of your feed.
+              Displays active NIP-53 Nostr live streams at the top of your feed. Use the arrow on the bar to switch between compact and full cards.
             </div>
           </div>
           <input

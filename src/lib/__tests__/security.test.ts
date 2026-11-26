@@ -1617,4 +1617,38 @@ describe('Full code-audit regression & security hardening', () => {
     ])
     expect(parsedZapBody.youtube.map((y) => y.videoId)).toEqual(['20t-IZZztOk'])
   })
+
+  it('rotates hourly Upper/Middle/Lower wisp zones and balances visited coverage', async () => {
+    const {
+      createVisitedGrid,
+      getHourlyWispZone,
+      getZoneVerticalBand,
+      pickTargetBand,
+      readDevWispHourOverride,
+    } = await import('../wispRoam')
+
+    const d = new Date(2026, 10, 26, 10, 0, 0)
+    const z0 = getHourlyWispZone(d, 0)
+    const z1 = getHourlyWispZone(d, 1)
+    const z2 = getHourlyWispZone(d, 2)
+    expect(new Set([z0, z1, z2])).toEqual(new Set(['upper', 'middle', 'lower']))
+
+    expect(readDevWispHourOverride('?wispHour=14')).toBe(14)
+    expect(readDevWispHourOverride('?wispHour=99')).toBeNull()
+    expect(readDevWispHourOverride('')).toBeNull()
+
+    expect(getZoneVerticalBand(10, 910, 'upper')).toEqual({ top: 10, bottom: 310 })
+    expect(getZoneVerticalBand(10, 910, 'middle')).toEqual({ top: 310, bottom: 610 })
+    expect(getZoneVerticalBand(10, 910, 'lower')).toEqual({ top: 610, bottom: 910 })
+
+    // 80% stays in active zone, 20% softly explores adjacent zone
+    expect(pickTargetBand(10, 910, 'upper', 0.5)).toEqual({ top: 10, bottom: 310 })
+    expect(pickTargetBand(10, 910, 'upper', 0.9)).toEqual({ top: 310, bottom: 610 })
+
+    const bounds = { left: 0, right: 600, top: 0, bottom: 300, width: 600, height: 300 }
+    const grid = createVisitedGrid(6, 3)
+    for (let c = 0; c < 5; c++) grid.markVisited(c * 100 + 50, 50, bounds)
+    const pt = grid.pickLeastVisitedPoint(bounds, { top: 0, bottom: 100 }, () => 0.5)
+    expect(pt.x).toBeGreaterThanOrEqual(500)
+  })
 })

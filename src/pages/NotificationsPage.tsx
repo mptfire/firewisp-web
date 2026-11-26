@@ -231,10 +231,9 @@ export function NotificationsPage() {
                   }}
                   title={`Block & mute ${name}`}
                   aria-label={`Block ${name}`}
-                  className="mt-0.5 shrink-0 px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300"
+                  className="mt-1 shrink-0 p-1.5 rounded-lg border transition cursor-pointer bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300"
                 >
-                  <Ban className="w-3 h-3" />
-                  <span className="hidden sm:inline">Block User</span>
+                  <Ban className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>

@@ -213,6 +213,19 @@ export function Layout({ children }: { children: ReactNode }) {
         ? `(${unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}) Fire Wisp`
         : 'Fire Wisp — Privacy-Focused Nostr Web Client'
   }, [unreadNotificationCount])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const syncVisibility = () => {
+      document.documentElement.classList.toggle('fw-tab-hidden', document.hidden)
+    }
+    syncVisibility()
+    document.addEventListener('visibilitychange', syncVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibility)
+      document.documentElement.classList.remove('fw-tab-hidden')
+    }
+  }, [])
   const [relaysExpanded, setRelaysExpanded] = useState(false)
   const [iosInstallOpen, setIosInstallOpen] = useState(false)
   const isIos = useMemo(() => isIosDevice(), [])

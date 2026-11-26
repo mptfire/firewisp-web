@@ -81,10 +81,6 @@ export function FeedPage() {
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
-  const showLiveNowBar = useSettingsStore((s) => s.showLiveNowBar)
-  const setShowLiveNowBar = useSettingsStore((s) => s.setShowLiveNowBar)
-  const liveBarExpanded = useSettingsStore((s) => s.liveBarExpanded)
-  const setLiveBarExpanded = useSettingsStore((s) => s.setLiveBarExpanded)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -436,50 +432,6 @@ export function FeedPage() {
               </div>
             </div>
           )}
-          <div
-            className="inline-flex items-center gap-1.5"
-            title="Live stream preview cards (On) or compact streaming bar (Off)"
-          >
-            <span className="text-[11px] font-medium text-[#9a9890]">Live</span>
-            <div
-              role="group"
-              aria-label="Live streams display mode"
-              className="inline-flex items-center rounded-lg bg-[#0e0e11] border border-[#262938] p-0.5 gap-0.5"
-            >
-              <button
-                type="button"
-                aria-pressed={liveBarExpanded}
-                onClick={() => {
-                  if (!showLiveNowBar) setShowLiveNowBar(true)
-                  setLiveBarExpanded(true)
-                }}
-                title="Show full Live Now stream preview cards"
-                className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
-                  liveBarExpanded
-                    ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
-                    : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
-                }`}
-              >
-                On
-              </button>
-              <button
-                type="button"
-                aria-pressed={!liveBarExpanded}
-                onClick={() => {
-                  if (!showLiveNowBar) setShowLiveNowBar(true)
-                  setLiveBarExpanded(false)
-                }}
-                title="Show compact Live streaming pill bar"
-                className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
-                  !liveBarExpanded
-                    ? 'bg-red-600/25 border-red-500/50 text-red-300'
-                    : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
-                }`}
-              >
-                Off
-              </button>
-            </div>
-          </div>
           {tab === 'global' && (
             <button
               onClick={() => setSpamFilterEnabled(!spamFilterEnabled)}
