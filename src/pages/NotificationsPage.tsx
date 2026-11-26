@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
-import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
+import { getBuiltinEmoteByKey, resolveReactionEmoteSrc } from '../lib/nostr/customEmotes'
+import { normalizeReactionEmoji, parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
+import { ReactionEmote } from '../components/ReactionEmote'
 
 function formatRelative(unixSec: number): string {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
@@ -185,9 +187,20 @@ export function NotificationsPage() {
                   ? 'text-[#f59f00]'
                   : 'text-[#ff8a3d]'
 
+          const reactionKey =
+            ev.kind === 7 ? normalizeReactionEmoji(ev.content || '') || '+' : null
+          const reactionEmoteImg = reactionKey
+            ? resolveReactionEmoteSrc(reactionKey, ev.tags)
+            : null
+          const reactionEmoteLabel = reactionKey
+            ? getBuiltinEmoteByKey(reactionKey)?.label || reactionKey
+            : ''
+
           const actionText =
             ev.kind === 7
-              ? `reacted ${ev.content || '+'}`
+              ? reactionKey === '+'
+                ? 'reacted ❤️'
+                : `reacted ${ev.content || '+'}`
               : ev.kind === 6
                 ? 'reposted your note'
                 : ev.kind === 9735
@@ -228,7 +241,21 @@ export function NotificationsPage() {
                   <div className="flex items-baseline justify-between gap-2">
                     <p className="text-sm truncate">
                       <span className="font-semibold text-white">{name}</span>{' '}
-                      <span className="text-[#9a9890]">{actionText}</span>
+                      <span className="text-[#9a9890]">
+                        {ev.kind === 7 && reactionEmoteImg ? (
+                          <>
+                            reacted{' '}
+                            <ReactionEmote
+                              src={reactionEmoteImg}
+                              alt={reactionEmoteLabel}
+                              fallback={reactionKey || ev.content || '+'}
+                              className="w-4 h-4 object-contain inline-block align-text-bottom"
+                            />
+                          </>
+                        ) : (
+                          actionText
+                        )}
+                      </span>
                     </p>
                     <span className="text-[11px] text-[#6f6d66] shrink-0">
                       {formatRelative(ev.created_at)}

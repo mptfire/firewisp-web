@@ -146,6 +146,9 @@ export function Layout({ children }: { children: ReactNode }) {
     if (to === '/' && pendingFeedCount > 0) {
       flushPendingFeed(activeFeedTab)
     }
+    if (to === '/notifications' && notifWispActive && latestUnreadNotifKey) {
+      setNotifWispAckKey(latestUnreadNotifKey)
+    }
     if (location.pathname === to && !location.search && !location.hash) {
       e.preventDefault()
       window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -176,11 +179,14 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
 
-  const unreadNotificationCount = useMemo(() => {
-    if (!pubkey || notificationsLastSeenAt <= 0) return 0
+  const { unreadNotificationCount, latestUnreadNotifKey } = useMemo(() => {
+    if (!pubkey || notificationsLastSeenAt <= 0) {
+      return { unreadNotificationCount: 0, latestUnreadNotifKey: null as string | null }
+    }
     const allMutedPks =
       privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
     let count = 0
+    let latestKey: string | null = null
     for (const id of notificationIds) {
       const ev = events[id]
       if (!ev) continue
@@ -197,9 +203,10 @@ export function Layout({ children }: { children: ReactNode }) {
       ) {
         continue
       }
+      if (!latestKey) latestKey = ev.id
       count++
     }
-    return count
+    return { unreadNotificationCount: count, latestUnreadNotifKey: latestKey }
   }, [
     pubkey,
     notificationIds,
@@ -218,6 +225,79 @@ export function Layout({ children }: { children: ReactNode }) {
     spamFilterEnabled,
     followSet,
   ])
+
+  const [feedWispDying, setFeedWispDying] = useState(false)
+  const [notifWispDying, setNotifWispDying] = useState(false)
+  const [notifWispAckKey, setNotifWispAckKey] = useState<string | null>(null)
+  const feedWispTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const notifWispTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const feedWispActive = showWisps && pendingFeedCount > 0
+  const notifWispActive =
+    showWisps && unreadNotificationCount > 0 && latestUnreadNotifKey !== notifWispAckKey
+  const prevFeedWispActiveRef = useRef(feedWispActive)
+  const prevNotifWispActiveRef = useRef(notifWispActive)
+
+  useEffect(() => {
+    const wasActive = prevFeedWispActiveRef.current
+    prevFeedWispActiveRef.current = feedWispActive
+    if (!showWisps) {
+      if (feedWispTimerRef.current) {
+        clearTimeout(feedWispTimerRef.current)
+        feedWispTimerRef.current = null
+      }
+      setFeedWispDying(false)
+      return
+    }
+    if (feedWispActive) {
+      if (feedWispTimerRef.current) {
+        clearTimeout(feedWispTimerRef.current)
+        feedWispTimerRef.current = null
+      }
+      setFeedWispDying(false)
+    } else if (wasActive) {
+      if (feedWispTimerRef.current) clearTimeout(feedWispTimerRef.current)
+      setFeedWispDying(true)
+      feedWispTimerRef.current = setTimeout(() => {
+        feedWispTimerRef.current = null
+        setFeedWispDying(false)
+      }, 7000)
+    }
+  }, [feedWispActive, showWisps])
+
+  useEffect(() => {
+    const wasActive = prevNotifWispActiveRef.current
+    prevNotifWispActiveRef.current = notifWispActive
+    if (!showWisps) {
+      if (notifWispTimerRef.current) {
+        clearTimeout(notifWispTimerRef.current)
+        notifWispTimerRef.current = null
+      }
+      setNotifWispDying(false)
+      return
+    }
+    if (notifWispActive) {
+      if (notifWispTimerRef.current) {
+        clearTimeout(notifWispTimerRef.current)
+        notifWispTimerRef.current = null
+      }
+      setNotifWispDying(false)
+    } else if (wasActive) {
+      if (notifWispTimerRef.current) clearTimeout(notifWispTimerRef.current)
+      setNotifWispDying(true)
+      notifWispTimerRef.current = setTimeout(() => {
+        notifWispTimerRef.current = null
+        setNotifWispDying(false)
+      }, 7000)
+    }
+  }, [notifWispActive, showWisps])
+
+  useEffect(() => {
+    return () => {
+      if (feedWispTimerRef.current) clearTimeout(feedWispTimerRef.current)
+      if (notifWispTimerRef.current) clearTimeout(notifWispTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -385,8 +465,13 @@ export function Layout({ children }: { children: ReactNode }) {
 
             <nav className="space-y-1">
               {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => {
-                const hasNotifFlame = showWisps && to === '/notifications' && badge !== undefined
-                const hasFeedNew = showWisps && to === '/' && badge !== undefined
+                const hasNotifFlame = showWisps && to === '/notifications' && notifWispActive
+                const hasFeedNew = showWisps && to === '/' && feedWispActive
+                const showNotifWisp =
+                  showWisps && to === '/notifications' && (notifWispActive || notifWispDying)
+                const showFeedWisp = showWisps && to === '/' && (feedWispActive || feedWispDying)
+                const notifDying = showNotifWisp && !notifWispActive && notifWispDying
+                const feedDying = showFeedWisp && !feedWispActive && feedWispDying
                 const hasUnreadNotif = to === '/notifications' && badge !== undefined
                 const hasPendingFeed = to === '/' && badge !== undefined
                 return (
@@ -396,11 +481,11 @@ export function Layout({ children }: { children: ReactNode }) {
                     end={end}
                     onClick={(e) => scrollTopIfCurrent(e, to)}
                     className={({ isActive }) =>
-                      `flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition-[background-color,border-color,color] duration-500 ease-out ${
+                      `${showFeedWisp || showNotifWisp ? 'fw-notif-flame ' : ''}flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition-[background-color,border-color,color] duration-500 ease-out ${
                         hasFeedNew
-                          ? 'fw-notif-flame bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
+                          ? 'bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
                           : hasNotifFlame
-                            ? 'fw-notif-flame bg-transparent border-transparent text-white hover:bg-white/5'
+                            ? 'bg-transparent border-transparent text-white hover:bg-white/5'
                             : isActive
                               ? 'bg-[#e8590c]/15 text-[#ff922b] border-[#e8590c]/25'
                               : hasPendingFeed
@@ -411,23 +496,47 @@ export function Layout({ children }: { children: ReactNode }) {
                       }`
                     }
                   >
-                    {hasNotifFlame && (
+                    {showNotifWisp && (
                       <>
-                        <span className="fw-notif-seg fw-green-tail-3" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-green-tail-2" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-green-tail-1" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-notif-wisp fw-green-wisp" aria-hidden="true">
-                          <FireWispFlameSprite idPrefix="fw-notif" variant="green" />
+                        <span
+                          className={`fw-notif-seg fw-green-tail-3 ${notifDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-green-tail-2 ${notifDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-green-tail-1 ${notifDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-notif-wisp fw-green-wisp ${notifDying ? 'fw-wisp-dying' : ''}`}
+                          aria-hidden="true"
+                        >
+                          <FireWispFlameSprite idPrefix="fw-notif" variant="green" powerDown={notifDying} />
                         </span>
                       </>
                     )}
-                    {hasFeedNew && (
+                    {showFeedWisp && (
                       <>
-                        <span className="fw-notif-seg fw-white-tail-3" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-white-tail-2" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-white-tail-1" aria-hidden="true" />
-                        <span className="fw-notif-seg fw-notif-wisp fw-white-wisp" aria-hidden="true">
-                          <FireWispFlameSprite idPrefix="fw-feed" variant="white" />
+                        <span
+                          className={`fw-notif-seg fw-white-tail-3 ${feedDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-white-tail-2 ${feedDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-white-tail-1 ${feedDying ? 'fw-tail-dying' : ''}`}
+                          aria-hidden="true"
+                        />
+                        <span
+                          className={`fw-notif-seg fw-notif-wisp fw-white-wisp ${feedDying ? 'fw-wisp-dying' : ''}`}
+                          aria-hidden="true"
+                        >
+                          <FireWispFlameSprite idPrefix="fw-feed" variant="white" powerDown={feedDying} />
                         </span>
                       </>
                     )}

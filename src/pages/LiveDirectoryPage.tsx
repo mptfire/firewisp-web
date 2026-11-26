@@ -17,7 +17,7 @@ import {
   isStreamFollowed,
   sortLiveStreams,
 } from '../lib/nostr/nip53'
-import { isConnectionSaveData } from '../lib/mediaAudio'
+import { formatAudioSourceLabel, isConnectionSaveData } from '../lib/mediaAudio'
 import { useLiveStore, type LiveStreamEntry } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -156,6 +156,7 @@ function LiveDirectoryCard({
         {hoverActive && !isInMiniPlayer && previewUrl && (
           <LiveHoverPreview
             streamUrl={previewUrl}
+            sourceLabel={formatAudioSourceLabel(hostName, title, previewUrl)}
             rightOffset
             onStatusChange={setPreviewStatus}
           />

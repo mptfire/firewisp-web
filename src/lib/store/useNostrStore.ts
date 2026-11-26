@@ -3,9 +3,10 @@ import { verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure'
 import type { SubCloser } from 'nostr-tools/pool'
 import { nostrPool, type RelayStatus } from '../nostr/pool'
 import { CLIENT_TAG_VALUE, CURATED_EXPLORE_RELAYS, DEFAULT_RELAYS, FIREWISP_RELAY, TRENDING_RELAY, type RelayEntry } from '../constants'
-import { sanitizePublicRelayUrl } from '../sanitize'
+import { sanitizePublicHttpsUrl, sanitizePublicRelayUrl } from '../sanitize'
 import { minePowAsync } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from '../nostr/content'
+import { extractNip30EmojiUrl, extractShortcode, getBuiltinEmoteByKey } from '../nostr/customEmotes'
 import {
   applyMuteListMutations,
   buildBud03BlossomListTags,
@@ -123,6 +124,7 @@ export interface NostrState {
   replyCounts: Record<string, number>
   reactionCounts: Record<string, number>
   reactionEmojiCounts: Record<string, Record<string, number>>
+  reactionEmojiUrls: Record<string, Record<string, string>>
   userLiked: Record<string, boolean>
   userReactions: Record<string, Record<string, true>>
   repostCounts: Record<string, number>
@@ -205,7 +207,7 @@ export interface NostrState {
     replyTo?: Event
     kind?: number
   }) => Promise<Event>
-  toggleLike: (target: Event, emoji?: string) => Promise<void>
+  toggleLike: (target: Event, emoji?: string, customEmojiUrl?: string) => Promise<void>
   toggleRepost: (target: Event) => Promise<void>
   toggleFollow: (targetPubkey: string) => Promise<void>
   toggleBookmark: (eventId: string) => Promise<void>
@@ -576,6 +578,8 @@ export function normalizeReactionEmoji(rawContent: string): string | null {
     return '+'
   }
   if (clean === '-') return null
+  const shortcode = extractShortcode(clean)
+  if (shortcode) return `:${shortcode}:`
   return clean.slice(0, 16)
 }
 
@@ -684,6 +688,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   replyCounts: {},
   reactionCounts: {},
   reactionEmojiCounts: {},
+  reactionEmojiUrls: {},
   userLiked: {},
   userReactions: {},
   repostCounts: {},
@@ -988,10 +993,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (!emoji) return
       const targetId = [...event.tags].reverse().find((t) => t[0] === 'e' && t[1])?.[1]
       if (!targetId) return
+      const builtinEmote = getBuiltinEmoteByKey(emoji)
+      const nip30Url = builtinEmote
+        ? builtinEmote.localSrc
+        : extractNip30EmojiUrl(event.tags, emoji)
       set((s) => {
         const prevEmojiMap = s.reactionEmojiCounts[targetId] || {}
         const isMine = Boolean(myPubkey && event.pubkey.toLowerCase() === myPubkey)
         const prevMineMap = s.userReactions[targetId] || {}
+        const prevUrlMap = s.reactionEmojiUrls[targetId] || {}
         return {
           events: { ...s.events, [event.id]: event },
           reactionCounts: {
@@ -1005,6 +1015,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
               [emoji]: (prevEmojiMap[emoji] || 0) + 1,
             },
           },
+          reactionEmojiUrls: nip30Url
+            ? {
+                ...s.reactionEmojiUrls,
+                [targetId]: {
+                  ...prevUrlMap,
+                  [emoji]: nip30Url,
+                },
+              }
+            : s.reactionEmojiUrls,
           userLiked:
             isMine && emoji === '+' ? { ...s.userLiked, [targetId]: true } : s.userLiked,
           userReactions: isMine
@@ -2577,7 +2596,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     return signed
   },
 
-  toggleLike: async (target, emoji = '+') => {
+  toggleLike: async (target, emoji = '+', customEmojiUrl) => {
     const signer = useAuthStore.getState().signer
     if (!signer?.canSign) {
       useAuthStore.getState().openAuthModal()
@@ -2588,15 +2607,27 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (reactionKey === '+' && get().userLiked[target.id]) return
     const settings = useSettingsStore.getState()
 
+    const tags: string[][] = [
+      ['e', target.id],
+      ['p', target.pubkey],
+      ['k', String(target.kind)],
+    ]
+    const shortcode = extractShortcode(reactionKey)
+    if (shortcode) {
+      const builtin = getBuiltinEmoteByKey(reactionKey)
+      const tagUrl = builtin
+        ? builtin.publicUrl
+        : sanitizePublicHttpsUrl(customEmojiUrl || get().reactionEmojiUrls[target.id]?.[reactionKey])
+      if (tagUrl) {
+        tags.push(['emoji', shortcode, tagUrl])
+      }
+    }
+
     let unsigned: UnsignedEvent = {
       kind: 7,
       pubkey: signer.pubkey,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [
-        ['e', target.id],
-        ['p', target.pubkey],
-        ['k', String(target.kind)],
-      ],
+      tags,
       content: reactionKey,
     }
 

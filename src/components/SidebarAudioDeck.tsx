@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Volume1, Volume2, VolumeX } from 'lucide-react'
 import {
+  getActiveSoundSourceLabel,
   hasActiveSoundPlaying,
   readActiveFrequencyBands,
   subscribeAudioActivity,
@@ -13,6 +14,7 @@ const EQ_BAND_COUNT = 16
 /**
  * Compact persistent sidebar audio deck underneath Live Zaps / Top Zappers:
  * - Always-available Global Volume slider (0% -> 200% boost) + Mute toggle
+ * - Slow-scrolling active audio source title while sound plays ("Global Audio" when idle)
  * - Live 16-band graphic equalizer with decaying peak-hold caps that automatically appears when sound is playing
  */
 export function SidebarAudioDeck() {
@@ -22,6 +24,7 @@ export function SidebarAudioDeck() {
   const setMediaMuted = useSettingsStore((s) => s.setMediaMuted)
 
   const [soundPlaying, setSoundPlaying] = useState(() => hasActiveSoundPlaying())
+  const [sourceLabel, setSourceLabel] = useState<string | null>(() => getActiveSoundSourceLabel())
   const [hasSpectrum, setHasSpectrum] = useState(false)
   const [bars, setBars] = useState<number[]>(() => Array(EQ_BAND_COUNT).fill(0))
   const [peaks, setPeaks] = useState<number[]>(() => Array(EQ_BAND_COUNT).fill(0))
@@ -30,7 +33,10 @@ export function SidebarAudioDeck() {
   const peaksRef = useRef<number[]>(Array(EQ_BAND_COUNT).fill(0))
 
   useEffect(() => {
-    const sync = () => setSoundPlaying(hasActiveSoundPlaying())
+    const sync = () => {
+      setSoundPlaying(hasActiveSoundPlaying())
+      setSourceLabel(getActiveSoundSourceLabel())
+    }
     sync()
     return subscribeAudioActivity(sync)
   }, [])
@@ -94,6 +100,7 @@ export function SidebarAudioDeck() {
   const isBoosted = !mediaMuted && effectiveVol > 1.005
   const fillPct = Math.min(100, (pct / 200) * 100)
   const showEq = soundPlaying && !mediaMuted && pct > 0
+  const activeTitle = showEq && sourceLabel ? sourceLabel : null
 
   const VolumeIcon = mediaMuted || pct === 0 ? VolumeX : pct < 45 ? Volume1 : Volume2
 
@@ -119,7 +126,7 @@ export function SidebarAudioDeck() {
     >
       {/* Header + status */}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9a9890] flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 flex items-center gap-1.5">
           <VolumeIcon
             className={`w-3.5 h-3.5 shrink-0 ${
               mediaMuted || pct === 0
@@ -131,10 +138,28 @@ export function SidebarAudioDeck() {
                     : 'text-[#8c8a82]'
             }`}
           />
-          Global Audio
+          {activeTitle ? (
+            <span className="fw-audio-marquee min-w-0 flex-1 overflow-hidden" title={activeTitle}>
+              <span
+                className="fw-audio-marquee-track text-[10px] font-semibold tracking-wide text-[#f4f1ea]"
+                style={{
+                  animationDuration: `${Math.max(12, Math.min(26, Math.round(activeTitle.length * 0.35 + 8)))}s`,
+                }}
+              >
+                <span className="pr-6">{activeTitle}</span>
+                <span className="pr-6" aria-hidden="true">
+                  {activeTitle}
+                </span>
+              </span>
+            </span>
+          ) : (
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9a9890] truncate">
+              Global Audio
+            </span>
+          )}
         </span>
         <span
-          className={`text-[10px] font-mono font-semibold tabular-nums ${
+          className={`shrink-0 text-[10px] font-mono font-semibold tabular-nums ${
             mediaMuted || pct === 0
               ? 'text-red-400'
               : isBoosted

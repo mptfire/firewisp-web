@@ -22,10 +22,15 @@ import {
   UserPlus,
 } from 'lucide-react'
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
+import {
+  CUSTOM_REACTION_EMOTES,
+  getBuiltinEmoteByKey,
+  resolveReactionEmoteSrc,
+} from '../lib/nostr/customEmotes'
 import { buildLiveATag, encodeLiveNaddr, isLiveStreamFresh } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
 import { verifyEventPow } from '../lib/crypto/nip13'
-import { isConnectionSaveData } from '../lib/mediaAudio'
+import { formatAudioSourceLabel, isConnectionSaveData } from '../lib/mediaAudio'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -36,6 +41,7 @@ import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
 import { AddToListButton } from './AddToListButton'
+import { ReactionEmote } from './ReactionEmote'
 import { YouTubeCard } from './YouTubeCard'
 
 const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
@@ -83,6 +89,7 @@ const LONG_NOTE_CHAR_LIMIT = 900
 const LONG_NOTE_LINE_LIMIT = 12
 
 const EMPTY_EMOJI_COUNTS: Record<string, number> = {}
+const EMPTY_EMOJI_URLS: Record<string, string> = {}
 const EMPTY_USER_REACTIONS: Record<string, true> = {}
 const QUICK_BAR_EMOJIS = ['😂', '💯'] as const
 const PICKER_EMOJIS: Array<{ emoji: string; label: string }> = [
@@ -236,6 +243,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           streamUrl={effectivePlayUrl}
           posterUrl={thumb}
           title={title}
+          sourceLabel={formatAudioSourceLabel(hostName, title, effectivePlayUrl)}
           isLive={isLive}
           autoStart
           forceMuted={hasMiniPlayer ? audioOwner !== 'main' : undefined}
@@ -284,6 +292,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
           {hoverActive && !isInMiniPlayer && (
             <LiveHoverPreview
               streamUrl={liveStreamUrl}
+              sourceLabel={formatAudioSourceLabel(hostName, title, liveStreamUrl)}
               rightOffset
               onStatusChange={setPreviewStatus}
             />
@@ -500,6 +509,11 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
               <FireWispVideoPlayer
                 src={firstVideo.url}
                 poster={firstVideo.poster}
+                sourceLabel={formatAudioSourceLabel(
+                  authorProfile?.display_name || authorProfile?.name,
+                  firstVideo.alt || 'Quoted video',
+                  firstVideo.url,
+                )}
                 compact
                 videoClassName="max-h-64 w-full object-contain bg-black"
               />
@@ -665,6 +679,11 @@ const ReplyContextLine = memo(function ReplyContextLine({
           <FireWispVideoPlayer
             src={parentVideo.url}
             poster={parentVideo.poster}
+            sourceLabel={formatAudioSourceLabel(
+              label,
+              parentVideo.alt || 'Reply video',
+              parentVideo.url,
+            )}
             compact
             videoClassName="max-h-64 w-full object-contain bg-black"
           />
@@ -694,6 +713,9 @@ export const NoteCard = memo(function NoteCard({
   const reactionCount = useNostrStore((s) => s.reactionCounts[event.id] || 0)
   const emojiCounts = useNostrStore(
     (s) => s.reactionEmojiCounts[event.id] ?? EMPTY_EMOJI_COUNTS,
+  )
+  const emojiUrls = useNostrStore(
+    (s) => s.reactionEmojiUrls[event.id] ?? EMPTY_EMOJI_URLS,
   )
   const liked = useNostrStore((s) => Boolean(s.userLiked[event.id]))
   const myReactions = useNostrStore(
@@ -1220,6 +1242,11 @@ export const NoteCard = memo(function NoteCard({
                     <FireWispVideoPlayer
                       src={m.url}
                       poster={m.poster}
+                      sourceLabel={formatAudioSourceLabel(
+                        displayName,
+                        m.alt || 'Video note',
+                        m.url,
+                      )}
                       videoClassName="w-full max-h-[560px] object-contain bg-black"
                     />
                   )}
@@ -1274,19 +1301,31 @@ export const NoteCard = memo(function NoteCard({
               <div className="mt-2.5 flex flex-wrap gap-1.5">
                 {extraChips.map(([emoji, count]) => {
                   const mine = Boolean(myReactions[emoji])
+                  const builtin = getBuiltinEmoteByKey(emoji)
+                  const emoteSrc = resolveReactionEmoteSrc(emoji, undefined, emojiUrls[emoji])
+                  const chipLabel = builtin?.label || emoji
                   return (
                     <button
                       key={emoji}
                       type="button"
-                      onClick={() => void toggleLike(event, emoji)}
-                      title={`React with ${emoji}`}
+                      onClick={() => void toggleLike(event, emoji, emojiUrls[emoji])}
+                      title={`React with ${chipLabel}`}
                       className={`px-2 py-0.5 rounded-full border text-[11px] flex items-center gap-1 transition cursor-pointer ${
                         mine
                           ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-white'
                           : 'bg-[#171822] hover:bg-[#1e2030] border-[#262938] text-[#c7c4bc]'
                       }`}
                     >
-                      <span>{emoji}</span>
+                      {emoteSrc ? (
+                        <ReactionEmote
+                          src={emoteSrc}
+                          alt={chipLabel}
+                          fallback={emoji}
+                          className="w-4 h-4 object-contain shrink-0"
+                        />
+                      ) : (
+                        <span>{emoji}</span>
+                      )}
                       <span>{count}</span>
                     </button>
                   )
@@ -1380,32 +1419,64 @@ export const NoteCard = memo(function NoteCard({
                 <div
                   role="menu"
                   aria-label="Quick emoji reactions"
-                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-1.5 py-1 rounded-xl bg-[#1a1c26] border border-[#2c2f40] shadow-xl flex items-center gap-1 z-30"
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-1.5 py-1.5 rounded-xl bg-[#1a1c26] border border-[#2c2f40] shadow-xl flex flex-col gap-1 z-30 w-max"
                 >
-                  {PICKER_EMOJIS.map(({ emoji, label }) => {
-                    const cnt = emojiCounts[emoji] || 0
-                    const mine = Boolean(myReactions[emoji])
-                    return (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => {
-                          setReactPickerOpen(false)
-                          void toggleLike(event, emoji)
-                        }}
-                        title={label}
-                        aria-label={`React with ${label}`}
-                        className={`px-1.5 py-1 rounded-lg text-sm flex items-center gap-0.5 transition cursor-pointer ${
-                          mine
-                            ? 'bg-[#e8590c]/25 ring-1 ring-[#e8590c]/60 text-white'
-                            : 'hover:bg-white/10 text-[#ece9e1]'
-                        }`}
-                      >
-                        <span className="leading-none">{emoji}</span>
-                        {cnt > 0 && <span className="text-[10px] text-[#9a9890]">{cnt}</span>}
-                      </button>
-                    )
-                  })}
+                  <div className="flex items-center gap-1">
+                    {PICKER_EMOJIS.map(({ emoji, label }) => {
+                      const cnt = emojiCounts[emoji] || 0
+                      const mine = Boolean(myReactions[emoji])
+                      return (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => {
+                            setReactPickerOpen(false)
+                            void toggleLike(event, emoji)
+                          }}
+                          title={label}
+                          aria-label={`React with ${label}`}
+                          className={`px-1.5 py-1 rounded-lg text-sm flex items-center gap-0.5 transition cursor-pointer ${
+                            mine
+                              ? 'bg-[#e8590c]/25 ring-1 ring-[#e8590c]/60 text-white'
+                              : 'hover:bg-white/10 text-[#ece9e1]'
+                          }`}
+                        >
+                          <span className="leading-none">{emoji}</span>
+                          {cnt > 0 && <span className="text-[10px] text-[#9a9890]">{cnt}</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="border-t border-[#262938] pt-1 flex items-center justify-around gap-1">
+                    {CUSTOM_REACTION_EMOTES.map((em) => {
+                      const cnt = emojiCounts[em.key] || 0
+                      const mine = Boolean(myReactions[em.key])
+                      return (
+                        <button
+                          key={em.shortcode}
+                          type="button"
+                          onClick={() => {
+                            setReactPickerOpen(false)
+                            void toggleLike(event, em.key, em.publicUrl)
+                          }}
+                          title={em.label}
+                          aria-label={`React with ${em.label}`}
+                          className={`px-1.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer ${
+                            mine
+                              ? 'bg-[#e8590c]/25 ring-1 ring-[#e8590c]/60 text-white'
+                              : 'hover:bg-white/10 text-[#ece9e1]'
+                          }`}
+                        >
+                          <img
+                            src={em.localSrc}
+                            alt={em.label}
+                            className="w-5 h-5 object-contain shrink-0"
+                          />
+                          {cnt > 0 && <span className="text-[10px] text-[#9a9890]">{cnt}</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>

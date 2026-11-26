@@ -4,6 +4,7 @@ import type Hls from 'hls.js'
 import {
   applyVideoAudioLevel,
   claimFeedVideoFocus,
+  formatAudioSourceLabel,
   formatBitrate,
   isIosDevice,
   isWebAudioAvailable,
@@ -24,6 +25,7 @@ interface HlsVideoPlayerProps {
   streamUrl: string
   posterUrl?: string
   title?: string
+  sourceLabel?: string
   isLive?: boolean
   autoStart?: boolean
   compact?: boolean
@@ -40,6 +42,7 @@ export function HlsVideoPlayer({
   streamUrl,
   posterUrl,
   title,
+  sourceLabel,
   isLive = true,
   autoStart = false,
   compact = false,
@@ -446,15 +449,19 @@ export function HlsVideoPlayer({
   }, [started, mediaVolume, effectiveMuted, webAudioCapable, playing, forceMuted, error])
 
   // Notify global sidebar graphic equalizer whenever this player starts/stops outputting sound
+  const audioLabel = useMemo(
+    () => formatAudioSourceLabel(sourceLabel, title, safeStreamUrl || streamUrl),
+    [sourceLabel, title, safeStreamUrl, streamUrl],
+  )
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
     const audible = started && playing && !effectiveMuted && mediaVolume > 0 && !error
-    reportVideoSoundActive(video, audible)
+    reportVideoSoundActive(video, audible, audioLabel)
     return () => {
       reportVideoSoundActive(video, false)
     }
-  }, [started, playing, effectiveMuted, mediaVolume, error])
+  }, [started, playing, effectiveMuted, mediaVolume, error, audioLabel])
 
   useEffect(() => {
     onVideoElement?.(started ? videoRef.current : null)

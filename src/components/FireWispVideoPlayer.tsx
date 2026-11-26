@@ -3,6 +3,7 @@ import { Loader2, Play } from 'lucide-react'
 import {
   applyVideoAudioLevel,
   claimFeedVideoFocus,
+  formatAudioSourceLabel,
   isIosDevice,
   isWebAudioAvailable,
   onOtherFeedVideoFocus,
@@ -19,6 +20,7 @@ const SPEED_STEPS = [1, 1.25, 1.5, 2, 0.75]
 interface FireWispVideoPlayerProps {
   src: string
   poster?: string
+  sourceLabel?: string
   compact?: boolean
   autoPlay?: boolean
   className?: string
@@ -34,6 +36,7 @@ interface FireWispVideoPlayerProps {
 export function FireWispVideoPlayer({
   src,
   poster,
+  sourceLabel,
   compact = false,
   autoPlay = false,
   className = '',
@@ -63,6 +66,10 @@ export function FireWispVideoPlayer({
 
   const ios = useMemo(() => isIosDevice(), [])
   const webAudioCapable = isWebAudioAvailable() && useCors && corsReady
+  const audioLabel = useMemo(
+    () => formatAudioSourceLabel(sourceLabel, undefined, src),
+    [sourceLabel, src],
+  )
 
   // Reset CORS state if video URL changes
   useEffect(() => {
@@ -79,11 +86,11 @@ export function FireWispVideoPlayer({
     const video = videoRef.current
     if (!video) return
     applyVideoAudioLevel(video, mediaVolume, mediaMuted, webAudioCapable, playing && webAudioCapable)
-    reportVideoSoundActive(video, playing && !mediaMuted && mediaVolume > 0)
+    reportVideoSoundActive(video, playing && !mediaMuted && mediaVolume > 0, audioLabel)
     return () => {
       reportVideoSoundActive(video, false)
     }
-  }, [mediaVolume, mediaMuted, webAudioCapable, playing, useCors, src])
+  }, [mediaVolume, mediaMuted, webAudioCapable, playing, useCors, src, audioLabel])
 
   // Pause automatically if another feed video starts playing
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Volume2, VolumeX } from 'lucide-react'
 import {
   applyVideoAudioLevel,
+  formatAudioSourceLabel,
   isIosDevice,
   isWebAudioAvailable,
   reportVideoSoundActive,
@@ -15,6 +16,7 @@ export type HoverPreviewStatus = 'connecting' | 'playing' | 'audio-only' | 'erro
 
 interface LiveHoverPreviewProps {
   streamUrl: string
+  sourceLabel?: string
   rightOffset?: boolean | 'wide'
   onStatusChange?: (status: HoverPreviewStatus) => void
 }
@@ -27,6 +29,7 @@ interface LiveHoverPreviewProps {
  */
 export function LiveHoverPreview({
   streamUrl,
+  sourceLabel,
   rightOffset = false,
   onStatusChange,
 }: LiveHoverPreviewProps) {
@@ -37,6 +40,10 @@ export function LiveHoverPreview({
   const mediaVolume = useSettingsStore((s) => s.mediaVolume)
   const mediaMuted = useSettingsStore((s) => s.mediaMuted)
   const ios = useMemo(() => isIosDevice(), [])
+  const audioLabel = useMemo(
+    () => formatAudioSourceLabel(sourceLabel, undefined, streamUrl),
+    [sourceLabel, streamUrl],
+  )
 
   const [status, setStatus] = useState<HoverPreviewStatus>('connecting')
   const [muted, setMuted] = useState(false)
@@ -239,11 +246,15 @@ export function LiveHoverPreview({
       webAudioCapable,
       isPlayingState && !effectiveMuted && webAudioCapable,
     )
-    reportVideoSoundActive(video, isPlayingState && !effectiveMuted && mediaVolume > 0)
+    reportVideoSoundActive(
+      video,
+      isPlayingState && !effectiveMuted && mediaVolume > 0,
+      audioLabel,
+    )
     return () => {
       reportVideoSoundActive(video, false)
     }
-  }, [mediaVolume, effectiveMuted, webAudioCapable, status])
+  }, [mediaVolume, effectiveMuted, webAudioCapable, status, audioLabel])
 
   const toggleMute = (e: React.MouseEvent) => {
     e.preventDefault()

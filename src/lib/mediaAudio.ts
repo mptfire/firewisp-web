@@ -19,6 +19,7 @@ interface VideoAudioGraph {
 const graphByVideo = new WeakMap<HTMLVideoElement, VideoAudioGraph>()
 const failedVideos = new WeakSet<HTMLVideoElement>()
 const activeSoundVideos = new Set<HTMLVideoElement>()
+const soundSourceLabels = new Map<HTMLVideoElement, string>()
 const audioActivityListeners = new Set<() => void>()
 
 // Single shared AudioContext across all Fire Wisp players (avoids Chrome's 6-context cap
@@ -80,14 +81,58 @@ function notifyAudioActivity() {
   }
 }
 
-export function reportVideoSoundActive(video: HTMLVideoElement | null, active: boolean): void {
+function cleanLabelText(raw?: string | null): string {
+  return (raw || '').replace(/\s+/g, ' ').trim()
+}
+
+export function formatAudioSourceLabel(
+  primary?: string | null,
+  secondary?: string | null,
+  fallbackUrl?: string | null,
+): string {
+  const p = cleanLabelText(primary)
+  const s = cleanLabelText(secondary)
+  let out = ''
+  if (p && s) {
+    const pl = p.toLowerCase()
+    const sl = s.toLowerCase()
+    out = pl === sl || sl.startsWith(pl) ? s : `${p} — ${s}`
+  } else {
+    out = p || s
+  }
+  if (!out && fallbackUrl) {
+    try {
+      const parsed = new URL(fallbackUrl)
+      out = parsed.hostname.replace(/^www\./, '')
+    } catch {
+      out = 'Audio stream'
+    }
+  }
+  return (out || 'Audio stream').slice(0, 120)
+}
+
+export function reportVideoSoundActive(
+  video: HTMLVideoElement | null,
+  active: boolean,
+  sourceLabel?: string,
+): void {
   if (!video) return
   const had = activeSoundVideos.has(video)
-  if (active && !had) {
-    activeSoundVideos.add(video)
-    notifyAudioActivity()
-  } else if (!active && had) {
+  const cleanLabel = cleanLabelText(sourceLabel)
+  if (active) {
+    const prevLabel = soundSourceLabels.get(video) || ''
+    if (!had) {
+      activeSoundVideos.add(video)
+    }
+    if (cleanLabel && prevLabel !== cleanLabel) {
+      soundSourceLabels.set(video, cleanLabel)
+    }
+    if (!had || (cleanLabel && prevLabel !== cleanLabel)) {
+      notifyAudioActivity()
+    }
+  } else if (had || soundSourceLabels.has(video)) {
     activeSoundVideos.delete(video)
+    soundSourceLabels.delete(video)
     notifyAudioActivity()
   }
 }
@@ -104,6 +149,17 @@ export function hasActiveSoundPlaying(): boolean {
     if (!v.paused && !v.muted) return true
   }
   return false
+}
+
+export function getActiveSoundSourceLabel(): string | null {
+  const list = [...activeSoundVideos]
+  for (let i = list.length - 1; i >= 0; i--) {
+    const v = list[i]
+    if (!v.paused && !v.muted) {
+      return soundSourceLabels.get(v) || null
+    }
+  }
+  return null
 }
 
 export function isWebAudioAvailable(): boolean {

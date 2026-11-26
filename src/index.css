@@ -649,8 +649,157 @@
 
 .fw-tab-hidden .fw-notif-seg,
 .fw-tab-hidden .fw-notif-wisp,
-.fw-tab-hidden .fw-roam-wisp {
+.fw-tab-hidden .fw-roam-wisp,
+.fw-tab-hidden .fw-audio-marquee-track {
   animation-play-state: paused !important;
+}
+
+/* 7-second wisp power-down sequence: 0–4s sputtering electrical flash -> 4–7s dark outline -> gone */
+@keyframes fw-wisp-powerloss-4s {
+  0% {
+    opacity: 1;
+  }
+  7% {
+    opacity: 0.15;
+  }
+  14% {
+    opacity: 0.95;
+  }
+  22% {
+    opacity: 0.1;
+  }
+  31% {
+    opacity: 0.82;
+  }
+  39% {
+    opacity: 0.08;
+  }
+  48% {
+    opacity: 0.68;
+  }
+  56% {
+    opacity: 0.05;
+  }
+  64% {
+    opacity: 0.48;
+  }
+  72% {
+    opacity: 0.04;
+  }
+  81% {
+    opacity: 0.32;
+  }
+  89% {
+    opacity: 0.03;
+  }
+  94% {
+    opacity: 0.16;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fw-wisp-outline-7s {
+  0% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 0.78;
+  }
+  57.14% {
+    opacity: 0.95;
+  }
+  90% {
+    opacity: 0.92;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes fw-wisp-glow-loss-4s {
+  0% {
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85))
+      drop-shadow(0 0 8px rgba(16, 185, 129, 0.5));
+  }
+  25% {
+    filter: drop-shadow(0 0 1.5px rgba(226, 232, 240, 0.35));
+  }
+  42% {
+    filter: drop-shadow(0 0 3px rgba(226, 232, 240, 0.55));
+  }
+  100% {
+    filter: drop-shadow(0 0 1.2px rgba(180, 190, 210, 0.5))
+      drop-shadow(0 0 2.5px rgba(0, 0, 0, 0.95));
+  }
+}
+
+.fw-wisp-flame-powerloss {
+  animation: fw-wisp-powerloss-4s 4s linear forwards;
+}
+
+.fw-wisp-black-outline {
+  animation: fw-wisp-outline-7s 7s linear forwards;
+}
+
+.fw-notif-wisp.fw-wisp-dying {
+  animation:
+    fw-flame-orbit 24s linear infinite,
+    fw-wisp-glow-loss-4s 4s linear forwards;
+  animation-delay: -1.4s, 0s;
+}
+
+.fw-notif-seg.fw-tail-dying {
+  animation:
+    fw-flame-orbit 24s linear infinite,
+    fw-wisp-powerloss-4s 4s linear forwards;
+}
+
+.fw-white-tail-1.fw-tail-dying,
+.fw-green-tail-1.fw-tail-dying,
+.fw-notif-tail-1.fw-tail-dying {
+  animation-delay: -0.95s, 0s;
+}
+
+.fw-white-tail-2.fw-tail-dying,
+.fw-green-tail-2.fw-tail-dying,
+.fw-notif-tail-2.fw-tail-dying {
+  animation-delay: -0.58s, 0s;
+}
+
+.fw-white-tail-3.fw-tail-dying,
+.fw-green-tail-3.fw-tail-dying,
+.fw-notif-tail-3.fw-tail-dying {
+  animation-delay: -0.26s, 0s;
+}
+
+/* Slow-scrolling source title marquee inside Global Audio deck */
+@keyframes fw-audio-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.fw-audio-marquee {
+  display: block;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+}
+
+.fw-audio-marquee-track {
+  display: inline-flex;
+  width: max-content;
+  white-space: nowrap;
+  will-change: transform;
+  animation: fw-audio-marquee 15s linear infinite;
+}
+
+.fw-audio-marquee:hover .fw-audio-marquee-track {
+  animation-play-state: paused;
 }
 
 .fw-roam-tail {
@@ -705,7 +854,17 @@
   .fw-flame-wisp,
   .fw-notif-seg,
   .fw-notif-wisp,
-  .fw-roam-layer {
+  .fw-roam-layer,
+  .fw-wisp-black-outline {
+    display: none;
+  }
+  .fw-wisp-flame-powerloss {
+    animation: none;
+  }
+  .fw-audio-marquee-track {
+    animation: none;
+  }
+  .fw-audio-marquee-track > span[aria-hidden="true"] {
     display: none;
   }
 }

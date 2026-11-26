@@ -26,6 +26,12 @@ import {
   sanitizeRelayUrl,
 } from '../sanitize'
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
+import {
+  CUSTOM_REACTION_EMOTES,
+  extractNip30EmojiUrl,
+  getBuiltinEmoteByKey,
+  resolveReactionEmoteSrc,
+} from '../nostr/customEmotes'
 import { parseBolt11AmountSats, parseNwcUri, requestZapInvoice, resolveLud16ToUrl } from '../nostr/nip57'
 import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
 import {
@@ -2317,5 +2323,198 @@ describe('Full code-audit regression & security hardening', () => {
       })
       signer.destroy()
     }
+  })
+
+  it('normalizes NIP-30 custom emoji reactions, attaches emoji tags on publish, and sanitizes remote emoji URLs', async () => {
+    const { normalizeReactionEmoji, useNostrStore } = await import('../store/useNostrStore')
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { nostrPool } = await import('../nostr/pool')
+
+    expect(normalizeReactionEmoji(':GG:')).toBe(':gg:')
+    expect(normalizeReactionEmoji(' :Wisp_Orange: ')).toBe(':wisp_orange:')
+    expect(normalizeReactionEmoji(':lightning_bolt_zap_emote:')).toBe(':lightning_bolt_zap_emote:')
+
+    expect(getBuiltinEmoteByKey(':gg:')?.localSrc).toBe('/emotes/gg.png')
+    expect(CUSTOM_REACTION_EMOTES.map((e) => e.shortcode)).toEqual([
+      'gg',
+      'wisp_orange',
+      'wisp_green',
+      'wisp_white',
+    ])
+
+    // Valid remote HTTPS NIP-30 URL is preserved; insecure/LAN URLs are rejected
+    expect(
+      extractNip30EmojiUrl([['emoji', 'pepe', 'https://cdn.example.com/pepe.png']], ':pepe:'),
+    ).toBe('https://cdn.example.com/pepe.png')
+    expect(
+      extractNip30EmojiUrl([['emoji', 'pepe', 'http://cdn.example.com/pepe.png']], ':pepe:'),
+    ).toBeNull()
+    expect(
+      extractNip30EmojiUrl([['emoji', 'pepe', 'https://127.0.0.1/pepe.png']], ':pepe:'),
+    ).toBeNull()
+    expect(
+      extractNip30EmojiUrl([['emoji', 'pepe', 'https://192.168.1.10/pepe.png']], ':pepe:'),
+    ).toBeNull()
+    expect(
+      extractNip30EmojiUrl([['emoji', 'pepe', 'javascript:alert(1)']], ':pepe:'),
+    ).toBeNull()
+
+    // Built-in emote always resolves locally even if a remote tag tries to override its URL
+    expect(
+      resolveReactionEmoteSrc(':wisp_orange:', [
+        ['emoji', 'wisp_orange', 'https://evil.example/spoof.png'],
+      ]),
+    ).toBe('/emotes/wisp_orange.png')
+    expect(
+      resolveReactionEmoteSrc(':pepe:', [['emoji', 'pepe', 'https://cdn.example.com/pepe.png']]),
+    ).toBe('https://cdn.example.com/pepe.png')
+
+    const prevAuth = useAuthStore.getState()
+    const prevSettings = useSettingsStore.getState()
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const signer = new LocalKeySigner(generateSecretKey())
+    const published: Array<{ content: string; tags: string[][] }> = []
+
+    const targetId = 'd'.repeat(64)
+    const targetEv = {
+      id: targetId,
+      kind: 1,
+      pubkey: 'b'.repeat(64),
+      created_at: 1795700010,
+      tags: [],
+      content: 'gm custom emotes',
+      sig: '0'.repeat(128),
+    }
+
+    try {
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+      useSettingsStore.setState({
+        reactionPowEnabled: false,
+        reactionPowBits: 0,
+        relays: [{ url: 'wss://relay.firewisp.de', read: true, write: true }],
+      })
+      nostrPool.publish = (async (relays, ev) => {
+        published.push({ content: ev.content, tags: ev.tags })
+        return relays.map((relay) => ({ relay, ok: true }))
+      }) as typeof nostrPool.publish
+
+      await useNostrStore.getState().toggleLike(targetEv, ':wisp_orange:')
+      expect(published[0].content).toBe(':wisp_orange:')
+      expect(published[0].tags).toContainEqual([
+        'emoji',
+        'wisp_orange',
+        'https://firewisp.de/emotes/wisp_orange.png',
+      ])
+      expect(useNostrStore.getState().reactionEmojiCounts[targetId][':wisp_orange:']).toBe(1)
+      expect(useNostrStore.getState().reactionEmojiUrls[targetId][':wisp_orange:']).toBe(
+        '/emotes/wisp_orange.png',
+      )
+
+      // Ingest a remote third-party NIP-30 reaction (without valid sig check needed? ingestEvent verifies sig!)
+      const remoteSk = generateSecretKey()
+      const remoteReaction = finalizeEvent(
+        {
+          kind: 7,
+          created_at: 1795700020,
+          tags: [
+            ['e', targetId],
+            ['p', targetEv.pubkey],
+            ['emoji', 'party_parrots', 'https://media.example.org/parrot.png'],
+          ],
+          content: ':party_parrots:',
+        },
+        remoteSk,
+      )
+      useNostrStore.getState().ingestEvent(remoteReaction)
+      expect(useNostrStore.getState().reactionEmojiCounts[targetId][':party_parrots:']).toBe(1)
+      expect(useNostrStore.getState().reactionEmojiUrls[targetId][':party_parrots:']).toBe(
+        'https://media.example.org/parrot.png',
+      )
+
+      // Remote NIP-30 reaction with unsafe LAN URL still increments count cleanly, without storing unsafe URL
+      const unsafeReaction = finalizeEvent(
+        {
+          kind: 7,
+          created_at: 1795700025,
+          tags: [
+            ['e', targetId],
+            ['p', targetEv.pubkey],
+            ['emoji', 'ssrf_probe', 'https://192.168.0.1/probe.png'],
+          ],
+          content: ':ssrf_probe:',
+        },
+        remoteSk,
+      )
+      useNostrStore.getState().ingestEvent(unsafeReaction)
+      expect(useNostrStore.getState().reactionEmojiCounts[targetId][':ssrf_probe:']).toBe(1)
+      expect(useNostrStore.getState().reactionEmojiUrls[targetId][':ssrf_probe:']).toBeUndefined()
+
+      // Tolerate leading/trailing colons in tag[1], dot shortcodes, and single-tag fallback
+      expect(
+        extractNip30EmojiUrl(
+          [['emoji', ':funkycat:', 'https://cdn.example.org/funky.gif']],
+          ':funkycat:',
+        ),
+      ).toBe('https://cdn.example.org/funky.gif')
+      expect(
+        extractNip30EmojiUrl(
+          [['emoji', 'emoji.20', 'https://cdn.example.org/e20.png']],
+          ':emoji.20:',
+        ),
+      ).toBe('https://cdn.example.org/e20.png')
+      expect(
+        extractNip30EmojiUrl(
+          [['emoji', 'legacy_tag', 'https://cdn.example.org/chip.png']],
+          ':chip:',
+        ),
+      ).toBe('https://cdn.example.org/chip.png')
+      expect(
+        extractNip30EmojiUrl(
+          [['emoji', 'legacy_tag', 'http://cdn.example.org/insecure.png']],
+          ':chip:',
+        ),
+      ).toBeNull()
+    } finally {
+      nostrPool.publish = origPublish
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      useSettingsStore.setState({
+        reactionPowEnabled: prevSettings.reactionPowEnabled,
+        reactionPowBits: prevSettings.reactionPowBits,
+        relays: prevSettings.relays,
+      })
+      signer.destroy()
+    }
+  })
+
+  it('tracks active audio source labels for Global Audio sidebar marquee', async () => {
+    const {
+      formatAudioSourceLabel,
+      getActiveSoundSourceLabel,
+      hasActiveSoundPlaying,
+      reportVideoSoundActive,
+    } = await import('../mediaAudio')
+
+    expect(formatAudioSourceLabel('NoGood Radio', "NoGood's stream", 'https://cdn.example/s.m3u8')).toBe(
+      "NoGood Radio — NoGood's stream",
+    )
+    expect(formatAudioSourceLabel('Alice', 'Alice', 'https://cdn.example/s.m3u8')).toBe('Alice')
+    expect(formatAudioSourceLabel('', '', 'https://media.firewisp.de/clip.mp4')).toBe('media.firewisp.de')
+
+    const mockVideo = { paused: false, muted: false } as unknown as HTMLVideoElement
+    reportVideoSoundActive(mockVideo, true, 'NoGood Radio — Chill Beats')
+    expect(hasActiveSoundPlaying()).toBe(true)
+    expect(getActiveSoundSourceLabel()).toBe('NoGood Radio — Chill Beats')
+
+    reportVideoSoundActive(mockVideo, true, 'Alice — Live Jam')
+    expect(getActiveSoundSourceLabel()).toBe('Alice — Live Jam')
+
+    reportVideoSoundActive(mockVideo, false)
+    expect(hasActiveSoundPlaying()).toBe(false)
+    expect(getActiveSoundSourceLabel()).toBeNull()
   })
 })

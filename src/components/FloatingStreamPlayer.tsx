@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
+import { formatAudioSourceLabel } from '../lib/mediaAudio'
 import { decodeLiveNaddr } from '../lib/nostr/nip53'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -911,6 +912,7 @@ export function FloatingStreamPlayer() {
           streamUrl={miniPlayer.streamUrl}
           posterUrl={miniPlayer.posterUrl}
           title={miniPlayer.title}
+          sourceLabel={formatAudioSourceLabel(miniPlayer.hostName, miniPlayer.title, miniPlayer.streamUrl)}
           isLive={miniPlayer.isLive}
           autoStart
           compact

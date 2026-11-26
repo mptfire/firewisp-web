@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { X, ExternalLink } from 'lucide-react'
 import type { MediaAttachment } from '../lib/nostr/content'
+import { formatAudioSourceLabel } from '../lib/mediaAudio'
 import { FireWispVideoPlayer } from './FireWispVideoPlayer'
 
 interface MediaLightboxProps {
@@ -56,6 +57,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
           <FireWispVideoPlayer
             src={media.url}
             poster={media.poster}
+            sourceLabel={formatAudioSourceLabel(media.alt, undefined, media.url)}
             autoPlay
             className="rounded-xl max-w-[90vw]"
             videoClassName="max-h-[85vh] max-w-full object-contain bg-black"

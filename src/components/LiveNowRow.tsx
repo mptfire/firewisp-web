@@ -17,7 +17,7 @@ import {
   isStreamFollowed,
   sortLiveStreams,
 } from '../lib/nostr/nip53'
-import { isConnectionSaveData } from '../lib/mediaAudio'
+import { formatAudioSourceLabel, isConnectionSaveData } from '../lib/mediaAudio'
 import { useLiveStore, type LiveStreamEntry } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -146,6 +146,7 @@ function LiveStreamPreviewCard({
         {hoverActive && !isInMiniPlayer && previewUrl && (
           <LiveHoverPreview
             streamUrl={previewUrl}
+            sourceLabel={formatAudioSourceLabel(hostName, title, previewUrl)}
             rightOffset={onWatchWith ? 'wide' : true}
             onStatusChange={setPreviewStatus}
           />

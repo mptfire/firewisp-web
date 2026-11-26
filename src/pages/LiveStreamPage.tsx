@@ -29,6 +29,7 @@ import {
   type BlossomUploadResult,
 } from '../lib/nostr/blossom'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
+import { formatAudioSourceLabel } from '../lib/mediaAudio'
 import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr, isPlayableStreamUrl } from '../lib/nostr/nip53'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -969,6 +970,7 @@ export function LiveStreamPage() {
                   streamUrl={playableUrl}
                   posterUrl={activeActivity?.image}
                   title={activeActivity?.title}
+                  sourceLabel={formatAudioSourceLabel(primaryHostName, primaryTitle, playableUrl)}
                   isLive={isLive}
                   autoStart={resumedFromMini}
                   compact={isSplitView}
@@ -1113,6 +1115,7 @@ export function LiveStreamPage() {
                     streamUrl={companionPlayableUrl}
                     posterUrl={companionActivity?.image}
                     title={companionTitle}
+                    sourceLabel={formatAudioSourceLabel(companionHostName, companionTitle, companionPlayableUrl)}
                     isLive={companionIsLive}
                     autoStart
                     compact
