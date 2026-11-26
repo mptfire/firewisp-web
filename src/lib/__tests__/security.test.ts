@@ -1994,6 +1994,13 @@ describe('Full code-audit regression & security hardening', () => {
     const xSearch = 'https://x.com/search?q=nostr&src=typed_query&s=09'
     expect(cleanTrackingUrl(xSearch).url).toBe('https://x.com/search?q=nostr&src=typed_query')
 
+    // AT Internet / Piano Analytics params used by news outlets (e.g. BBC)
+    expect(
+      cleanTrackingUrl(
+        'https://www.bbc.com/news/articles/c123?at_medium=RSS&at_campaign=KARANGA&at_custom1=foo&xtor=AL-72',
+      ).url,
+    ).toBe('https://www.bbc.com/news/articles/c123')
+
     // Multi-line text cleaning preserves punctuation & leaves clean links byte-identical
     const rawNote =
       'Watch (https://youtu.be/dQw4w9WgXcQ?si=VIPrYOD3d-K0EoFP) and read https://nostr.com/guide?foo=bar!'
@@ -2013,5 +2020,60 @@ describe('Full code-audit regression & security hardening', () => {
       'https://www.youtube.com/@firewisp',
       'https://example.com/news',
     ])
+  })
+
+  it('filters Search people and notes strictly by NIP-51 list membership (Phase C)', async () => {
+    const { filterEventsForSearch, matchProfilesLocally } = await import('../nostr/profileSearch')
+
+    const pkMember = 'a'.repeat(64)
+    const pkOther = 'b'.repeat(64)
+    const allowed = new Set([pkMember])
+
+    const profiles = {
+      [pkMember]: { display_name: 'Alice Sparks', name: 'alice', nip05: 'alice@firewisp.de' },
+      [pkOther]: { display_name: 'Alice Outside', name: 'alice2', nip05: 'alice@other.example' },
+    }
+
+    const allHits = matchProfilesLocally('alice', profiles)
+    expect(allHits.map((h) => h.pubkey)).toEqual([pkMember, pkOther])
+
+    const listHits = matchProfilesLocally('alice', profiles, allowed)
+    expect(listHits.map((h) => h.pubkey)).toEqual([pkMember])
+    expect(matchProfilesLocally('#nostr', profiles)).toEqual([])
+
+    const evOld = {
+      id: '1'.repeat(64),
+      kind: 1,
+      pubkey: pkMember,
+      created_at: 100,
+      tags: [['t', 'nostr']],
+      content: 'Building Lightning tools #nostr',
+      sig: '0'.repeat(128),
+    }
+    const evNew = {
+      id: '2'.repeat(64),
+      kind: 1,
+      pubkey: pkMember,
+      created_at: 200,
+      tags: [],
+      content: 'Another lightning update today',
+      sig: '0'.repeat(128),
+    }
+    const evStranger = {
+      id: '3'.repeat(64),
+      kind: 1,
+      pubkey: pkOther,
+      created_at: 300,
+      tags: [['t', 'nostr']],
+      content: 'Lightning update from outside the list',
+      sig: '0'.repeat(128),
+    }
+
+    // Strict list gate excludes stranger even if content & created_at match
+    const filteredText = filterEventsForSearch([evOld, evNew, evStranger, evNew], 'lightning', allowed)
+    expect(filteredText.map((e) => e.id)).toEqual([evNew.id, evOld.id])
+
+    const filteredTag = filterEventsForSearch([evOld, evNew, evStranger], '#nostr', allowed)
+    expect(filteredTag.map((e) => e.id)).toEqual([evOld.id])
   })
 })

@@ -82,6 +82,21 @@ const GLOBAL_TRACKING_KEYS = new Set([
   'guccounter',
   'guce_referrer',
   'guce_referrer_sig',
+  'at_medium',
+  'at_campaign',
+  'at_campaign_group',
+  'at_creation',
+  'at_format',
+  'at_link_id',
+  'at_link_origin',
+  'at_link_type',
+  'at_ptr_name',
+  'at_bbc_team',
+  'at_custom1',
+  'at_custom2',
+  'at_custom3',
+  'at_custom4',
+  'xtor',
 ])
 
 const YOUTUBE_HOSTS = new Set([

@@ -1,4 +1,5 @@
 import * as nip19 from 'nostr-tools/nip19'
+import type { Event } from 'nostr-tools/pure'
 import { isValidHex64, sanitizePublicHttpsUrl } from '../sanitize'
 import { useNostrStore } from '../store/useNostrStore'
 import { nostrPool } from './pool'
@@ -126,4 +127,70 @@ export async function searchProfiles(
   }
 
   return [...hits.values()].slice(0, 20)
+}
+
+export function matchProfilesLocally(
+  rawQuery: string,
+  profiles: Record<
+    string,
+    { name?: string; display_name?: string; picture?: string; nip05?: string }
+  >,
+  allowedPubkeys?: ReadonlySet<string>,
+): ProfileSearchHit[] {
+  const lower = rawQuery.trim().toLowerCase()
+  if (!lower || lower.startsWith('#')) return []
+
+  const hits: ProfileSearchHit[] = []
+  const candidates = allowedPubkeys ? [...allowedPubkeys] : Object.keys(profiles)
+
+  for (const rawPk of candidates) {
+    const pk = rawPk.toLowerCase()
+    const prof = profiles[pk]
+    const haystack = `${prof?.display_name || ''} ${prof?.name || ''} ${prof?.nip05 || ''} ${pk}`.toLowerCase()
+    if (!haystack.includes(lower)) continue
+    hits.push({
+      pubkey: pk,
+      name: prof?.name,
+      display_name: prof?.display_name,
+      picture: prof?.picture,
+      nip05: prof?.nip05,
+    })
+    if (hits.length >= 25) break
+  }
+
+  return hits
+}
+
+export function filterEventsForSearch(
+  events: readonly Event[],
+  rawQuery: string,
+  allowedAuthors?: ReadonlySet<string>,
+): Event[] {
+  const q = rawQuery.trim()
+  const lower = q.toLowerCase()
+  const cleanTag = lower.startsWith('#') ? lower.slice(1).trim() : null
+  const seen = new Set<string>()
+  const out: Event[] = []
+
+  for (const ev of events) {
+    if (!ev || seen.has(ev.id)) continue
+    if (allowedAuthors && !allowedAuthors.has(ev.pubkey.toLowerCase())) continue
+
+    if (cleanTag) {
+      const hasTTag = ev.tags.some(
+        (t) => t[0] === 't' && t[1]?.trim().toLowerCase().replace(/^#/, '') === cleanTag,
+      )
+      const contentWithoutUrls = (ev.content || '').replace(/https?:\/\/\S+/gi, ' ').toLowerCase()
+      const hasInlineTag = contentWithoutUrls.includes(`#${cleanTag}`)
+      if (!hasTTag && !hasInlineTag) continue
+    } else if (lower) {
+      if (!(ev.content || '').toLowerCase().includes(lower)) continue
+    }
+
+    seen.add(ev.id)
+    out.push(ev)
+  }
+
+  out.sort((a, b) => b.created_at - a.created_at)
+  return out
 }
