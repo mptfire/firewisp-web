@@ -1694,4 +1694,117 @@ describe('Full code-audit regression & security hardening', () => {
       useSettingsStore.setState({ mutedWords: [], privateMutedWords: [] })
     }
   })
+
+  it('parses/builds NIP-51 kind-30000 follow sets, hides app-state tags, protects private lists, and syncs via useListsStore', async () => {
+    const {
+      buildFollowSetDeletionTags,
+      buildUpdatedFollowSetPayload,
+      isAppStateDTag,
+      makePrivateDTag,
+      makePublicDTag,
+      parseFollowSetEvent,
+    } = await import('../nostr/followSets')
+
+    expect(isAppStateDTag('notifications/lastOpened')).toBe(true)
+    expect(isAppStateDTag(`chats/${'a'.repeat(64)}/lastOpened`)).toBe(true)
+    expect(isAppStateDTag('Bitcoin')).toBe(false)
+
+    expect(makePublicDTag('Bitcoin')).toBe('bitcoin')
+    expect(makePublicDTag('Bitcoin', ['bitcoin'])).toBe('bitcoin-2')
+
+    const privD = makePrivateDTag()
+    expect(privD).toMatch(/^p-[0-9a-f]{12}$/)
+    expect(privD).not.toContain('secret')
+
+    const pkA = 'a'.repeat(64)
+    const pkB = 'b'.repeat(64)
+    const junkFiltered = parseFollowSetEvent({
+      id: '1'.repeat(64),
+      kind: 30000,
+      pubkey: pkA,
+      created_at: 1795700000,
+      content: '',
+      tags: [['d', 'notifications/lastOpened']],
+    })
+    expect(junkFiltered).toBeNull()
+
+    const preserved = buildUpdatedFollowSetPayload({
+      dTag: 'bitcoin',
+      title: 'Bitcoiners',
+      members: [pkA, 'not-a-hex', pkA],
+      isPrivate: false,
+      basePublicTags: [
+        ['d', 'bitcoin'],
+        ['image', 'https://example.com/banner.png'],
+        ['description', 'Builders'],
+      ],
+    })
+    expect(preserved.publicTags).toContainEqual(['image', 'https://example.com/banner.png'])
+    expect(preserved.publicTags).toContainEqual(['description', 'Builders'])
+    expect(preserved.publicTags.filter((t) => t[0] === 'p')).toEqual([['p', pkA]])
+
+    expect(() =>
+      buildUpdatedFollowSetPayload({
+        dTag: privD,
+        title: 'Locked',
+        members: [],
+        isPrivate: true,
+        isLocked: true,
+      }),
+    ).toThrow()
+
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useListsStore } = await import('../store/useListsStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { nostrPool } = await import('../nostr/pool')
+
+    const prevAuth = useAuthStore.getState()
+    const origQuery = nostrPool.query.bind(nostrPool)
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const signer = new LocalKeySigner(generateSecretKey())
+    const published: Array<Awaited<ReturnType<typeof signer.signEvent>>> = []
+
+    try {
+      useListsStore.getState().resetLists()
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+      useSettingsStore.setState({
+        relays: [{ url: 'wss://relay.firewisp.de', read: true, write: true }],
+      })
+      nostrPool.query = (async () => []) as typeof nostrPool.query
+      nostrPool.publish = (async (relays, ev) => {
+        published.push(ev as Awaited<ReturnType<typeof signer.signEvent>>)
+        return relays.map((relay) => ({ relay, ok: true }))
+      }) as typeof nostrPool.publish
+
+      const createdPriv = await useListsStore.getState().createList('Close Friends', true)
+      expect(createdPriv).not.toBeNull()
+      expect(createdPriv!.isPrivate).toBe(true)
+      expect(createdPriv!.dTag.startsWith('p-')).toBe(true)
+      expect(createdPriv!.dTag).not.toContain('close')
+
+      const added = await useListsStore.getState().addMember(createdPriv!.dTag, pkB, 'Bob')
+      expect(added).toBe(true)
+      expect(useListsStore.getState().lists[createdPriv!.dTag].members).toEqual([pkB])
+
+      const delTags = buildFollowSetDeletionTags(signer.pubkey, createdPriv!.dTag, createdPriv!.eventId)
+      expect(delTags).toContainEqual(['k', '30000'])
+      expect(delTags.some((t) => t[0] === 'a')).toBe(true)
+
+      await useListsStore.getState().removeMember(createdPriv!.dTag, pkB, 'Bob')
+      expect(useListsStore.getState().lists[createdPriv!.dTag].members).toEqual([])
+
+      useListsStore.getState().resetLists()
+      expect(useListsStore.getState().lists).toEqual({})
+    } finally {
+      nostrPool.query = origQuery
+      nostrPool.publish = origPublish
+      useListsStore.getState().resetLists()
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      signer.destroy()
+    }
+  })
 })

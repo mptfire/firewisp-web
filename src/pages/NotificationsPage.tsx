@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
+import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 
 function formatRelative(unixSec: number): string {
@@ -27,6 +28,7 @@ export function NotificationsPage() {
   const events = useNostrStore((s) => s.events)
   const profiles = useNostrStore((s) => s.profiles)
   const blockPubkey = useNostrStore((s) => s.blockPubkey)
+  const toggleFollow = useNostrStore((s) => s.toggleFollow)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
@@ -39,6 +41,7 @@ export function NotificationsPage() {
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
   const follows = useNostrStore((s) => s.follows)
   const [loading, setLoading] = useState(() => notificationIds.length === 0)
+  const [followBusy, setFollowBusy] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!pubkey) return
@@ -237,18 +240,60 @@ export function NotificationsPage() {
                 </div>
               </Link>
               {!isMe && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isUnread) markNotificationRead(pubkey, ev.id)
-                    void blockPubkey(actorPubkey, name)
-                  }}
-                  title={`Block & mute ${name}`}
-                  aria-label={`Block ${name}`}
-                  className="mt-1 shrink-0 p-1.5 rounded-lg border transition cursor-pointer bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300"
-                >
-                  <Ban className="w-3.5 h-3.5" />
-                </button>
+                <div className="mt-0.5 shrink-0 flex items-center gap-1">
+                  {(() => {
+                    const actorPk = actorPubkey.toLowerCase()
+                    const isFollowing = followSet.has(actorPk)
+                    const busy = Boolean(followBusy[actorPk])
+                    return (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={async () => {
+                          if (isUnread) markNotificationRead(pubkey, ev.id)
+                          setFollowBusy((b) => ({ ...b, [actorPk]: true }))
+                          try {
+                            await toggleFollow(actorPubkey)
+                          } finally {
+                            setFollowBusy((b) => ({ ...b, [actorPk]: false }))
+                          }
+                        }}
+                        title={isFollowing ? `Unfollow ${name}` : `Follow ${name}`}
+                        aria-label={isFollowing ? `Unfollow ${name}` : `Follow ${name}`}
+                        className={`px-2 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer disabled:opacity-50 ${
+                          isFollowing
+                            ? 'bg-[#1a1c26] hover:bg-amber-500/15 border-[#2d3042] hover:border-amber-500/45 text-[#c7c4bc] hover:text-amber-300'
+                            : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/35 hover:border-emerald-400 text-emerald-300'
+                        }`}
+                      >
+                        {isFollowing ? (
+                          <>
+                            <UserMinus className="w-3 h-3" />
+                            <span>Unf</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus className="w-3 h-3" />
+                            <span>Fol</span>
+                          </>
+                        )}
+                      </button>
+                    )
+                  })()}
+                  <AddToListButton pubkey={actorPubkey} displayName={name} variant="compact" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isUnread) markNotificationRead(pubkey, ev.id)
+                      void blockPubkey(actorPubkey, name)
+                    }}
+                    title={`Block & mute ${name}`}
+                    aria-label={`Block ${name}`}
+                    className="p-1.5 rounded-lg border transition cursor-pointer bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300"
+                  >
+                    <Ban className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               )}
             </div>
           )

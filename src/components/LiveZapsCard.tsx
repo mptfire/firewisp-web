@@ -12,6 +12,7 @@ import {
 } from '../lib/nostr/zapsFeed'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { AddToListButton } from './AddToListButton'
 import { Avatar } from './Avatar'
 
 const MAX_LIVE_ZAPS = 600
@@ -365,7 +366,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
             return (
               <div
                 key={z.id}
-                className={`px-2 py-1.5 rounded-xl border transition space-y-1 ${
+                className={`group/zap px-2 py-1.5 rounded-xl border transition space-y-1 ${
                   isFreshHit
                     ? 'bg-[#ffe066]/15 border-[#ffe066]/65'
                     : isBigZap
@@ -401,6 +402,12 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
                       <Zap className="w-2.5 h-2.5 fill-current" />
                       {formatCompactSats(z.sats)}
                     </span>
+                    <AddToListButton
+                      pubkey={z.senderPubkey}
+                      displayName={senderName}
+                      variant="icon"
+                      className="opacity-0 group-hover/zap:opacity-100 focus-within:opacity-100"
+                    />
                     <span className="text-[9px] text-[#6f6d66]">
                       {formatAgo(z.createdAt, nowSec)}
                     </span>

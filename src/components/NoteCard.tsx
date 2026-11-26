@@ -34,6 +34,7 @@ import { FireWispVideoPlayer } from './FireWispVideoPlayer'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
+import { AddToListButton } from './AddToListButton'
 import { YouTubeCard } from './YouTubeCard'
 
 const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
@@ -919,6 +920,10 @@ export const NoteCard = memo(function NoteCard({
                     {followBusy ? '…' : 'Unfollow'}
                   </span>
                 </button>
+              )}
+
+              {!isMyNote && (
+                <AddToListButton pubkey={event.pubkey} displayName={displayName} variant="compact" />
               )}
 
               {!isMyNote && (

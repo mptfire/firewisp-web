@@ -20,6 +20,7 @@ import { sanitizePublicHttpsUrl, sanitizePublicRelayUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { NoteCard } from '../components/NoteCard'
 import { ZapModal } from '../components/ZapModal'
@@ -350,6 +351,7 @@ export function ProfilePage() {
             )}
             {!isMe && (
               <>
+                <AddToListButton pubkey={hexPubkey} displayName={displayName} variant="profile" />
                 <button
                   onClick={() =>
                     void (isMuted

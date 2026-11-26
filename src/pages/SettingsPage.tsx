@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
@@ -20,6 +21,7 @@ import {
   Send,
   Smartphone,
   ExternalLink,
+  List,
 } from 'lucide-react'
 import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
 import { extractMuteItemsFromTags } from '../lib/nostr/lists'
@@ -211,11 +213,22 @@ export function SettingsPage() {
 
   return (
     <div className="divide-y divide-[#20222c]">
-      <div className="px-4 py-3.5">
-        <h1 className="font-bold text-lg">Settings</h1>
-        <p className="text-xs text-[#8c8a82]">
-          All preferences stay strictly in your browser. Zero telemetry.
-        </p>
+      <div className="px-4 py-3.5 flex items-center justify-between gap-2">
+        <div>
+          <h1 className="font-bold text-lg">Settings</h1>
+          <p className="text-xs text-[#8c8a82]">
+            All preferences stay strictly in your browser. Zero telemetry.
+          </p>
+        </div>
+        {pubkey && (
+          <Link
+            to="/lists"
+            className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/35 text-xs font-semibold text-purple-200 flex items-center gap-1.5 shrink-0 transition"
+          >
+            <List className="w-3.5 h-3.5" />
+            Lists
+          </Link>
+        )}
       </div>
 
       {/* Optional Feed Tabs */}

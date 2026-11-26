@@ -2,6 +2,7 @@ import { Component, Suspense, lazy, useEffect, type ErrorInfo, type ReactNode } 
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { parseSharedQueryParams } from './lib/shareTarget'
 import { useAuthStore } from './lib/store/useAuthStore'
+import { useListsStore } from './lib/store/useListsStore'
 import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
 import { Layout } from './components/Layout'
@@ -21,6 +22,12 @@ const SearchPage = lazy(() =>
 )
 const BookmarksPage = lazy(() =>
   import('./pages/BookmarksPage').then((m) => ({ default: m.BookmarksPage })),
+)
+const ListsPage = lazy(() =>
+  import('./pages/ListsPage').then((m) => ({ default: m.ListsPage })),
+)
+const ListDetailPage = lazy(() =>
+  import('./pages/ListDetailPage').then((m) => ({ default: m.ListDetailPage })),
 )
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
@@ -111,6 +118,9 @@ export function App() {
   useEffect(() => {
     if (pubkey) {
       void loadUserGraph(pubkey)
+      void useListsStore.getState().fetchOwnLists(pubkey)
+    } else {
+      useListsStore.getState().resetLists()
     }
   }, [pubkey, loadUserGraph])
 
@@ -162,6 +172,8 @@ export function App() {
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/bookmarks" element={<BookmarksPage />} />
+              <Route path="/lists" element={<ListsPage />} />
+              <Route path="/lists/:dTag" element={<ListDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/live" element={<LiveDirectoryPage />} />
               <Route path="/live/:naddr" element={<LiveStreamPage />} />

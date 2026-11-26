@@ -35,6 +35,7 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore, type LiveChatMessage } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
 import { LiveNowRow } from '../components/LiveNowRow'
@@ -322,12 +323,15 @@ function ChatBubble({
     const hasRichContent = hasVisibleSegments || parsed.media.length > 0 || parsed.youtube.length > 0
     return (
       <div className="px-3 py-2 rounded-xl bg-[#f59f00]/12 border border-[#f59f00]/35 text-xs">
-        <div className="flex items-center gap-1.5 text-[#f59f00] font-semibold">
-          <Zap className="w-3.5 h-3.5 fill-[#f59f00]" />
-          <Link to={`/p/${msg.senderPubkey}`} className="hover:underline truncate">
-            {name}
-          </Link>
-          <span>zapped {(msg.zapAmountSats || 0).toLocaleString()} sats</span>
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-1.5 text-[#f59f00] font-semibold min-w-0">
+            <Zap className="w-3.5 h-3.5 fill-[#f59f00] shrink-0" />
+            <Link to={`/p/${msg.senderPubkey}`} className="hover:underline truncate">
+              {name}
+            </Link>
+            <span className="shrink-0">zapped {(msg.zapAmountSats || 0).toLocaleString()} sats</span>
+          </div>
+          <AddToListButton pubkey={msg.senderPubkey} displayName={name} variant="icon" />
         </div>
         {hasRichContent && <div className="mt-1">{richContent}</div>}
       </div>
@@ -375,14 +379,17 @@ function ChatBubble({
                 <MessageCircle className="w-3 h-3" />
               </button>
               {!isMe && (
-                <button
-                  type="button"
-                  onClick={() => onBlock(msg.senderPubkey, name)}
-                  title={`Block ${name}`}
-                  className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer"
-                >
-                  <Ban className="w-3 h-3" />
-                </button>
+                <>
+                  <AddToListButton pubkey={msg.senderPubkey} displayName={name} variant="icon" />
+                  <button
+                    type="button"
+                    onClick={() => onBlock(msg.senderPubkey, name)}
+                    title={`Block ${name}`}
+                    className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer"
+                  >
+                    <Ban className="w-3 h-3" />
+                  </button>
+                </>
               )}
             </div>
           </div>

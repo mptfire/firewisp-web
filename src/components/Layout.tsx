@@ -5,6 +5,7 @@ import {
   Search,
   Bell,
   Bookmark,
+  List,
   Settings,
   User,
   Smartphone,
@@ -351,6 +352,7 @@ export function Layout({ children }: { children: ReactNode }) {
       badgeTone: 'red',
     },
     ...(showBookmarksNav ? [{ to: '/bookmarks', label: 'Bookmarks', icon: Bookmark }] : []),
+    ...(pubkey ? [{ to: '/lists', label: 'Lists', icon: List }] : []),
     ...(pubkey ? [{ to: `/p/${pubkey}`, label: 'Profile', icon: User }] : []),
     { to: '/settings', label: 'Settings', icon: Settings },
   ]
