@@ -1,4 +1,4 @@
-import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react'
+import { Component, Suspense, lazy, useEffect, type ErrorInfo, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { parseSharedQueryParams } from './lib/shareTarget'
 import { useAuthStore } from './lib/store/useAuthStore'
@@ -6,14 +6,31 @@ import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
 import { Layout } from './components/Layout'
 import { FeedPage } from './pages/FeedPage'
-import { ThreadPage } from './pages/ThreadPage'
-import { ProfilePage } from './pages/ProfilePage'
-import { NotificationsPage } from './pages/NotificationsPage'
-import { SearchPage } from './pages/SearchPage'
-import { BookmarksPage } from './pages/BookmarksPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { LiveDirectoryPage } from './pages/LiveDirectoryPage'
-import { LiveStreamPage } from './pages/LiveStreamPage'
+
+const ThreadPage = lazy(() =>
+  import('./pages/ThreadPage').then((m) => ({ default: m.ThreadPage })),
+)
+const ProfilePage = lazy(() =>
+  import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })),
+)
+const NotificationsPage = lazy(() =>
+  import('./pages/NotificationsPage').then((m) => ({ default: m.NotificationsPage })),
+)
+const SearchPage = lazy(() =>
+  import('./pages/SearchPage').then((m) => ({ default: m.SearchPage })),
+)
+const BookmarksPage = lazy(() =>
+  import('./pages/BookmarksPage').then((m) => ({ default: m.BookmarksPage })),
+)
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+)
+const LiveDirectoryPage = lazy(() =>
+  import('./pages/LiveDirectoryPage').then((m) => ({ default: m.LiveDirectoryPage })),
+)
+const LiveStreamPage = lazy(() =>
+  import('./pages/LiveStreamPage').then((m) => ({ default: m.LiveStreamPage })),
+)
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
@@ -130,19 +147,27 @@ export function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <Layout>
-          <Routes>
-            <Route path="/" element={<FeedPage />} />
-            <Route path="/share" element={<ShareTargetRoute />} />
-            <Route path="/e/:eventId" element={<ThreadPage />} />
-            <Route path="/p/:pubkey" element={<ProfilePage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/bookmarks" element={<BookmarksPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/live" element={<LiveDirectoryPage />} />
-            <Route path="/live/:naddr" element={<LiveStreamPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-16 text-sm text-[#9a9890]">
+                Loading…
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<FeedPage />} />
+              <Route path="/share" element={<ShareTargetRoute />} />
+              <Route path="/e/:eventId" element={<ThreadPage />} />
+              <Route path="/p/:pubkey" element={<ProfilePage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/bookmarks" element={<BookmarksPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/live" element={<LiveDirectoryPage />} />
+              <Route path="/live/:naddr" element={<LiveStreamPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </Layout>
       </BrowserRouter>
     </ErrorBoundary>

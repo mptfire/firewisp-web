@@ -10,11 +10,23 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false,
+    chunkSizeWarningLimit: 650,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom', 'zustand'],
-          nostr: ['nostr-tools', '@scure/bip39'],
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (/\/node_modules\/hls\.js\//.test(id)) return 'hls'
+          if (/\/node_modules\/(qrcode|dijkstrajs|pngjs)\//.test(id)) return 'qrcode'
+          if (/\/node_modules\/lucide-react\//.test(id)) return 'icons'
+          if (/\/node_modules\/(nostr-tools|@noble\/|@scure\/)/.test(id)) return 'nostr'
+          if (
+            /\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|zustand)\//.test(
+              id,
+            )
+          ) {
+            return 'react'
+          }
+          return undefined
         },
       },
     },

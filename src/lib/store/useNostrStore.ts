@@ -1394,7 +1394,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           if (picked.length >= 6) break
         }
       } else {
-        // Wisp Relay (firewisp.relay.rtard.de)
+        // Fire Wisp Relay (wss://relay.firewisp.de)
         const raw = await nostrPool.query([FIREWISP_RELAY], { kinds: [1], limit: 50 }, 4000)
         const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
         for (const ev of sorted) {

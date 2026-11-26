@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
@@ -35,7 +35,8 @@ import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
 import { YouTubeCard } from './YouTubeCard'
-import { ZapModal } from './ZapModal'
+
+const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
 
 const requestedQuotes = new Set<string>()
 const requestedParents = new Set<string>()
@@ -1218,13 +1219,15 @@ export const NoteCard = memo(function NoteCard({
       <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />
 
       {zapOpen && profile?.lud16 && (
-        <ZapModal
-          recipientPubkey={event.pubkey}
-          recipientName={displayName}
-          lud16={profile.lud16}
-          eventId={event.id}
-          onClose={() => setZapOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <ZapModal
+            recipientPubkey={event.pubkey}
+            recipientName={displayName}
+            lud16={profile.lud16}
+            eventId={event.id}
+            onClose={() => setZapOpen(false)}
+          />
+        </Suspense>
       )}
     </article>
   )

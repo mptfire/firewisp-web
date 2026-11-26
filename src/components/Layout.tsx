@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   Flame,
@@ -33,12 +33,15 @@ import { useLiveStore } from '../lib/store/useLiveStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
-import { AuthModal } from './AuthModal'
-import { FloatingStreamPlayer } from './FloatingStreamPlayer'
 import { LiveZapsCard } from './LiveZapsCard'
 import { SidebarAudioDeck } from './SidebarAudioDeck'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
 import { TrendingSidebar } from './TrendingSidebar'
+
+const AuthModal = lazy(() => import('./AuthModal').then((m) => ({ default: m.AuthModal })))
+const FloatingStreamPlayer = lazy(() =>
+  import('./FloatingStreamPlayer').then((m) => ({ default: m.FloatingStreamPlayer })),
+)
 
 function FireWispFlameSprite({
   idPrefix,
@@ -165,6 +168,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const isTheaterMode = location.pathname.startsWith('/live/')
   const pubkey = useAuthStore((s) => s.pubkey)
   const method = useAuthStore((s) => s.method)
+  const authModalOpen = useAuthStore((s) => s.authModalOpen)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const logout = useAuthStore((s) => s.logout)
   const profile = useNostrStore((s) => (pubkey ? s.profiles[pubkey] : undefined))
@@ -901,8 +905,16 @@ export function Layout({ children }: { children: ReactNode }) {
         </button>
       )}
 
-      <FloatingStreamPlayer />
-      <AuthModal />
+      {hasMiniPlayer && (
+        <Suspense fallback={null}>
+          <FloatingStreamPlayer />
+        </Suspense>
+      )}
+      {authModalOpen && (
+        <Suspense fallback={null}>
+          <AuthModal />
+        </Suspense>
+      )}
 
       {/* iOS Safari Home-Screen PWA Install Guide (only ever opened on iOS Safari) */}
       {iosInstallOpen && (

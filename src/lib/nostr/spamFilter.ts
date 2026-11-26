@@ -127,7 +127,7 @@ export function evaluateNoteSpam(
   const reasons: string[] = []
   const content = event.content || ''
 
-  // Verified NIP-13 PoW gives strong anti-spam credit (matches firewisp.relay.rtard.de)
+  // Verified NIP-13 PoW gives strong anti-spam credit (matches wss://relay.firewisp.de)
   if (powBits >= 16) score -= 45
   else if (powBits >= 12) score -= 25
 
