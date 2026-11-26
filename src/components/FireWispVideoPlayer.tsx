@@ -227,7 +227,7 @@ export function FireWispVideoPlayer({
       onMouseLeave={() => {
         if (playing) setControlsVisible(false)
       }}
-      className={`relative w-full overflow-hidden bg-black group/fwvid focus:outline-none ${className}`}
+      className={`relative z-[6] w-full overflow-hidden bg-black group/fwvid focus:outline-none ${className}`}
     >
       <video
         key={`${src}:${useCors ? 'cors' : 'nocors'}`}

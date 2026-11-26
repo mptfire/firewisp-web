@@ -23,6 +23,9 @@ import { useLiveStore, type LiveChatMessage } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
+import { YouTubeCard } from './YouTubeCard'
+
+const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
 
 interface DragPosition {
   x: number
@@ -156,6 +159,51 @@ const MiniChatMention = memo(function MiniChatMention({
   )
 })
 
+function MiniBlossomMedia({ url, display }: { url: string; display: string }) {
+  const [mode, setMode] = useState<'img' | 'video' | 'link'>('img')
+  if (mode === 'link') {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[#ff8a3d] hover:underline break-all"
+      >
+        {display}
+      </a>
+    )
+  }
+  if (mode === 'video') {
+    return (
+      <video
+        src={`${url}#t=0.001`}
+        controls
+        playsInline
+        preload="metadata"
+        onError={() => setMode('link')}
+        className="relative z-[6] mt-1 rounded-md max-h-24 max-w-full border border-[#2a2d3d] bg-black"
+      />
+    )
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="relative z-[6] block mt-1"
+    >
+      <img
+        src={url}
+        alt="Chat media"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setMode('video')}
+        className="rounded-md max-h-24 max-w-full object-contain border border-[#2a2d3d] bg-[#0b0b0e]"
+      />
+    </a>
+  )
+}
+
 const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage }) {
   const profile = useNostrStore((s) => s.profiles[msg.senderPubkey])
   const senderName =
@@ -164,9 +212,132 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
     () => parseNoteContent({ content: msg.content, tags: msg.tags }),
     [msg.content, msg.tags],
   )
-  const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
+  const parsedMediaUrls = useMemo(
+    () => new Set(parsed.media.map((m) => m.url)),
+    [parsed.media],
+  )
+  const hasVisibleSegments = useMemo(
+    () =>
+      parsed.segments.some((seg) => {
+        if (seg.type === 'text') return seg.text.trim().length > 0
+        if (seg.type === 'link') {
+          const pub = sanitizePublicHttpsUrl(seg.url)
+          if (pub && parsedMediaUrls.has(pub)) return false
+        }
+        return true
+      }),
+    [parsed.segments, parsedMediaUrls],
+  )
+
+  const richBody = (
+    <>
+      {hasVisibleSegments && (
+        <span className="text-[#e4e1d8] whitespace-pre-wrap break-words">
+          {parsed.segments.map((seg, i) => {
+            if (seg.type === 'text') {
+              return <span key={i}>{renderTextWithCustomEmojis(seg.text, msg.tags)}</span>
+            }
+            if (seg.type === 'link') {
+              const publicHttps = sanitizePublicHttpsUrl(seg.url)
+              if (publicHttps && parsedMediaUrls.has(publicHttps)) return null
+              if (publicHttps && BLOSSOM_HEX_URL_RE.test(publicHttps)) {
+                return <MiniBlossomMedia key={i} url={publicHttps} display={seg.display} />
+              }
+              return (
+                <a
+                  key={i}
+                  href={seg.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#ff8a3d] hover:underline break-all"
+                >
+                  {seg.display}
+                </a>
+              )
+            }
+            if (seg.type === 'hashtag') {
+              return (
+                <span key={i} className="text-[#f59f00]">
+                  #{seg.tag}
+                </span>
+              )
+            }
+            if (seg.type === 'mention') {
+              return <MiniChatMention key={i} pubkey={seg.pubkey} bech32={seg.bech32} />
+            }
+            if (seg.type === 'quote' && seg.eventId) {
+              return (
+                <Link
+                  key={i}
+                  to={`/e/${seg.eventId}`}
+                  className="text-[#ff8a3d] hover:underline"
+                >
+                  nostr:{seg.bech32.slice(0, 14)}…
+                </Link>
+              )
+            }
+            if (seg.type === 'live') {
+              return (
+                <Link
+                  key={i}
+                  to={`/live/${seg.bech32}`}
+                  className="text-[#ff8a3d] hover:underline"
+                >
+                  Watch stream
+                </Link>
+              )
+            }
+            return null
+          })}
+        </span>
+      )}
+      {parsed.media.length > 0 && (
+        <div className="mt-1 space-y-1 relative z-[6]">
+          {parsed.media.map((m) =>
+            m.kind === 'image' ? (
+              <a
+                key={m.url}
+                href={m.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <img
+                  src={m.url}
+                  alt={m.alt || 'Chat attachment'}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  className="rounded-md max-h-24 max-w-full object-contain border border-[#2a2d3d] bg-[#0b0b0e]"
+                />
+              </a>
+            ) : m.kind === 'video' ? (
+              <video
+                key={m.url}
+                src={`${m.url}#t=0.001`}
+                poster={m.poster}
+                controls
+                playsInline
+                preload="metadata"
+                className="rounded-md max-h-24 max-w-full border border-[#2a2d3d] bg-black"
+              />
+            ) : (
+              <audio key={m.url} src={m.url} controls preload="none" className="w-full h-7" />
+            ),
+          )}
+        </div>
+      )}
+      {parsed.youtube.length > 0 && (
+        <div className="mt-1 space-y-1">
+          {parsed.youtube.map((yt) => (
+            <YouTubeCard key={yt.videoId} video={yt} compact />
+          ))}
+        </div>
+      )}
+    </>
+  )
 
   if (msg.isZapAnnouncement) {
+    const hasRichContent = hasVisibleSegments || parsed.media.length > 0 || parsed.youtube.length > 0
     return (
       <div className="px-2 py-1 rounded-lg bg-[#f59f00]/12 border border-[#f59f00]/30 text-[11px] leading-snug">
         <div className="flex items-center justify-between gap-1.5">
@@ -176,7 +347,7 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
           </span>
           <span className="text-[9px] text-[#8c8a82] shrink-0">{formatMiniTime(msg.createdAt)}</span>
         </div>
-        {msg.content && <p className="text-[#ece9e1] mt-0.5 break-words">{msg.content}</p>}
+        {hasRichContent && <div className="mt-0.5">{richBody}</div>}
       </div>
     )
   }
@@ -190,46 +361,7 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
       >
         {senderName}
       </Link>
-      <span className="text-[#e4e1d8]">
-        {parsed.segments.map((seg, i) => {
-          if (seg.type === 'text') {
-            return <span key={i}>{renderTextWithCustomEmojis(seg.text, msg.tags)}</span>
-          }
-          if (seg.type === 'link') {
-            return (
-              <a
-                key={i}
-                href={seg.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[#ff8a3d] hover:underline break-all"
-              >
-                {seg.display}
-              </a>
-            )
-          }
-          if (seg.type === 'hashtag') {
-            return (
-              <span key={i} className="text-[#f59f00]">
-                #{seg.tag}
-              </span>
-            )
-          }
-          if (seg.type === 'mention') {
-            return <MiniChatMention key={i} pubkey={seg.pubkey} bech32={seg.bech32} />
-          }
-          return null
-        })}
-      </span>
-      {firstImg && (
-        <img
-          src={firstImg}
-          alt="Chat attachment"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          className="mt-1 rounded-md max-h-24 max-w-full object-contain border border-[#2a2d3d] bg-[#0b0b0e]"
-        />
-      )}
+      {richBody}
     </div>
   )
 })

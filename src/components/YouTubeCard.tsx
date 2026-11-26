@@ -60,7 +60,7 @@ export const YouTubeCard = memo(function YouTubeCard({
   return (
     <div
       onClick={(e) => e.stopPropagation()}
-      className="group rounded-xl overflow-hidden border border-[#262834] hover:border-red-500/60 bg-[#12131a] transition"
+      className="relative z-[6] group rounded-xl overflow-hidden border border-[#262834] hover:border-red-500/60 bg-[#12131a] transition"
     >
       {playing && canPlayInline ? (
         <div

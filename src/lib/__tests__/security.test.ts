@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { bytesToHex, hexToBytes } from 'nostr-tools/utils'
 import { generateSecretKey, finalizeEvent, getPublicKey } from 'nostr-tools/pure'
 import * as nip44 from 'nostr-tools/nip44'
@@ -1572,5 +1572,46 @@ describe('Full code-audit regression & security hardening', () => {
       })
       signer.destroy()
     }
+  })
+
+  it('defaults showLiveZaps to false for fresh users and renders Blossom, image, and YouTube links in zap announcements', async () => {
+    vi.resetModules()
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    expect(useSettingsStore.getState().showLiveZaps).toBe(false)
+
+    const { parseZapReceiptInfo } = await import('../store/useNostrStore')
+    const hash = 'a'.repeat(64)
+    const zapReq = {
+      pubkey: 'b'.repeat(64),
+      content: `Great stream! https://blossom.primal.net/${hash} https://example.com/pic.png https://youtu.be/20t-IZZztOk`,
+      tags: [['imeta', `url https://blossom.primal.net/${hash}`, 'm image/webp']],
+    }
+    const receipt = {
+      id: 'c'.repeat(64),
+      pubkey: 'd'.repeat(64),
+      kind: 9735,
+      created_at: 1795700100,
+      content: '',
+      tags: [
+        ['bolt11', 'lnbc210u1ptest'],
+        ['description', JSON.stringify(zapReq)],
+      ],
+      sig: 'e'.repeat(128),
+    }
+
+    const info = parseZapReceiptInfo(receipt)
+    expect(info.senderPubkey).toBe('b'.repeat(64))
+    expect(info.sats).toBe(21000)
+    expect(info.tags).toEqual([['imeta', `url https://blossom.primal.net/${hash}`, 'm image/webp']])
+
+    const parsedZapBody = parseNoteContent({
+      content: info.comment || '',
+      tags: info.tags || [],
+    })
+    expect(parsedZapBody.media.map((m) => m.url)).toEqual([
+      `https://blossom.primal.net/${hash}`,
+      'https://example.com/pic.png',
+    ])
+    expect(parsedZapBody.youtube.map((y) => y.videoId)).toEqual(['20t-IZZztOk'])
   })
 })

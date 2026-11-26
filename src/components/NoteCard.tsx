@@ -242,7 +242,7 @@ const LiveStreamEmbedCard = memo(function LiveStreamEmbedCard({
         <div
           onMouseEnter={startHoverPreview}
           onMouseLeave={stopHoverPreview}
-          className="relative aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden"
+          className="relative z-[6] aspect-video max-h-72 w-full bg-[#0e0e11] overflow-hidden"
         >
           <button
             type="button"
@@ -476,11 +476,11 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
               alt={firstImage.alt || 'Quoted image'}
               loading="lazy"
               referrerPolicy="no-referrer"
-              className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734]"
+              className="relative z-[6] mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734]"
             />
           )}
           {!firstImage && firstVideo && (
-            <div className="mt-2 rounded-lg overflow-hidden border border-[#242734]">
+            <div className="relative z-[6] mt-2 rounded-lg overflow-hidden border border-[#242734]">
               <FireWispVideoPlayer
                 src={firstVideo.url}
                 poster={firstVideo.poster}
@@ -490,7 +490,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
             </div>
           )}
           {!firstImage && !firstVideo && firstYoutube && (
-            <div className="mt-2">
+            <div className="relative z-[6] mt-2">
               <YouTubeCard video={firstYoutube} compact />
             </div>
           )}
@@ -640,12 +640,12 @@ const ReplyContextLine = memo(function ReplyContextLine({
               navigate(`/e/${replyTargetId}`)
             }
           }}
-          className="mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734] hover:border-[#e8590c]/60 transition cursor-zoom-in"
+          className="relative z-[6] mt-2 rounded-lg max-h-72 max-w-full w-auto h-auto object-contain bg-[#0b0b0e] border border-[#242734] hover:border-[#e8590c]/60 transition cursor-zoom-in"
         />
       )}
 
       {!parentImage && parentVideo && (
-        <div className="mt-2 rounded-lg overflow-hidden border border-[#242734]">
+        <div className="relative z-[6] mt-2 rounded-lg overflow-hidden border border-[#242734]">
           <FireWispVideoPlayer
             src={parentVideo.url}
             poster={parentVideo.poster}
@@ -656,7 +656,7 @@ const ReplyContextLine = memo(function ReplyContextLine({
       )}
 
       {!parentImage && !parentVideo && parentYoutube && (
-        <div className="mt-2">
+        <div className="relative z-[6] mt-2">
           <YouTubeCard video={parentYoutube} compact />
         </div>
       )}
@@ -1127,7 +1127,7 @@ export const NoteCard = memo(function NoteCard({
           {/* Media gallery with NIP-92 ALT badges */}
           {parsed.media.length > 0 && (
             <div
-              className={`mt-2.5 grid gap-2 ${
+              className={`relative z-[6] mt-2.5 grid gap-2 ${
                 parsed.media.length === 1 ? 'grid-cols-1' : 'grid-cols-2'
               }`}
             >

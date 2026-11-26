@@ -112,7 +112,7 @@ function LiveStreamPreviewCard({
       }`}
     >
       {/* 16:9 Stream Thumbnail Preview */}
-      <div className="relative aspect-video w-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] overflow-hidden">
+      <div className="relative z-[6] aspect-video w-full bg-gradient-to-br from-[#2a150c] via-[#1a1826] to-[#11131a] overflow-hidden">
         <Link
           to={`/live/${naddr}`}
           aria-label={`Watch ${title}`}

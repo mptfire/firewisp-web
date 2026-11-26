@@ -658,6 +658,67 @@
   animation-delay: -0.26s;
 }
 
+/* Free-roaming main orange Fire Wisp sprite across the viewport */
+.fw-roam-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 20px;
+  will-change: transform;
+}
+
+.fw-roam-wisp {
+  width: 28px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+}
+
+.fw-roam-tail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 9999px;
+  will-change: transform;
+}
+
+.fw-roam-tail-1 {
+  width: 14px;
+  height: 4px;
+  background: linear-gradient(90deg, rgba(232, 89, 12, 0.45), #ff922b 55%, #ffd43b);
+  box-shadow: 0 0 7px 1px rgba(255, 146, 43, 0.6);
+}
+
+.fw-roam-tail-2 {
+  width: 12px;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(201, 42, 42, 0.25), #e8590c 60%, rgba(255, 146, 43, 0.9));
+  box-shadow: 0 0 6px 0.75px rgba(232, 89, 12, 0.48);
+}
+
+.fw-roam-tail-3 {
+  width: 10px;
+  height: 2.25px;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.16), rgba(217, 72, 15, 0.75) 65%, rgba(255, 146, 43, 0.78));
+  box-shadow: 0 0 4.5px 0.5px rgba(232, 89, 12, 0.36);
+}
+
+.fw-roam-tail-4 {
+  width: 9px;
+  height: 1.5px;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.06), rgba(201, 42, 42, 0.55) 65%, rgba(232, 89, 12, 0.62));
+  box-shadow: 0 0 3px 0.25px rgba(201, 42, 42, 0.28);
+}
+
+.fw-roam-tail-5 {
+  width: 7px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0), rgba(185, 28, 28, 0.35) 65%, rgba(232, 89, 12, 0.42));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fw-edge-btn::before,
   .fw-zap-circuit.fw-zap-circuit-active::before,
@@ -667,7 +728,8 @@
   .fw-flame-seg,
   .fw-flame-wisp,
   .fw-notif-seg,
-  .fw-notif-wisp {
+  .fw-notif-wisp,
+  .fw-roam-layer {
     display: none;
   }
 }

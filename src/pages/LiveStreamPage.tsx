@@ -46,7 +46,7 @@ import { WatchWithModal, type WatchWithSelection } from '../components/WatchWith
 import { YouTubeCard } from '../components/YouTubeCard'
 
 // Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
-const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:\?.*)?$/i
+const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
 
 function formatChatTime(unixSec: number): string {
   return new Date(unixSec * 1000).toLocaleTimeString([], {
@@ -121,7 +121,7 @@ function BlossomBlobMedia({
         playsInline
         preload="metadata"
         onError={() => setMode('link')}
-        className="block mt-1.5 max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
+        className="relative z-[6] block mt-1.5 max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
       />
     )
   }
@@ -129,7 +129,7 @@ function BlossomBlobMedia({
     <button
       type="button"
       onClick={() => onOpenLightbox({ url, kind: 'image' })}
-      className="block mt-1.5 rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
+      className="relative z-[6] block mt-1.5 rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
     >
       <img
         src={url}
@@ -197,7 +197,129 @@ function ChatBubble({
     [parsed.segments, parsedMediaUrls],
   )
 
+  const richContent = (
+    <>
+      {hasVisibleSegments && (
+        <div className="text-xs text-[#ece9e1] whitespace-pre-wrap break-words leading-relaxed">
+          {parsed.segments.map((seg, idx) => {
+            if (seg.type === 'text') {
+              return <span key={idx}>{renderTextWithCustomEmojis(seg.text, emojiMap)}</span>
+            }
+            if (seg.type === 'link') {
+              const publicHttps = sanitizePublicHttpsUrl(seg.url)
+              if (publicHttps && parsedMediaUrls.has(publicHttps)) return null
+              if (publicHttps && BLOSSOM_HEX_URL_RE.test(publicHttps)) {
+                return (
+                  <BlossomBlobMedia
+                    key={idx}
+                    url={publicHttps}
+                    display={seg.display}
+                    onOpenLightbox={onOpenLightbox}
+                  />
+                )
+              }
+              return (
+                <a
+                  key={idx}
+                  href={seg.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#ff8a3d] hover:underline break-all"
+                >
+                  {seg.display}
+                </a>
+              )
+            }
+            if (seg.type === 'hashtag') {
+              return (
+                <Link
+                  key={idx}
+                  to={`/search?q=${encodeURIComponent('#' + seg.tag)}`}
+                  className="text-[#f59f00] hover:underline"
+                >
+                  #{seg.tag}
+                </Link>
+              )
+            }
+            if (seg.type === 'mention') {
+              return <ChatMention key={idx} pubkey={seg.pubkey} bech32={seg.bech32} />
+            }
+            if (seg.type === 'quote' && seg.eventId) {
+              return (
+                <Link
+                  key={idx}
+                  to={`/e/${seg.eventId}`}
+                  className="text-[#ff8a3d] hover:underline"
+                >
+                  nostr:{seg.bech32.slice(0, 14)}…
+                </Link>
+              )
+            }
+            if (seg.type === 'live') {
+              return (
+                <Link
+                  key={idx}
+                  to={`/live/${seg.bech32}`}
+                  className="text-[#ff8a3d] hover:underline"
+                >
+                  Watch stream
+                </Link>
+              )
+            }
+            return null
+          })}
+        </div>
+      )}
+
+      {/* Standard & imeta media attachments (images, gifs, videos, audio) */}
+      {parsed.media.length > 0 && (
+        <div className="mt-1.5 space-y-1.5 relative z-[6]">
+          {parsed.media.map((m) =>
+            m.kind === 'image' ? (
+              <button
+                key={m.url}
+                type="button"
+                onClick={() => onOpenLightbox(m)}
+                className="block rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
+              >
+                <img
+                  src={m.url}
+                  alt={m.alt || 'Chat media'}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  className="max-h-44 max-w-full object-contain"
+                />
+              </button>
+            ) : m.kind === 'video' ? (
+              <video
+                key={m.url}
+                src={`${m.url}#t=0.001`}
+                poster={m.poster}
+                controls
+                playsInline
+                preload="metadata"
+                className="max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
+              />
+            ) : (
+              <audio key={m.url} src={m.url} controls preload="none" className="w-full h-8" />
+            ),
+          )}
+        </div>
+      )}
+
+      {/* YouTube link preview cards in Live Chat */}
+      {parsed.youtube.length > 0 && (
+        <div className="mt-1.5 space-y-1.5">
+          {parsed.youtube.map((yt) => (
+            <YouTubeCard key={yt.videoId} video={yt} compact />
+          ))}
+        </div>
+      )}
+    </>
+  )
+
   if (msg.isZapAnnouncement) {
+    const hasRichContent = hasVisibleSegments || parsed.media.length > 0 || parsed.youtube.length > 0
     return (
       <div className="px-3 py-2 rounded-xl bg-[#f59f00]/12 border border-[#f59f00]/35 text-xs">
         <div className="flex items-center gap-1.5 text-[#f59f00] font-semibold">
@@ -207,7 +329,7 @@ function ChatBubble({
           </Link>
           <span>zapped {(msg.zapAmountSats || 0).toLocaleString()} sats</span>
         </div>
-        {msg.content && <p className="mt-1 text-[#ece9e1] break-words">{msg.content}</p>}
+        {hasRichContent && <div className="mt-1">{richContent}</div>}
       </div>
     )
   }
@@ -265,123 +387,8 @@ function ChatBubble({
             </div>
           </div>
 
-          {/* Rich chat text + inline extensionless Blossom media */}
-          {hasVisibleSegments && (
-            <div className="text-xs text-[#ece9e1] whitespace-pre-wrap break-words leading-relaxed">
-              {parsed.segments.map((seg, idx) => {
-                if (seg.type === 'text') {
-                  return <span key={idx}>{renderTextWithCustomEmojis(seg.text, emojiMap)}</span>
-                }
-                if (seg.type === 'link') {
-                  const publicHttps = sanitizePublicHttpsUrl(seg.url)
-                  if (publicHttps && parsedMediaUrls.has(publicHttps)) return null
-                  if (publicHttps && BLOSSOM_HEX_URL_RE.test(publicHttps)) {
-                    return (
-                      <BlossomBlobMedia
-                        key={idx}
-                        url={publicHttps}
-                        display={seg.display}
-                        onOpenLightbox={onOpenLightbox}
-                      />
-                    )
-                  }
-                  return (
-                    <a
-                      key={idx}
-                      href={seg.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#ff8a3d] hover:underline break-all"
-                    >
-                      {seg.display}
-                    </a>
-                  )
-                }
-                if (seg.type === 'hashtag') {
-                  return (
-                    <Link
-                      key={idx}
-                      to={`/search?q=${encodeURIComponent('#' + seg.tag)}`}
-                      className="text-[#f59f00] hover:underline"
-                    >
-                      #{seg.tag}
-                    </Link>
-                  )
-                }
-                if (seg.type === 'mention') {
-                  return <ChatMention key={idx} pubkey={seg.pubkey} bech32={seg.bech32} />
-                }
-                if (seg.type === 'quote' && seg.eventId) {
-                  return (
-                    <Link
-                      key={idx}
-                      to={`/e/${seg.eventId}`}
-                      className="text-[#ff8a3d] hover:underline"
-                    >
-                      nostr:{seg.bech32.slice(0, 14)}…
-                    </Link>
-                  )
-                }
-                if (seg.type === 'live') {
-                  return (
-                    <Link
-                      key={idx}
-                      to={`/live/${seg.bech32}`}
-                      className="text-[#ff8a3d] hover:underline"
-                    >
-                      Watch stream
-                    </Link>
-                  )
-                }
-                return null
-              })}
-            </div>
-          )}
-
-          {/* Standard & imeta media attachments (images, gifs, videos, audio) */}
-          {parsed.media.length > 0 && (
-            <div className="mt-1.5 space-y-1.5">
-              {parsed.media.map((m) =>
-                m.kind === 'image' ? (
-                  <button
-                    key={m.url}
-                    type="button"
-                    onClick={() => onOpenLightbox(m)}
-                    className="block rounded-lg overflow-hidden border border-[#2a2d3d] bg-[#0e0e11] hover:border-[#e8590c]/60 transition cursor-pointer"
-                  >
-                    <img
-                      src={m.url}
-                      alt={m.alt || 'Chat media'}
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      className="max-h-44 max-w-full object-contain"
-                    />
-                  </button>
-                ) : m.kind === 'video' ? (
-                  <video
-                    key={m.url}
-                    src={`${m.url}#t=0.001`}
-                    poster={m.poster}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    className="max-h-44 max-w-full rounded-lg border border-[#2a2d3d] bg-black"
-                  />
-                ) : (
-                  <audio key={m.url} src={m.url} controls preload="none" className="w-full h-8" />
-                ),
-              )}
-            </div>
-          )}
-
-          {/* YouTube link preview cards in Live Chat */}
-          {parsed.youtube.length > 0 && (
-            <div className="mt-1.5 space-y-1.5">
-              {parsed.youtube.map((yt) => (
-                <YouTubeCard key={yt.videoId} video={yt} compact />
-              ))}
-            </div>
-          )}
+          {/* Rich chat text + inline extensionless Blossom media, attachments & YouTube */}
+          {richContent}
         </div>
       </div>
     </div>

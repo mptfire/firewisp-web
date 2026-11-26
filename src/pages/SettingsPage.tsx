@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
@@ -28,6 +28,54 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
 import { sanitizePublicRelayUrl } from '../lib/sanitize'
+
+function SettingsSection({
+  id,
+  title,
+  icon: Icon,
+  badge,
+  isOpen,
+  onToggle,
+  children,
+}: {
+  id: string
+  title: string
+  icon: ComponentType<{ className?: string }>
+  badge?: ReactNode
+  isOpen: boolean
+  onToggle: (id: string) => void
+  children: ReactNode
+}) {
+  return (
+    <section className="px-4">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={`settings-panel-${id}`}
+        onClick={() => onToggle(id)}
+        className="w-full py-3.5 flex items-center justify-between gap-3 text-left group cursor-pointer"
+      >
+        <span className="font-semibold text-sm flex items-center gap-2 text-white group-hover:text-[#ffd43b] transition min-w-0">
+          <Icon className="w-4 h-4 text-[#f59f00] shrink-0" />
+          <span className="truncate">{title}</span>
+        </span>
+        <span className="flex items-center gap-2 shrink-0">
+          {badge}
+          <ChevronDown
+            className={`w-4 h-4 text-[#8c8a82] transition-transform duration-200 ${
+              isOpen ? 'rotate-180 text-[#f59f00]' : 'group-hover:text-white'
+            }`}
+          />
+        </span>
+      </button>
+      {isOpen && (
+        <div id={`settings-panel-${id}`} className="pb-4 space-y-3">
+          {children}
+        </div>
+      )}
+    </section>
+  )
+}
 
 export function SettingsPage() {
   const settings = useSettingsStore()
@@ -60,6 +108,9 @@ export function SettingsPage() {
   const [newBlossom, setNewBlossom] = useState('')
   const [newMuteTag, setNewMuteTag] = useState('')
   const [newMuteWord, setNewMuteWord] = useState('')
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
+  const toggleSection = (id: string) =>
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }))
   const [mutedUsersOpen, setMutedUsersOpen] = useState(false)
   const [privateMutedUsersOpen, setPrivateMutedUsersOpen] = useState(false)
   const [mutedTagsOpen, setMutedTagsOpen] = useState(false)
@@ -105,6 +156,24 @@ export function SettingsPage() {
     settings.privateMutedHashtags.length +
     settings.privateMutedWords.length
 
+  const enabledFeedOptionsCount = [
+    settings.showLiveNowBar,
+    settings.showBookmarksNav,
+    settings.showLiveZaps,
+    settings.showGlobalAudio,
+    settings.mobileDataSaving,
+    settings.hoverStreamPreview,
+    settings.inlineMediaPlayback,
+    settings.showFireWispTab,
+    settings.showExtendedTab,
+    settings.showExploreTab,
+  ].filter(Boolean).length
+
+  const totalMutedWords = settings.mutedWords.length + settings.privateMutedWords.length
+  const totalMutedTags = settings.mutedHashtags.length + settings.privateMutedHashtags.length
+  const totalMutedUsers = settings.mutedPubkeys.length + settings.privateMutedPubkeys.length
+  const totalMutedAll = totalMutedWords + totalMutedTags + totalMutedUsers
+
   useEffect(() => {
     setNwcInput(settings.nwcUri)
   }, [settings.nwcUri])
@@ -143,11 +212,18 @@ export function SettingsPage() {
       </div>
 
       {/* Optional Feed Tabs */}
-      <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <LayoutGrid className="w-4 h-4 text-[#f59f00]" />
-          Feed Tabs
-        </h2>
+      <SettingsSection
+        id="feed-tabs"
+        title="Feed Tabs"
+        icon={LayoutGrid}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {enabledFeedOptionsCount} active
+          </span>
+        }
+        isOpen={Boolean(openSections['feed-tabs'])}
+        onToggle={toggleSection}
+      >
         <p className="text-xs text-[#8c8a82]">
           For You, Follows, and your selected sidebar feed (Trending / Extended / Explore / Wisp Relay) are always shown. Enable extra tabs below to pin multiple at once.
         </p>
@@ -301,16 +377,24 @@ export function SettingsPage() {
             className="accent-[#e8590c]"
           />
         </label>
-      </section>
+      </SettingsSection>
 
       {/* Relays */}
-      <section className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Radio className="w-4 h-4 text-[#f59f00]" />
-            Nostr Relays
-          </h2>
+      <SettingsSection
+        id="relays"
+        title="Nostr Relays"
+        icon={Radio}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {settings.relays.length} relays
+          </span>
+        }
+        isOpen={Boolean(openSections['relays'])}
+        onToggle={toggleSection}
+      >
+        <div className="flex justify-end">
           <button
+            type="button"
             onClick={settings.resetRelays}
             className="text-xs text-[#9a9890] hover:text-white flex items-center gap-1 cursor-pointer"
           >
@@ -552,15 +636,22 @@ export function SettingsPage() {
             })}
           </div>
         )}
-      </section>
+      </SettingsSection>
 
       {/* Blossom media servers */}
-      <section className="p-4 space-y-3">
+      <SettingsSection
+        id="blossom"
+        title="Blossom Media Servers"
+        icon={UploadCloud}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {settings.blossomServers.length} servers
+          </span>
+        }
+        isOpen={Boolean(openSections['blossom'])}
+        onToggle={toggleSection}
+      >
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <UploadCloud className="w-4 h-4 text-[#f59f00]" />
-            Blossom Media Servers
-          </h2>
           <span className="text-[11px] text-[#8c8a82]">BUD-03 (kind 10063)</span>
         </div>
         <div className="space-y-1.5">
@@ -674,14 +765,22 @@ export function SettingsPage() {
             </p>
           )}
         </div>
-      </section>
+      </SettingsSection>
 
       {/* NIP-13 Anti-Spam PoW */}
-      <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <Cpu className="w-4 h-4 text-[#f59f00]" />
-          NIP-13 Anti-Spam Proof-of-Work
-        </h2>
+      <SettingsSection
+        id="pow"
+        title="NIP-13 Anti-Spam Proof-of-Work"
+        icon={Cpu}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {settings.notePowEnabled ? `${settings.notePowBits}b` : 'Off'} /{' '}
+            {settings.reactionPowEnabled ? `${settings.reactionPowBits}b` : 'Off'}
+          </span>
+        }
+        isOpen={Boolean(openSections['pow'])}
+        onToggle={toggleSection}
+      >
         <p className="text-xs text-[#8c8a82]">
           Fire Wisp Relay requires at least 12 bits of PoW on public posts and reactions. Mining
           runs in a background Web Worker.
@@ -728,21 +827,25 @@ export function SettingsPage() {
             />
           )}
         </div>
-      </section>
+      </SettingsSection>
 
       {/* Lightning NWC */}
-      <section className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <Wallet className="w-4 h-4 text-[#f59f00]" />
-            Lightning Wallet (NWC — NIP-47)
-          </h2>
-          {settings.nwcUri && (
+      <SettingsSection
+        id="wallet"
+        title="Lightning Wallet (NWC — NIP-47)"
+        icon={Wallet}
+        badge={
+          settings.nwcUri ? (
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[10px] font-semibold text-emerald-300">
               Connected
             </span>
-          )}
-        </div>
+          ) : (
+            <span className="text-[11px] text-[#8c8a82]">Not connected</span>
+          )
+        }
+        isOpen={Boolean(openSections['wallet'])}
+        onToggle={toggleSection}
+      >
         <p className="text-xs text-[#8c8a82]">
           Connect Alby, Primal, CoinOS, or Zeus for one-click zaps (or use WebLN / QR invoices
           without connecting a wallet). Best practice: use a spending-capped zap budget URI.
@@ -814,16 +917,25 @@ export function SettingsPage() {
           />
         </label>
         {nwcStatus && <p className="text-xs text-[#f59f00]">{nwcStatus}</p>}
-      </section>
+      </SettingsSection>
 
-      {/* Muted Hashtags & Users */}
-      <section className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="font-semibold text-sm flex items-center gap-2">
-            <VolumeX className="w-4 h-4 text-[#f59f00]" />
-            Muted Hashtags &amp; Users
-          </h2>
-          {pubkey && (
+      {/* Muted Words, Hashtags & Users */}
+      <SettingsSection
+        id="mutes"
+        title="Muted Words, Hashtags & Users"
+        icon={VolumeX}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {totalMutedAll > 0
+              ? `${totalMutedWords} words · ${totalMutedTags} tags · ${totalMutedUsers} users`
+              : 'None'}
+          </span>
+        }
+        isOpen={Boolean(openSections['mutes'])}
+        onToggle={toggleSection}
+      >
+        {pubkey && (
+          <div className="flex items-center justify-end gap-2 flex-wrap">
             <div className="flex items-center gap-1.5 flex-wrap">
               {signer?.canSign && localUnsyncedMutesCount > 0 && (
                 <button
@@ -884,8 +996,8 @@ export function SettingsPage() {
                 {muteListSyncStatus === 'syncing' ? 'Syncing…' : 'Sync Nostr Mute List'}
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
         <p className="text-[11px] text-[#8c8a82]">
           {signer?.canSign
             ? 'Global Nostr sync enabled (NIP-51 kind 10000): blocking users, hashtags, and words/domains automatically encrypts (NIP-44) and syncs across your Nostr clients while preserving all existing entries.'
@@ -1139,12 +1251,20 @@ export function SettingsPage() {
             </div>
           </div>
         )}
-      </section>
-      <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <Shield className="w-4 h-4 text-[#f59f00]" />
-          Privacy &amp; Key Backup
-        </h2>
+      </SettingsSection>
+
+      <SettingsSection
+        id="privacy"
+        title="Privacy & Key Backup"
+        icon={Shield}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            Spam filter {settings.spamFilterEnabled ? 'on' : 'off'}
+          </span>
+        }
+        isOpen={Boolean(openSections['privacy'])}
+        onToggle={toggleSection}
+      >
 
         <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
           <div>
@@ -1271,14 +1391,17 @@ export function SettingsPage() {
             Remove saved encrypted browser vault
           </button>
         )}
-      </section>
+      </SettingsSection>
 
       {/* Fire Wisp for Android */}
-      <section className="p-4 space-y-3">
-        <h2 className="font-semibold text-sm flex items-center gap-2">
-          <Smartphone className="w-4 h-4 text-[#f59f00]" />
-          Fire Wisp for Android
-        </h2>
+      <SettingsSection
+        id="android"
+        title="Fire Wisp for Android"
+        icon={Smartphone}
+        badge={<span className="text-[11px] text-[#8c8a82]">APK · Zapstore</span>}
+        isOpen={Boolean(openSections['android'])}
+        onToggle={toggleSection}
+      >
         <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-3">
           <p className="text-xs text-[#9a9890] leading-relaxed">
             Built-in fail-closed Tor, Amber signer, NIP-49 backups, and a self-custodial Lightning
@@ -1305,7 +1428,7 @@ export function SettingsPage() {
             </a>
           </div>
         </div>
-      </section>
+      </SettingsSection>
     </div>
   )
 }

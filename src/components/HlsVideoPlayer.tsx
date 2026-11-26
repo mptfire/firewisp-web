@@ -599,7 +599,7 @@ export function HlsVideoPlayer({
       onMouseLeave={() => {
         if (playing) setControlsVisible(false)
       }}
-      className={`relative w-full aspect-video bg-black overflow-hidden group/player focus:outline-none ${
+      className={`relative z-[6] w-full aspect-video bg-black overflow-hidden group/player focus:outline-none ${
         compact ? '' : 'rounded-xl border border-[#232530]'
       }`}
     >

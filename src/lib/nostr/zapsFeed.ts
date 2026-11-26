@@ -68,7 +68,7 @@ export function parseLiveZapReceipt(
       }
       if (typeof parsed.content === 'string') {
         const clean = parsed.content.trim()
-        if (clean) comment = clean.slice(0, 140)
+        if (clean) comment = clean.slice(0, 280)
       }
       if (Array.isArray(parsed.tags)) {
         for (const t of parsed.tags) {

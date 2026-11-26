@@ -223,7 +223,7 @@ export function StreamZapBar({
             setComment(e.target.value)
             setInvoice(null)
           }}
-          maxLength={140}
+          maxLength={280}
           placeholder="Note…"
           className="w-28 sm:w-32 px-2.5 py-2 rounded-xl bg-[#0e0e11] border border-[#292c3b] focus:border-[#f59f00] text-xs text-white placeholder-[#6c6a63] focus:outline-none"
         />

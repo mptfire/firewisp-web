@@ -188,7 +188,7 @@ export function ZapModal({
                   setComment(e.target.value)
                   setInvoice(null)
                 }}
-                maxLength={140}
+                maxLength={280}
                 className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-[#0e0e11] border border-[#2a2d3a] text-sm focus:outline-none focus:border-[#e8590c]"
                 placeholder="Optional note…"
               />

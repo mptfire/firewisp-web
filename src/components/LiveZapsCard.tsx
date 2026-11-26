@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Radio, Zap } from 'lucide-react'
+import { parseNoteContent } from '../lib/nostr/content'
 import { LIVE_DISCOVERY_RELAYS } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
+import { sanitizePublicHttpsUrl } from '../lib/sanitize'
 import {
   computeLiveZapsStats,
   parseLiveZapReceipt,
@@ -30,6 +32,89 @@ function formatAgo(createdAt: number, nowSec: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`
   return `${Math.floor(diff / 86400)}d`
+}
+
+const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
+
+function ZapCommentThumb({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-[#ff8a3d] hover:underline break-all"
+      >
+        {url.replace(/^https?:\/\//, '').slice(0, 48)}
+      </a>
+    )
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="relative z-[6] block mt-1"
+    >
+      <img
+        src={url}
+        alt="Zap media"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="rounded-md max-h-20 max-w-full object-contain border border-[#222532] bg-[#0b0b0e]"
+      />
+    </a>
+  )
+}
+
+function ZapCommentBody({ comment }: { comment: string }) {
+  const parsed = useMemo(() => parseNoteContent({ content: comment, tags: [] }), [comment])
+  const mediaUrls = useMemo(() => new Set(parsed.media.map((m) => m.url)), [parsed.media])
+  const firstImg = parsed.media.find((m) => m.kind === 'image')?.url
+
+  return (
+    <div className="text-[10px] text-[#b8b5ad] leading-snug break-words pl-1 space-y-1">
+      <div className="line-clamp-2">
+        {parsed.segments.map((seg, idx) => {
+          if (seg.type === 'text') return <span key={idx}>{seg.text}</span>
+          if (seg.type === 'link') {
+            const pub = sanitizePublicHttpsUrl(seg.url)
+            if (pub && mediaUrls.has(pub)) return null
+            if (pub && BLOSSOM_HEX_URL_RE.test(pub)) {
+              return <ZapCommentThumb key={idx} url={pub} />
+            }
+            return (
+              <a
+                key={idx}
+                href={seg.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#ff8a3d] hover:underline break-all"
+              >
+                {seg.display}
+              </a>
+            )
+          }
+          if (seg.type === 'hashtag') return <span key={idx} className="text-[#f59f00]">#{seg.tag}</span>
+          return null
+        })}
+      </div>
+      {firstImg && <ZapCommentThumb url={firstImg} />}
+      {parsed.youtube.map((yt) => (
+        <a
+          key={yt.videoId}
+          href={yt.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/35 text-[9px] font-medium text-red-300 hover:bg-red-500/25"
+        >
+          YouTube · {yt.videoId}
+        </a>
+      ))}
+    </div>
+  )
 }
 
 export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
@@ -352,11 +437,7 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
                 </div>
 
                 {/* Row 3: Optional zap comment */}
-                {z.comment && (
-                  <p className="text-[10px] text-[#b8b5ad] leading-snug line-clamp-2 break-words pl-1">
-                    {z.comment}
-                  </p>
-                )}
+                {z.comment && <ZapCommentBody comment={z.comment} />}
               </div>
             )
           })}

@@ -586,18 +586,33 @@ export function parseBolt11Sats(bolt11: string): number {
   }
 }
 
-export function parseZapReceiptInfo(ev: Event): { senderPubkey: string; sats: number; comment?: string } {
+export function parseZapReceiptInfo(ev: Event): {
+  senderPubkey: string
+  sats: number
+  comment?: string
+  tags?: string[][]
+} {
   const bolt11 = ev.tags.find((t) => t[0] === 'bolt11' && t[1])?.[1]
   const sats = bolt11 ? parseBolt11Sats(bolt11) : 0
   const desc = ev.tags.find((t) => t[0] === 'description' && t[1])?.[1]
   if (desc) {
     try {
-      const parsed = JSON.parse(desc) as { pubkey?: unknown; content?: unknown }
+      const parsed = JSON.parse(desc) as { pubkey?: unknown; content?: unknown; tags?: unknown }
       if (typeof parsed.pubkey === 'string' && /^[0-9a-f]{64}$/i.test(parsed.pubkey)) {
+        const cleanTags = Array.isArray(parsed.tags)
+          ? parsed.tags.filter(
+              (t): t is string[] =>
+                Array.isArray(t) && t.length > 0 && t.every((item) => typeof item === 'string'),
+            )
+          : undefined
         return {
           senderPubkey: parsed.pubkey.toLowerCase(),
           sats,
-          comment: typeof parsed.content === 'string' && parsed.content.trim() ? parsed.content.trim() : undefined,
+          comment:
+            typeof parsed.content === 'string' && parsed.content.trim()
+              ? parsed.content.trim()
+              : undefined,
+          tags: cleanTags && cleanTags.length > 0 ? cleanTags : undefined,
         }
       }
     } catch {

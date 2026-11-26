@@ -320,7 +320,7 @@ export function ProfilePage() {
       </div>
 
       {/* Banner */}
-      <div className="h-36 bg-gradient-to-r from-[#24140d] via-[#1c1622] to-[#141720] relative overflow-hidden">
+      <div className="h-36 bg-gradient-to-r from-[#24140d] via-[#1c1622] to-[#141720] relative z-[6] overflow-hidden">
         {bannerUrl && (
           <img
             src={bannerUrl}

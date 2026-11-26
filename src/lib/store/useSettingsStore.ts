@@ -220,7 +220,7 @@ function loadInitial(): PersistedSettings & {
     showExploreTab: false,
     showLiveNowBar: true,
     liveBarExpanded: true,
-    showLiveZaps: true,
+    showLiveZaps: false,
     showGlobalAudio: true,
     showBookmarksNav: false,
     sidebarFeedMode: 'trending',
