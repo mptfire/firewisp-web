@@ -1,6 +1,7 @@
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
 import { sanitizeHttpUrl, sanitizePublicHttpsUrl } from '../sanitize'
+import { cleanTrackingUrl } from './urlClean'
 import { extractYouTubeVideo, type YouTubeRef } from './youtube'
 
 export interface MediaAttachment {
@@ -142,10 +143,11 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
               ytSeen.add(ytRef.videoId)
               youtube.push(ytRef)
             } else {
+              const cleanedUrl = cleanTrackingUrl(safe).url
               segments.push({
                 type: 'link',
-                url: safe,
-                display: trimmed.replace(/^https?:\/\//, '').slice(0, 60),
+                url: cleanedUrl,
+                display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
               })
             }
           }
@@ -161,10 +163,11 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
             })
           }
         } else {
+          const cleanedUrl = cleanTrackingUrl(safe).url
           segments.push({
             type: 'link',
-            url: safe,
-            display: trimmed.replace(/^https?:\/\//, '').slice(0, 60),
+            url: cleanedUrl,
+            display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
           })
         }
       } else {

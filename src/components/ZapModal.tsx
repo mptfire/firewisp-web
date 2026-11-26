@@ -6,6 +6,7 @@ import {
   payInvoiceWithWebln,
   requestZapInvoice,
 } from '../lib/nostr/nip57'
+import { stripTrackingParamsInText } from '../lib/nostr/urlClean'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 
@@ -74,7 +75,7 @@ export function ZapModal({
           recipientPubkey,
           eventId,
           eventATag,
-          comment,
+          comment: stripTrackingParamsInText(comment.trim()).text,
           relays: readRelays,
           signer,
         }))

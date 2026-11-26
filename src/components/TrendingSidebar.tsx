@@ -4,6 +4,7 @@ import {
   Flame,
   Globe,
   Heart,
+  List,
   MessageCircle,
   Network,
   Play,
@@ -13,17 +14,25 @@ import {
   Zap,
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
+import { getListFeedDTag, makeListFeedKey } from '../lib/nostr/followSets'
 import { useAuthStore } from '../lib/store/useAuthStore'
+import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
-import { useSettingsStore, type SidebarFeedMode } from '../lib/store/useSettingsStore'
+import {
+  useSettingsStore,
+  type BuiltinSidebarFeedMode,
+  type SidebarFeedMode,
+} from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 
-const SIDEBAR_FEED_OPTIONS: Array<{ value: SidebarFeedMode; label: string }> = [
+const SIDEBAR_FEED_OPTIONS: Array<{ value: BuiltinSidebarFeedMode; label: string }> = [
   { value: 'trending', label: 'Trending Posts' },
   { value: 'extended', label: 'Extended' },
   { value: 'global', label: 'Explore' },
   { value: 'firewisp', label: 'Wisp Relay' },
 ]
+
+const EMPTY_IDS: string[] = []
 
 function formatShortAge(unixSec: number): string {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
@@ -221,19 +230,44 @@ export function TrendingSidebar() {
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const setSidebarFeedMode = useSettingsStore((s) => s.setSidebarFeedMode)
 
-  const postIds = useNostrStore((s) => s.sidebarFeedIds[sidebarFeedMode])
-  const loading = useNostrStore((s) => s.sidebarFeedLoading[sidebarFeedMode])
+  const postIds = useNostrStore((s) => s.sidebarFeedIds[sidebarFeedMode] ?? EMPTY_IDS)
+  const loading = useNostrStore((s) => Boolean(s.sidebarFeedLoading[sidebarFeedMode]))
   const loadingExtendedGraph = useNostrStore((s) => s.loadingExtendedGraph)
   const follows = useNostrStore((s) => s.follows)
   const followsLoaded = useNostrStore((s) => s.followsLoaded)
   const loadSidebarFeed = useNostrStore((s) => s.loadSidebarFeed)
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
+  const listsMap = useListsStore((s) => s.lists)
+  const listsLoading = useListsStore((s) => s.loading)
+  const sortedLists = useMemo(
+    () => Object.values(listsMap).sort((a, b) => a.name.localeCompare(b.name)),
+    [listsMap],
+  )
+  const selectedListDTag = getListFeedDTag(sidebarFeedMode)
+  const selectedList = selectedListDTag ? listsMap[selectedListDTag] : undefined
+  const selectedListMembersKey = selectedList ? selectedList.members.join(',') : ''
   const attemptedKeyRef = useRef<string>('')
 
-  const isBusy = loading || (sidebarFeedMode === 'extended' && loadingExtendedGraph)
+  const isBusy =
+    loading ||
+    (sidebarFeedMode === 'extended' && loadingExtendedGraph) ||
+    (Boolean(selectedListDTag) && listsLoading && !selectedList)
 
-  // Initial load whenever the user switches mode (and once follows finish loading for Extended)
+  // Initial load whenever the user switches mode (and once follows / lists finish loading)
   useEffect(() => {
+    if (selectedListDTag) {
+      if (!pubkey || (listsLoading && !selectedList) || !selectedList) return
+      const attemptKey = `${sidebarFeedMode}:${selectedListMembersKey}`
+      if (attemptedKeyRef.current === attemptKey) return
+      const prevMode = attemptedKeyRef.current.split(':')[0]
+      attemptedKeyRef.current = attemptKey
+      const hasCached = (useNostrStore.getState().sidebarFeedIds[sidebarFeedMode]?.length ?? 0) > 0
+      const membersChanged = prevMode === sidebarFeedMode
+      if (membersChanged || !hasCached) {
+        void loadSidebarFeed(sidebarFeedMode, membersChanged)
+      }
+      return
+    }
     if (sidebarFeedMode === 'extended' && pubkey && !followsLoaded) return
     const attemptKey =
       sidebarFeedMode === 'extended'
@@ -241,10 +275,20 @@ export function TrendingSidebar() {
         : sidebarFeedMode
     if (attemptedKeyRef.current === attemptKey) return
     attemptedKeyRef.current = attemptKey
-    if (useNostrStore.getState().sidebarFeedIds[sidebarFeedMode].length === 0) {
+    if ((useNostrStore.getState().sidebarFeedIds[sidebarFeedMode]?.length ?? 0) === 0) {
       void loadSidebarFeed(sidebarFeedMode)
     }
-  }, [sidebarFeedMode, pubkey, followsLoaded, follows.length, loadSidebarFeed])
+  }, [
+    sidebarFeedMode,
+    selectedListDTag,
+    selectedList,
+    selectedListMembersKey,
+    listsLoading,
+    pubkey,
+    followsLoaded,
+    follows.length,
+    loadSidebarFeed,
+  ])
 
   // Auto-refresh active sidebar feed every 5 minutes while the tab is visible
   useEffect(() => {
@@ -255,8 +299,9 @@ export function TrendingSidebar() {
     return () => clearInterval(id)
   }, [sidebarFeedMode, loadSidebarFeed])
 
-  const ModeIcon =
-    sidebarFeedMode === 'extended'
+  const ModeIcon = selectedListDTag
+    ? List
+    : sidebarFeedMode === 'extended'
       ? Network
       : sidebarFeedMode === 'global'
         ? Globe
@@ -270,8 +315,17 @@ export function TrendingSidebar() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const emptyMessage =
-    sidebarFeedMode === 'extended'
+  const emptyMessage = selectedListDTag
+    ? !pubkey
+      ? 'Sign in to view posts from this list.'
+      : listsLoading && !selectedList
+        ? 'Syncing your lists from relays…'
+        : !selectedList
+          ? 'This list was not found on your relays.'
+          : selectedList.members.length === 0
+            ? 'No people in this list yet.'
+            : 'No recent posts from this list in the last 7 days.'
+    : sidebarFeedMode === 'extended'
       ? !pubkey
         ? 'Sign in to see posts from your Extended Web of Trust.'
         : follows.length === 0
@@ -287,7 +341,9 @@ export function TrendingSidebar() {
     <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
       <div className="flex items-center justify-between gap-2 mb-2.5">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <ModeIcon className="w-3.5 h-3.5 text-[#e8590c] shrink-0" />
+          <ModeIcon
+            className={`w-3.5 h-3.5 shrink-0 ${selectedListDTag ? 'text-purple-400' : 'text-[#e8590c]'}`}
+          />
           <select
             aria-label="Sidebar feed source"
             value={sidebarFeedMode}
@@ -295,11 +351,31 @@ export function TrendingSidebar() {
             title="Switch right sidebar feed"
             className="w-full min-w-0 px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#262938] hover:border-[#3b4057] text-xs font-semibold text-[#e4e1d8] focus:outline-none focus:border-[#e8590c] truncate cursor-pointer"
           >
-            {SIDEBAR_FEED_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-[#14151e] text-white">
-                {opt.label}
-              </option>
-            ))}
+            <optgroup label="Built-in" className="bg-[#14151e] text-[#9a9890]">
+              {SIDEBAR_FEED_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-[#14151e] text-white">
+                  {opt.label}
+                </option>
+              ))}
+            </optgroup>
+            {((pubkey && sortedLists.length > 0) || Boolean(selectedListDTag)) && (
+              <optgroup label="Your Lists" className="bg-[#14151e] text-[#9a9890]">
+                {sortedLists.map((l) => (
+                  <option
+                    key={l.dTag}
+                    value={makeListFeedKey(l.dTag)}
+                    className="bg-[#14151e] text-white"
+                  >
+                    {l.name} ({l.members.length})
+                  </option>
+                ))}
+                {selectedListDTag && !selectedList && (
+                  <option value={sidebarFeedMode} className="bg-[#14151e] text-white">
+                    {listsLoading ? 'Loading list…' : 'Saved list'}
+                  </option>
+                )}
+              </optgroup>
+            )}
           </select>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -338,7 +414,26 @@ export function TrendingSidebar() {
           ))}
         </div>
       ) : postIds.length === 0 ? (
-        <p className="text-xs text-[#6f6d66]">{emptyMessage}</p>
+        <div className="space-y-2">
+          <p className="text-xs text-[#6f6d66]">{emptyMessage}</p>
+          {selectedListDTag && selectedList && selectedList.members.length === 0 && (
+            <Link
+              to={`/lists/${encodeURIComponent(selectedListDTag)}`}
+              className="inline-block text-[11px] text-purple-300 hover:underline font-medium"
+            >
+              Add people →
+            </Link>
+          )}
+          {selectedListDTag && !listsLoading && !selectedList && (
+            <button
+              type="button"
+              onClick={() => setSidebarFeedMode('trending')}
+              className="text-[11px] text-[#ff8a3d] hover:underline cursor-pointer"
+            >
+              Switch back to Trending
+            </button>
+          )}
+        </div>
       ) : (
         <div className="space-y-2.5">
           {postIds.map((id) => (

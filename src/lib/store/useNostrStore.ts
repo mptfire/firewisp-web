@@ -24,7 +24,10 @@ import { evaluateNoteSpam, foldConfusables, isTopLevelNote } from '../nostr/spam
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
+import { useListsStore } from './useListsStore'
 import { useSettingsStore, type SidebarFeedMode } from './useSettingsStore'
+import { getListFeedDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
+import { stripTrackingParamsInText } from '../nostr/urlClean'
 
 export interface NostrProfile {
   pubkey: string
@@ -43,7 +46,14 @@ const BOOKMARKS_KEY = 'firewisp_bookmarks_v1'
 const PROFILES_CACHE_KEY = 'firewisp_profiles_cache_v1'
 const MAX_CACHED_PROFILES = 400
 
-export type FeedTab = 'foryou' | 'global' | 'trending' | 'firewisp' | 'following' | 'extended'
+export type FeedTab =
+  | 'foryou'
+  | 'global'
+  | 'trending'
+  | 'firewisp'
+  | 'following'
+  | 'extended'
+  | ListFeedKey
 
 function loadBookmarks(): string[] {
   if (typeof localStorage === 'undefined') return []
@@ -128,14 +138,15 @@ export interface NostrState {
   extendedFeedIds: string[]
   trendingFeedIds: string[]
   globalFeedIds: string[]
-  pendingFeedIds: Record<FeedTab, string[]>
+  listFeedIds: Record<string, string[]>
+  pendingFeedIds: Record<string, string[]>
   extendedAuthors: string[]
   loadingExtendedGraph: boolean
   loadingMore: boolean
   trendingSidebarIds: string[]
   loadingTrends: boolean
-  sidebarFeedIds: Record<SidebarFeedMode, string[]>
-  sidebarFeedLoading: Record<SidebarFeedMode, boolean>
+  sidebarFeedIds: Record<string, string[]>
+  sidebarFeedLoading: Record<string, boolean>
   notificationIds: string[]
   notificationsLastSeenAt: number
   readNotificationIds: Record<string, true>
@@ -673,6 +684,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   extendedFeedIds: [],
   trendingFeedIds: [],
   globalFeedIds: [],
+  listFeedIds: {},
   pendingFeedIds: {
     foryou: [],
     global: [],
@@ -727,6 +739,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return merged.slice(0, 500)
       }
       const nextPending = { ...s.pendingFeedIds, [tab]: [] }
+      if (isListFeedKey(tab)) {
+        const dTag = getListFeedDTag(tab)!
+        return {
+          listFeedIds: {
+            ...s.listFeedIds,
+            [dTag]: mergeInto(s.listFeedIds[dTag] ?? []),
+          },
+          pendingFeedIds: nextPending,
+        }
+      }
       if (tab === 'foryou') {
         return { forYouFeedIds: mergeInto(s.forYouFeedIds), pendingFeedIds: nextPending }
       }
@@ -752,6 +774,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   clearFeedTab: (tab) => {
     set((s) => {
       const nextPending = { ...s.pendingFeedIds, [tab]: [] }
+      if (isListFeedKey(tab)) {
+        const dTag = getListFeedDTag(tab)!
+        return {
+          listFeedIds: { ...s.listFeedIds, [dTag]: [] },
+          pendingFeedIds: nextPending,
+        }
+      }
       if (tab === 'foryou') return { forYouFeedIds: [], forYouSuppIds: {}, pendingFeedIds: nextPending }
       if (tab === 'firewisp') return { firewispFeedIds: [], pendingFeedIds: nextPending }
       if (tab === 'following') return { followingFeedIds: [], pendingFeedIds: nextPending }
@@ -787,13 +816,33 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       bookmarks: [],
       userLiked: {},
       userRepostIds: {},
+      activeFeedTab: isListFeedKey(s.activeFeedTab) ? 'foryou' : s.activeFeedTab,
       forYouFeedIds: [],
       forYouSuppIds: {},
       followingFeedIds: [],
       extendedFeedIds: [],
+      listFeedIds: {},
       extendedAuthors: [],
-      sidebarFeedIds: { ...s.sidebarFeedIds, extended: [] },
-      pendingFeedIds: { ...s.pendingFeedIds, foryou: [], following: [], extended: [] },
+      sidebarFeedIds: {
+        trending: s.sidebarFeedIds.trending ?? [],
+        extended: [],
+        global: s.sidebarFeedIds.global ?? [],
+        firewisp: s.sidebarFeedIds.firewisp ?? [],
+      },
+      sidebarFeedLoading: {
+        trending: Boolean(s.sidebarFeedLoading.trending),
+        extended: false,
+        global: Boolean(s.sidebarFeedLoading.global),
+        firewisp: Boolean(s.sidebarFeedLoading.firewisp),
+      },
+      pendingFeedIds: {
+        foryou: [],
+        global: s.pendingFeedIds.global ?? [],
+        trending: s.pendingFeedIds.trending ?? [],
+        firewisp: s.pendingFeedIds.firewisp ?? [],
+        following: [],
+        extended: [],
+      },
       notificationIds: [],
       notificationsLastSeenAt: 0,
       readNotificationIds: {},
@@ -1301,7 +1350,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   loadSidebarFeed: async (mode, force = false) => {
     if (get().sidebarFeedLoading[mode]) return
-    if (!force && get().sidebarFeedIds[mode].length > 0) return
+    if (!force && (get().sidebarFeedIds[mode]?.length ?? 0) > 0) return
 
     set((s) => ({
       sidebarFeedLoading: { ...s.sidebarFeedLoading, [mode]: true },
@@ -1418,6 +1467,46 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           picked.push(ev)
           if (picked.length >= 6) break
         }
+      } else if (isListFeedKey(mode)) {
+        const dTag = getListFeedDTag(mode)!
+        const listObj = useListsStore.getState().lists[dTag]
+        if (listObj && listObj.members.length > 0) {
+          const members = [...new Set(listObj.members.map((p) => p.toLowerCase()))]
+          const allowed = new Set(members)
+          const since7d = Math.floor(Date.now() / 1000) - 7 * 86400
+          const queries: Promise<Event[]>[] = []
+          for (let i = 0; i < Math.min(members.length, 500); i += 250) {
+            queries.push(
+              nostrPool.query(
+                readRelays,
+                { kinds: [1, 20, 21, 22], authors: members.slice(i, i + 250), since: since7d, limit: 40 },
+                4000,
+              ),
+            )
+          }
+          const raw = (await Promise.all(queries)).flat()
+          const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+          const maxPerAuthor = members.length <= 2 ? 6 : 2
+          for (const ev of sorted) {
+            const pk = ev.pubkey.toLowerCase()
+            if (
+              !allowed.has(pk) ||
+              seenIds.has(ev.id) ||
+              get().isEventDeleted(ev) ||
+              get().isEventMuted(ev)
+            ) {
+              continue
+            }
+            if (ev.kind === 1 && !isTopLevelNote(ev)) continue
+            if (!ev.content.trim()) continue
+            const count = authorCounts.get(pk) || 0
+            if (count >= maxPerAuthor) continue
+            seenIds.add(ev.id)
+            authorCounts.set(pk, count + 1)
+            picked.push(ev)
+            if (picked.length >= 6) break
+          }
+        }
       } else {
         // Fire Wisp Relay (wss://relay.firewisp.de)
         const raw = await nostrPool.query([FIREWISP_RELAY], { kinds: [1], limit: 50 }, 4000)
@@ -1460,9 +1549,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         const eventsMap = { ...s.events }
         for (const ev of picked) eventsMap[ev.id] = ev
         const resolvedIds =
-          nextIds.length > 0 || mode === 'extended' || mode === 'firewisp'
+          nextIds.length > 0 || mode === 'extended' || mode === 'firewisp' || isListFeedKey(mode)
             ? nextIds
-            : s.sidebarFeedIds[mode]
+            : (s.sidebarFeedIds[mode] ?? [])
         return {
           events: eventsMap,
           sidebarFeedIds: { ...s.sidebarFeedIds, [mode]: resolvedIds },
@@ -1480,8 +1569,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadOlderFeed: async (tab) => {
     if (get().loadingMore) return 0
     const s = get()
-    const currentIds =
-      tab === 'foryou'
+    const listDTag = getListFeedDTag(tab)
+    const currentIds = listDTag
+      ? (s.listFeedIds[listDTag] ?? [])
+      : tab === 'foryou'
         ? s.forYouFeedIds
         : tab === 'firewisp'
           ? s.firewispFeedIds
@@ -1560,6 +1651,23 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
         const results = await Promise.all(queries)
         fetched = results.flat().filter((ev) => allowed.has(ev.pubkey.toLowerCase()))
+      } else if (listDTag) {
+        const listObj = useListsStore.getState().lists[listDTag]
+        if (!listObj || listObj.members.length === 0) return 0
+        const allAuthors = [...new Set(listObj.members.map((p) => p.toLowerCase()))]
+        const allowed = new Set(allAuthors)
+        const queries: Promise<Event[]>[] = []
+        for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
+          queries.push(
+            nostrPool.query(
+              targetRelays,
+              { kinds: [1, 6, 20, 21, 22], authors: allAuthors.slice(i, i + 250), until, limit: 40 },
+              4500,
+            ),
+          )
+        }
+        const results = await Promise.all(queries)
+        fetched = results.flat().filter((ev) => allowed.has(ev.pubkey.toLowerCase()))
       } else if (tab === 'extended') {
         const allowed = new Set(s.extendedAuthors.map((p) => p.toLowerCase()))
         const res = await nostrPool.query(
@@ -1606,6 +1714,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           merged.sort((a, b) => (eventsMap[b]?.created_at || 0) - (eventsMap[a]?.created_at || 0))
           return merged.slice(0, 800)
         }
+        if (listDTag) {
+          return {
+            events: eventsMap,
+            listFeedIds: {
+              ...st.listFeedIds,
+              [listDTag]: mergeOlder(st.listFeedIds[listDTag] ?? []),
+            },
+          }
+        }
         if (tab === 'foryou') return { events: eventsMap, forYouFeedIds: mergeOlder(st.forYouFeedIds) }
         if (tab === 'firewisp') return { events: eventsMap, firewispFeedIds: mergeOlder(st.firewispFeedIds) }
         if (tab === 'following') return { events: eventsMap, followingFeedIds: mergeOlder(st.followingFeedIds) }
@@ -1637,10 +1754,27 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const followedHashtags = get().followedHashtags
     const extendedAuthors = get().extendedAuthors
     const myPubkey = useAuthStore.getState().pubkey
+    const listDTag = getListFeedDTag(tab)
 
     if (tab === 'following' && !myPubkey) {
       set({ loadingFeed: false })
       return () => {}
+    }
+
+    if (listDTag) {
+      if (!myPubkey) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
+      const listState = useListsStore.getState()
+      const listObj = listState.lists[listDTag]
+      if (!listObj && listState.loading) {
+        return () => {}
+      }
+      if (!listObj || listObj.members.length === 0) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
     }
 
     // While signed in and still loading kind-3 follows, wait cleanly before subscribing;
@@ -1681,6 +1815,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       tab === 'extended'
         ? new Set(extendedAuthors.map((p) => p.toLowerCase()))
         : null
+    const allowedListAuthors = listDTag
+      ? new Set((useListsStore.getState().lists[listDTag]?.members ?? []).map((p) => p.toLowerCase()))
+      : null
 
     const authorBatch = new Set<string>()
     let batchTimer: ReturnType<typeof setTimeout> | null = null
@@ -1694,7 +1831,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     let initialEoseDone = false
     const handleEvent = (ev: Event) => {
-      // STRICT AUTHOR GATE: never allow buggy relays or race conditions to leak unfollowed spam into For You/Follows/Extended
+      // STRICT AUTHOR GATE: never allow buggy relays or race conditions to leak unfollowed spam into For You/Follows/Extended/Lists
       if (allowedForYouAuthors && !allowedForYouAuthors.has(ev.pubkey.toLowerCase())) {
         return
       }
@@ -1702,6 +1839,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return
       }
       if (allowedExtendedAuthors && !allowedExtendedAuthors.has(ev.pubkey.toLowerCase())) {
+        return
+      }
+      if (allowedListAuthors && !allowedListAuthors.has(ev.pubkey.toLowerCase())) {
         return
       }
 
@@ -1717,8 +1857,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22 || ev.kind === 6) {
         set((s) => {
           const eventsMap = { ...s.events, [ev.id]: ev }
-          const existingList =
-            tab === 'foryou'
+          const existingList = listDTag
+            ? (s.listFeedIds[listDTag] ?? [])
+            : tab === 'foryou'
               ? s.forYouFeedIds
               : tab === 'firewisp'
                 ? s.firewispFeedIds
@@ -1746,6 +1887,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             }
           }
 
+          if (listDTag) {
+            return {
+              events: eventsMap,
+              listFeedIds: {
+                ...s.listFeedIds,
+                [listDTag]: insertSortedUnique(s.listFeedIds[listDTag] ?? [], ev, eventsMap),
+              },
+            }
+          }
           if (tab === 'foryou') {
             return {
               events: eventsMap,
@@ -1829,6 +1979,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
         return chunks
       }
+      if (listDTag) {
+        const allAuthors = [...(allowedListAuthors || [])]
+        if (allAuthors.length === 0) return []
+        const since = Math.floor(Date.now() / 1000) - 7 * 86400
+        const chunks: Array<{ kinds: number[]; authors: string[]; since: number; limit: number }> = []
+        for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
+          chunks.push({
+            kinds: [1, 6, 20, 21, 22],
+            authors: allAuthors.slice(i, i + 250),
+            since,
+            limit: 60,
+          })
+        }
+        return chunks
+      }
       if (tab === 'extended') {
         return [{ kinds: [1, 20, 21, 22], authors: extendedAuthors.slice(0, 200), limit: 80 }]
       }
@@ -1854,8 +2019,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       flushAuthors()
       set({ loadingFeed: false })
       const s = get()
-      const ids =
-        tab === 'foryou'
+      const ids = listDTag
+        ? (s.listFeedIds[listDTag] ?? []).slice(0, 50)
+        : tab === 'foryou'
           ? s.forYouFeedIds.slice(0, 50)
           : tab === 'firewisp'
             ? s.firewispFeedIds.slice(0, 40)
@@ -2154,6 +2320,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (!signer?.canSign) {
       throw new Error('Sign in with a signing method (NIP-07, Bunker, or key) to publish')
     }
+    const cleanedContent = stripTrackingParamsInText(content).text
     const settings = useSettingsStore.getState()
     const tags: string[][] = [...extraTags]
 
@@ -2173,7 +2340,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
 
     // Extract #hashtags into `t` tags (strip URLs first so #fragments aren't tagged)
-    const hashtags = content.replace(/https?:\/\/\S+/gi, ' ').match(/#[a-zA-Z0-9_]{1,64}/g) || []
+    const hashtags = cleanedContent.replace(/https?:\/\/\S+/gi, ' ').match(/#[a-zA-Z0-9_]{1,64}/g) || []
     const tSeen = new Set<string>()
     for (const h of hashtags) {
       const clean = h.slice(1).toLowerCase()
@@ -2192,7 +2359,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       pubkey: signer.pubkey,
       created_at: Math.floor(Date.now() / 1000),
       tags,
-      content: content.trim(),
+      content: cleanedContent.trim(),
     }
 
     if (settings.notePowEnabled && settings.notePowBits > 0) {

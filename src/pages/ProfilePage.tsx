@@ -6,8 +6,8 @@ import {
   ArrowLeft,
   Zap,
   Ban,
+  UserMinus,
   UserPlus,
-  UserCheck,
   Copy,
   Check,
   Loader2,
@@ -339,50 +339,59 @@ export function ProfilePage() {
             <Avatar src={profile?.picture} pubkey={hexPubkey} name={displayName} size="xl" />
           </div>
 
-          <div className="flex items-center gap-2 pt-12">
+          <div className="flex items-center gap-1.5 pt-12">
             {profile?.lud16 && (
               <button
                 onClick={() => setZapOpen(true)}
-                className="p-2 rounded-xl bg-[#181a22] border border-[#2a2d3a] hover:border-[#f59f00] text-[#f59f00] cursor-pointer"
+                className="p-1.5 rounded-lg bg-[#181a22] border border-[#2a2d3a] hover:border-[#f59f00] text-[#f59f00] cursor-pointer"
                 title={`Zap ${profile.lud16}`}
+                aria-label={`Zap ${displayName}`}
               >
-                <Zap className="w-4 h-4" />
+                <Zap className="w-3.5 h-3.5" />
               </button>
             )}
             {!isMe && (
               <>
-                <AddToListButton pubkey={hexPubkey} displayName={displayName} variant="profile" />
                 <button
+                  type="button"
+                  onClick={() => void toggleFollow(hexPubkey)}
+                  title={isFollowing ? `Unfollow ${displayName}` : `Follow ${displayName}`}
+                  aria-label={isFollowing ? `Unfollow ${displayName}` : `Follow ${displayName}`}
+                  className={`px-2 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                    isFollowing
+                      ? 'bg-[#1a1c26] hover:bg-amber-500/15 border-[#2d3042] hover:border-amber-500/45 text-[#c7c4bc] hover:text-amber-300'
+                      : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/35 hover:border-emerald-400 text-emerald-300'
+                  }`}
+                >
+                  {isFollowing ? (
+                    <>
+                      <UserMinus className="w-3 h-3" />
+                      <span>Unf</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3 h-3" />
+                      <span>Fol</span>
+                    </>
+                  )}
+                </button>
+                <AddToListButton pubkey={hexPubkey} displayName={displayName} variant="compact" />
+                <button
+                  type="button"
                   onClick={() =>
                     void (isMuted
                       ? unblockPubkey(hexPubkey, displayName)
                       : blockPubkey(hexPubkey, displayName))
                   }
-                  className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                  className={`p-1.5 rounded-lg border transition cursor-pointer ${
                     isMuted
-                      ? 'bg-red-600/25 border-red-500/60 text-red-200 hover:bg-red-600/35'
-                      : 'bg-red-500/10 border-red-500/35 text-red-400 hover:bg-red-500/20 hover:text-red-300'
+                      ? 'bg-red-600/30 border-red-500/60 text-red-200 hover:bg-red-600/40'
+                      : 'bg-red-500/10 border-red-500/25 text-red-400 hover:bg-red-500/25 hover:border-red-500/50 hover:text-red-300'
                   }`}
-                  title={isMuted ? 'Unblock / Unmute user' : 'Block / Mute user'}
+                  title={isMuted ? `Unblock ${displayName}` : `Block & mute ${displayName}`}
+                  aria-label={isMuted ? `Unblock ${displayName}` : `Block ${displayName}`}
                 >
                   <Ban className="w-3.5 h-3.5" />
-                  <span>{isMuted ? 'Blocked' : 'Block / Mute'}</span>
-                </button>
-                <button
-                  onClick={() => void toggleFollow(hexPubkey)}
-                  className={`fw-edge-btn px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer text-white ${
-                    isFollowing ? 'fw-edge-following' : 'fw-edge-follow'
-                  }`}
-                >
-                  {isFollowing ? (
-                    <>
-                      <UserCheck className="w-3.5 h-3.5" /> Following
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-3.5 h-3.5" /> Follow
-                    </>
-                  )}
                 </button>
               </>
             )}

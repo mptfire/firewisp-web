@@ -35,6 +35,25 @@ export function isAppStateDTag(dTag: string): boolean {
   return !clean || clean.includes('/')
 }
 
+export type ListFeedKey = `list:${string}`
+
+export function makeListFeedKey(dTag: string): ListFeedKey {
+  return `list:${dTag}`
+}
+
+export function isListFeedKey(value: unknown): value is ListFeedKey {
+  return (
+    typeof value === 'string' &&
+    value.startsWith('list:') &&
+    value.length > 5 &&
+    !isAppStateDTag(value.slice(5))
+  )
+}
+
+export function getListFeedDTag(value: string): string | null {
+  return isListFeedKey(value) ? value.slice(5) : null
+}
+
 export function makePublicDTag(name: string, existingDTags?: Iterable<string>): string {
   const used = new Set(existingDTags || [])
   const base =

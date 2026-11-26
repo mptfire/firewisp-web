@@ -17,6 +17,7 @@ import { sanitizePublicRelayUrl } from '../sanitize'
 import { useAuthStore } from './useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from './useNostrStore'
 import { useSettingsStore } from './useSettingsStore'
+import { stripTrackingParamsInText } from '../nostr/urlClean'
 
 export interface LiveChatMessage {
   id: string
@@ -952,7 +953,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
       useAuthStore.getState().openAuthModal()
       throw new Error('Sign in to send chat messages')
     }
-    const cleanText = content.trim()
+    const cleanText = stripTrackingParamsInText(content.trim()).text
     if (!cleanText) return
 
     const cleanHost = hostPubkey.toLowerCase()

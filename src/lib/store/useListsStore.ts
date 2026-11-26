@@ -9,6 +9,7 @@ import {
   encryptMuteListTags,
   isAppStateDTag,
   KIND_FOLLOW_SET,
+  makeListFeedKey,
   makePrivateDTag,
   makePublicDTag,
   parseFollowSetEvent,
@@ -398,6 +399,17 @@ export const useListsStore = create<ListsState>((set, get) => ({
         })
         const { writeRelays } = getRelays()
         await nostrPool.publish(writeRelays, delEvent)
+        const feedKey = makeListFeedKey(dTag)
+        const settings = useSettingsStore.getState()
+        settings.unpinListTab(dTag)
+        if (settings.sidebarFeedMode === feedKey) {
+          settings.setSidebarFeedMode('trending')
+        }
+        const nostr = useNostrStore.getState()
+        nostr.clearFeedTab(feedKey)
+        if (nostr.activeFeedTab === feedKey) {
+          nostr.setActiveFeedTab('foryou')
+        }
         useNostrStore.getState().setToast(`Deleted list "${prev.name}"`)
         return true
       } catch (err) {

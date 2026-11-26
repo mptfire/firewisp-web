@@ -10,6 +10,7 @@ import {
 import { parseNoteContent } from '../lib/nostr/content'
 import { buildLiveATag } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
+import { stripTrackingParamsInText } from '../lib/nostr/urlClean'
 import { extractYouTubeRefsFromText } from '../lib/nostr/youtube'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
@@ -287,11 +288,17 @@ export function Composer({
   // Consume incoming Android / OS Web Share Target content once signed in (only top-level composer)
   useEffect(() => {
     if (replyTo || !pendingShareText || !signer?.canSign) return
+    const cleaned = stripTrackingParamsInText(pendingShareText)
     setText((prev) => {
-      if (!prev.trim()) return pendingShareText
+      if (!prev.trim()) return cleaned.text
       const sep = prev.endsWith('\n') ? '' : '\n'
-      return `${prev}${sep}${pendingShareText}`
+      return `${prev}${sep}${cleaned.text}`
     })
+    if (cleaned.removedParams.length > 0) {
+      useNostrStore
+        .getState()
+        .setToast(`Removed tracking (${cleaned.removedParams.slice(0, 3).join(', ')})`)
+    }
     setPendingShareText(null)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [replyTo, pendingShareText, signer?.canSign, setPendingShareText])
@@ -403,10 +410,16 @@ export function Composer({
           .map((l) => l.trim())
           .find((l) => l && !l.startsWith('#'))
         if (cleanUrl) {
+          const cleaned = stripTrackingParamsInText(cleanUrl)
+          if (cleaned.removedParams.length > 0) {
+            useNostrStore
+              .getState()
+              .setToast(`Removed tracking (${cleaned.removedParams.slice(0, 3).join(', ')})`)
+          }
           setText((prev) => {
-            if (!prev.trim()) return cleanUrl
+            if (!prev.trim()) return cleaned.text
             const sep = prev.endsWith(' ') || prev.endsWith('\n') ? '' : '\n'
-            return `${prev}${sep}${cleanUrl}`
+            return `${prev}${sep}${cleaned.text}`
           })
         }
       }}
@@ -456,6 +469,28 @@ export function Composer({
                   if (files.length > 0) {
                     e.preventDefault()
                     void handleFiles(files)
+                    return
+                  }
+                  const pastedText = dt.getData('text/plain')
+                  if (pastedText) {
+                    const cleaned = stripTrackingParamsInText(pastedText)
+                    if (cleaned.removedParams.length > 0) {
+                      e.preventDefault()
+                      const el = e.currentTarget
+                      const start = el.selectionStart ?? text.length
+                      const end = el.selectionEnd ?? text.length
+                      const nextText = `${text.slice(0, start)}${cleaned.text}${text.slice(end)}`
+                      const caret = start + cleaned.text.length
+                      setText(nextText)
+                      useNostrStore
+                        .getState()
+                        .setToast(
+                          `Removed tracking (${cleaned.removedParams.slice(0, 3).join(', ')})`,
+                        )
+                      requestAnimationFrame(() => {
+                        textareaRef.current?.setSelectionRange(caret, caret)
+                      })
+                    }
                   }
                 }}
                 onKeyDown={(e) => {

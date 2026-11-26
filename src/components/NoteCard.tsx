@@ -897,7 +897,7 @@ export const NoteCard = memo(function NoteCard({
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
-              {!isMyNote && isFollowingAuthor && (
+              {!isMyNote && (
                 <button
                   type="button"
                   disabled={followBusy}
@@ -911,14 +911,25 @@ export const NoteCard = memo(function NoteCard({
                       setFollowBusy(false)
                     }
                   }}
-                  title={`Unfollow ${displayName}`}
-                  aria-label={`Unfollow ${displayName}`}
-                  className="px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer disabled:opacity-50 bg-[#1a1c26] hover:bg-amber-500/15 border-[#2d3042] hover:border-amber-500/45 text-[#c7c4bc] hover:text-amber-300"
+                  title={isFollowingAuthor ? `Unfollow ${displayName}` : `Follow ${displayName}`}
+                  aria-label={isFollowingAuthor ? `Unfollow ${displayName}` : `Follow ${displayName}`}
+                  className={`px-2 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer disabled:opacity-50 ${
+                    isFollowingAuthor
+                      ? 'bg-[#1a1c26] hover:bg-amber-500/15 border-[#2d3042] hover:border-amber-500/45 text-[#c7c4bc] hover:text-amber-300'
+                      : 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/35 hover:border-emerald-400 text-emerald-300'
+                  }`}
                 >
-                  <UserMinus className="w-3 h-3" />
-                  <span className="hidden sm:inline">
-                    {followBusy ? '…' : 'Unfollow'}
-                  </span>
+                  {isFollowingAuthor ? (
+                    <>
+                      <UserMinus className="w-3 h-3" />
+                      <span>{followBusy ? '…' : 'Unf'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-3 h-3" />
+                      <span>{followBusy ? '…' : 'Fol'}</span>
+                    </>
+                  )}
                 </button>
               )}
 
@@ -928,6 +939,7 @@ export const NoteCard = memo(function NoteCard({
 
               {!isMyNote && (
                 <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation()
                     if (isAuthorMuted) {
@@ -938,16 +950,13 @@ export const NoteCard = memo(function NoteCard({
                   }}
                   title={isAuthorMuted ? `Unblock ${displayName}` : `Block & mute ${displayName}`}
                   aria-label={isAuthorMuted ? `Unblock ${displayName}` : `Block ${displayName}`}
-                  className={`px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                  className={`p-1.5 rounded-lg border transition cursor-pointer ${
                     isAuthorMuted
                       ? 'bg-red-600/30 hover:bg-red-600/45 border-red-500/60 text-red-200'
                       : 'bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300'
                   }`}
                 >
-                  <Ban className="w-3 h-3" />
-                  <span className="hidden sm:inline">
-                    {isAuthorMuted ? 'Blocked' : 'Block User'}
-                  </span>
+                  <Ban className="w-3.5 h-3.5" />
                 </button>
               )}
 

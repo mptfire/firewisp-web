@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
-import { ArrowLeft, Check, Loader2, Lock, Pencil, Plus, Search, Trash2, UserMinus } from 'lucide-react'
+import { ArrowLeft, Check, Loader2, Lock, Pencil, Pin, Plus, Rss, Search, Trash2, UserMinus } from 'lucide-react'
+import { makeListFeedKey } from '../lib/nostr/followSets'
 import { searchProfiles, type ProfileSearchHit } from '../lib/nostr/profileSearch'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
@@ -28,8 +29,11 @@ export function ListDetailPage() {
   const removeMember = useListsStore((s) => s.removeMember)
   const profiles = useNostrStore((s) => s.profiles)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
+  const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const relays = useSettingsStore((s) => s.relays)
+  const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
+  const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
 
   const readRelays = useMemo(
     () =>
@@ -195,14 +199,48 @@ export function ListDetailPage() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmDel(true)}
-              className="p-1.5 rounded-lg text-[#8c8a82] hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
-              title="Delete list"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveFeedTab(makeListFeedKey(list.dTag))
+                  navigate('/')
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                }}
+                title="Open this list as a Feed"
+                className="px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-xs font-semibold text-purple-200 flex items-center gap-1 cursor-pointer"
+              >
+                <Rss className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Use as feed</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => togglePinnedListTab(list.dTag)}
+                title={
+                  pinnedListTabs.includes(list.dTag)
+                    ? 'Unpin from Feed tabs'
+                    : 'Pin to Feed tabs'
+                }
+                className={`px-2 py-1 rounded-lg border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  pinnedListTabs.includes(list.dTag)
+                    ? 'bg-purple-500/20 border-purple-400/50 text-purple-200'
+                    : 'bg-[#15161c] border-[#2a2d3a] text-[#9a9890] hover:text-white'
+                }`}
+              >
+                <Pin className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {pinnedListTabs.includes(list.dTag) ? 'Pinned' : 'Pin'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDel(true)}
+                className="p-1.5 rounded-lg text-[#8c8a82] hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
+                title="Delete list"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
           )}
         </div>
       </div>

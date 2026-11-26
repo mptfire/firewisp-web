@@ -9,17 +9,27 @@ import {
   type RelayEntry,
 } from '../constants'
 import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
+import { isAppStateDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
 
 const STORAGE_KEY = 'firewisp_settings_v1'
 const NWC_STORAGE_KEY = 'firewisp_nwc_v1'
 
-export type SidebarFeedMode = 'trending' | 'extended' | 'global' | 'firewisp'
-const VALID_SIDEBAR_FEED_MODES: readonly SidebarFeedMode[] = [
+export type BuiltinSidebarFeedMode = 'trending' | 'extended' | 'global' | 'firewisp'
+export type SidebarFeedMode = BuiltinSidebarFeedMode | ListFeedKey
+const VALID_SIDEBAR_FEED_MODES: readonly BuiltinSidebarFeedMode[] = [
   'trending',
   'extended',
   'global',
   'firewisp',
 ]
+
+function isValidSidebarFeedMode(mode: unknown): mode is SidebarFeedMode {
+  return (
+    (typeof mode === 'string' &&
+      (VALID_SIDEBAR_FEED_MODES as readonly string[]).includes(mode)) ||
+    isListFeedKey(mode)
+  )
+}
 
 function loadStoredNwc(): { nwcUri: string; remember: boolean } {
   try {
@@ -87,6 +97,7 @@ export interface SettingsState {
   showGlobalAudio: boolean
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
+  pinnedListTabs: string[]
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   mobileDataSaving: boolean
@@ -139,6 +150,8 @@ export interface SettingsState {
   setShowGlobalAudio: (enabled: boolean) => void
   setShowBookmarksNav: (enabled: boolean) => void
   setSidebarFeedMode: (mode: SidebarFeedMode) => void
+  togglePinnedListTab: (dTag: string) => void
+  unpinListTab: (dTag: string) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
   setMobileDataSaving: (enabled: boolean) => void
@@ -177,6 +190,7 @@ interface PersistedSettings {
   showGlobalAudio: boolean
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
+  pinnedListTabs: string[]
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   mobileDataSaving: boolean
@@ -228,6 +242,7 @@ function loadInitial(): PersistedSettings & {
     showGlobalAudio: true,
     showBookmarksNav: false,
     sidebarFeedMode: 'trending',
+    pinnedListTabs: [],
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
     mobileDataSaving: false,
@@ -284,10 +299,20 @@ function loadInitial(): PersistedSettings & {
       return map.size > 0 ? [...map.values()] : DEFAULT_RELAYS
     })()
 
-    const sidebarFeedMode: SidebarFeedMode =
-      parsed.sidebarFeedMode && VALID_SIDEBAR_FEED_MODES.includes(parsed.sidebarFeedMode)
-        ? parsed.sidebarFeedMode
-        : 'trending'
+    const sidebarFeedMode: SidebarFeedMode = isValidSidebarFeedMode(parsed.sidebarFeedMode)
+      ? parsed.sidebarFeedMode
+      : 'trending'
+
+    const pinnedListTabs: string[] = Array.isArray(parsed.pinnedListTabs)
+      ? [
+          ...new Set(
+            parsed.pinnedListTabs
+              .filter((d): d is string => typeof d === 'string')
+              .map((d) => d.trim())
+              .filter((d) => d.length > 0 && !isAppStateDTag(d)),
+          ),
+        ].slice(0, 12)
+      : []
 
     const mediaVolume =
       typeof parsed.mediaVolume === 'number' && Number.isFinite(parsed.mediaVolume)
@@ -302,6 +327,7 @@ function loadInitial(): PersistedSettings & {
       relays: sanitizedRelays.length > 0 ? sanitizedRelays : DEFAULT_RELAYS,
       blossomServers,
       sidebarFeedMode,
+      pinnedListTabs,
       mediaVolume,
       mediaMuted,
       privateMutedPubkeys: [],
@@ -355,6 +381,7 @@ function persist(state: SettingsState) {
     showGlobalAudio: state.showGlobalAudio,
     showBookmarksNav: state.showBookmarksNav,
     sidebarFeedMode: state.sidebarFeedMode,
+    pinnedListTabs: state.pinnedListTabs,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
     mobileDataSaving: state.mobileDataSaving,
@@ -706,8 +733,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     persist(get())
   },
   setSidebarFeedMode: (sidebarFeedMode) => {
-    if (!VALID_SIDEBAR_FEED_MODES.includes(sidebarFeedMode)) return
+    if (!isValidSidebarFeedMode(sidebarFeedMode)) return
     set({ sidebarFeedMode })
+    persist(get())
+  },
+  togglePinnedListTab: (rawDTag) => {
+    const clean = rawDTag.trim()
+    if (!clean || isAppStateDTag(clean)) return
+    const cur = get().pinnedListTabs
+    const next = cur.includes(clean)
+      ? cur.filter((d) => d !== clean)
+      : [...cur, clean].slice(0, 12)
+    set({ pinnedListTabs: next })
+    persist(get())
+  },
+  unpinListTab: (rawDTag) => {
+    const clean = rawDTag.trim()
+    if (!clean) return
+    const cur = get().pinnedListTabs
+    if (!cur.includes(clean)) return
+    set({ pinnedListTabs: cur.filter((d) => d !== clean) })
     persist(get())
   },
   setHoverStreamPreview: (hoverStreamPreview) => {

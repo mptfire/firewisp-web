@@ -1807,4 +1807,211 @@ describe('Full code-audit regression & security hardening', () => {
       signer.destroy()
     }
   })
+
+  it('supports NIP-51 list feed keys, pinned list tabs, sidebar list selector, and clean reset', async () => {
+    const {
+      getListFeedDTag,
+      isListFeedKey,
+      makeListFeedKey,
+    } = await import('../nostr/followSets')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { useNostrStore } = await import('../store/useNostrStore')
+    const { useListsStore } = await import('../store/useListsStore')
+    const { useAuthStore } = await import('../store/useAuthStore')
+
+    expect(makeListFeedKey('friends')).toBe('list:friends')
+    expect(isListFeedKey('list:friends')).toBe(true)
+    expect(isListFeedKey('list:p-abcdef012345')).toBe(true)
+    expect(isListFeedKey('list:')).toBe(false)
+    expect(isListFeedKey('list:   ')).toBe(false)
+    expect(isListFeedKey('list:wisp/app-state')).toBe(false)
+    expect(isListFeedKey('trending')).toBe(false)
+    expect(isListFeedKey('foryou')).toBe(false)
+    expect(getListFeedDTag('list:p-abcdef012345')).toBe('p-abcdef012345')
+    expect(getListFeedDTag('trending')).toBeNull()
+
+    const prevSettings = useSettingsStore.getState()
+    const prevNostr = useNostrStore.getState()
+    const prevAuth = useAuthStore.getState()
+
+    try {
+      // Settings: pinnedListTabs + SidebarFeedMode validation
+      useSettingsStore.setState({ pinnedListTabs: [], sidebarFeedMode: 'trending' })
+      useSettingsStore.getState().togglePinnedListTab('friends')
+      useSettingsStore.getState().togglePinnedListTab('p-abcdef012345')
+      useSettingsStore.getState().togglePinnedListTab('bad/app-state')
+      useSettingsStore.getState().togglePinnedListTab('   ')
+      expect(useSettingsStore.getState().pinnedListTabs).toEqual(['friends', 'p-abcdef012345'])
+
+      useSettingsStore.getState().togglePinnedListTab('friends')
+      expect(useSettingsStore.getState().pinnedListTabs).toEqual(['p-abcdef012345'])
+      useSettingsStore.getState().unpinListTab('p-abcdef012345')
+      expect(useSettingsStore.getState().pinnedListTabs).toEqual([])
+
+      useSettingsStore.getState().setSidebarFeedMode('list:friends')
+      expect(useSettingsStore.getState().sidebarFeedMode).toBe('list:friends')
+      useSettingsStore.getState().setSidebarFeedMode('list:bad/app-state')
+      expect(useSettingsStore.getState().sidebarFeedMode).toBe('list:friends')
+
+      // Nostr store: flushPendingFeed / clearFeedTab / resetUserState for list:<dTag>
+      const id1 = '1'.repeat(64)
+      const id2 = '2'.repeat(64)
+      const pkA = 'a'.repeat(64)
+      useNostrStore.setState({
+        activeFeedTab: 'list:test',
+        events: {
+          ...useNostrStore.getState().events,
+          [id1]: {
+            id: id1,
+            kind: 1,
+            pubkey: pkA,
+            created_at: 1795700001,
+            tags: [],
+            content: 'older',
+            sig: '0'.repeat(128),
+          },
+          [id2]: {
+            id: id2,
+            kind: 1,
+            pubkey: pkA,
+            created_at: 1795700002,
+            tags: [],
+            content: 'newer',
+            sig: '0'.repeat(128),
+          },
+        },
+        listFeedIds: { test: [id1] },
+        pendingFeedIds: {
+          ...useNostrStore.getState().pendingFeedIds,
+          'list:test': [id2],
+        },
+        sidebarFeedIds: {
+          ...useNostrStore.getState().sidebarFeedIds,
+          'list:test': [id1],
+        },
+      })
+
+      useNostrStore.getState().flushPendingFeed('list:test')
+      expect(useNostrStore.getState().listFeedIds.test).toEqual([id2, id1])
+      expect(useNostrStore.getState().pendingFeedIds['list:test']).toEqual([])
+
+      useNostrStore.getState().clearFeedTab('list:test')
+      expect(useNostrStore.getState().listFeedIds.test).toEqual([])
+
+      useNostrStore.setState({
+        activeFeedTab: 'list:test',
+        listFeedIds: { test: [id1] },
+        sidebarFeedIds: {
+          ...useNostrStore.getState().sidebarFeedIds,
+          'list:test': [id1],
+        },
+        pendingFeedIds: {
+          ...useNostrStore.getState().pendingFeedIds,
+          'list:test': [id2],
+        },
+      })
+      useNostrStore.getState().resetUserState()
+      expect(useNostrStore.getState().activeFeedTab).toBe('foryou')
+      expect(useNostrStore.getState().listFeedIds).toEqual({})
+      expect(useNostrStore.getState().sidebarFeedIds['list:test']).toBeUndefined()
+      expect(useNostrStore.getState().pendingFeedIds['list:test']).toBeUndefined()
+    } finally {
+      useListsStore.getState().resetLists()
+      useSettingsStore.setState({
+        pinnedListTabs: prevSettings.pinnedListTabs,
+        sidebarFeedMode: prevSettings.sidebarFeedMode,
+      })
+      useNostrStore.setState({
+        activeFeedTab: prevNostr.activeFeedTab,
+        listFeedIds: prevNostr.listFeedIds,
+        pendingFeedIds: prevNostr.pendingFeedIds,
+        sidebarFeedIds: prevNostr.sidebarFeedIds,
+      })
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+    }
+  })
+
+  it('strips URL tracking tokens safely across YouTube and web platforms without breaking content or auth links', async () => {
+    const { cleanTrackingUrl, stripTrackingParamsInText } = await import('../nostr/urlClean')
+    const { parseNoteContent } = await import('../nostr/content')
+
+    // YouTube: strips si, pp, feature, utm_* while preserving v, t, list, index, #fragment
+    expect(cleanTrackingUrl('https://youtu.be/dQw4w9WgXcQ?si=VIPrYOD3d-K0EoFP')).toEqual({
+      url: 'https://youtu.be/dQw4w9WgXcQ',
+      removedParams: ['si'],
+    })
+    expect(
+      cleanTrackingUrl(
+        'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&si=abc123&feature=shared#chapter',
+      ).url,
+    ).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s#chapter')
+    expect(
+      cleanTrackingUrl(
+        'https://www.youtube.com/playlist?list=PL123&index=4&si=trackme',
+      ).url,
+    ).toBe('https://www.youtube.com/playlist?list=PL123&index=4')
+    expect(
+      cleanTrackingUrl('https://www.youtube.com/@firewisp?si=VIPrYOD3d-K0EoFP').url,
+    ).toBe('https://www.youtube.com/@firewisp')
+
+    // Spotify, X/Twitter, Instagram, Reddit, TikTok, Amazon, Substack, Apple, SoundCloud, global UTMs
+    expect(
+      cleanTrackingUrl('https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=deadbeef').url,
+    ).toBe('https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC')
+    expect(
+      cleanTrackingUrl('https://x.com/jack/status/20?s=46&t=abcdef123').url,
+    ).toBe('https://x.com/jack/status/20')
+    expect(
+      cleanTrackingUrl('https://www.instagram.com/p/C123/?img_index=2&igsh=MzRlODBiNWFlZA==').url,
+    ).toBe('https://www.instagram.com/p/C123/?img_index=2')
+    expect(
+      cleanTrackingUrl('https://www.reddit.com/r/nostr/comments/abc/title/?context=3&rdt=12345&share_id=xyz').url,
+    ).toBe('https://www.reddit.com/r/nostr/comments/abc/title/?context=3')
+    expect(
+      cleanTrackingUrl('https://www.amazon.com/dp/B012345678?th=1&psc=1&tag=aff-20&pf_rd_p=abc').url,
+    ).toBe('https://www.amazon.com/dp/B012345678?th=1&psc=1')
+    expect(
+      cleanTrackingUrl('https://example.substack.com/p/post-slug?r=1a2b&utm_source=substack&utm_medium=email').url,
+    ).toBe('https://example.substack.com/p/post-slug')
+    expect(
+      cleanTrackingUrl('https://music.apple.com/us/album/foo/123?i=456&itsct=music_box_link&at=100').url,
+    ).toBe('https://music.apple.com/us/album/foo/123?i=456')
+
+    // Anti-breakage: presigned URLs, OAuth callbacks, Medium friend links, X search queries untouched
+    const s3 = 'https://cdn.example.com/file.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef&utm_source=test'
+    expect(cleanTrackingUrl(s3)).toEqual({ url: s3, removedParams: [] })
+
+    const oauth = 'https://example.com/oauth/callback?code=123&state=xyz&fbclid=bad'
+    expect(cleanTrackingUrl(oauth)).toEqual({ url: oauth, removedParams: [] })
+
+    const mediumFriend = 'https://medium.com/@author/story-123?sk=friendtoken123&source=email'
+    expect(cleanTrackingUrl(mediumFriend).url).toBe('https://medium.com/@author/story-123?sk=friendtoken123')
+
+    const xSearch = 'https://x.com/search?q=nostr&src=typed_query&s=09'
+    expect(cleanTrackingUrl(xSearch).url).toBe('https://x.com/search?q=nostr&src=typed_query')
+
+    // Multi-line text cleaning preserves punctuation & leaves clean links byte-identical
+    const rawNote =
+      'Watch (https://youtu.be/dQw4w9WgXcQ?si=VIPrYOD3d-K0EoFP) and read https://nostr.com/guide?foo=bar!'
+    const stripped = stripTrackingParamsInText(rawNote)
+    expect(stripped.text).toBe(
+      'Watch (https://youtu.be/dQw4w9WgXcQ) and read https://nostr.com/guide?foo=bar!',
+    )
+    expect(stripped.removedParams).toEqual(['si'])
+
+    // Incoming parseNoteContent also strips trackers on non-card links
+    const parsed = parseNoteContent({
+      content: 'Channel https://www.youtube.com/@firewisp?si=VIPrYOD3d-K0EoFP and https://example.com/news?fbclid=123',
+      tags: [],
+    })
+    const links = parsed.segments.filter((s) => s.type === 'link')
+    expect(links.map((l) => l.url)).toEqual([
+      'https://www.youtube.com/@firewisp',
+      'https://example.com/news',
+    ])
+  })
 })

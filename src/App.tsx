@@ -1,6 +1,7 @@
 import { Component, Suspense, lazy, useEffect, type ErrorInfo, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { parseSharedQueryParams } from './lib/shareTarget'
+import { getListFeedDTag } from './lib/nostr/followSets'
 import { useAuthStore } from './lib/store/useAuthStore'
 import { useListsStore } from './lib/store/useListsStore'
 import { useLiveStore } from './lib/store/useLiveStore'
@@ -96,6 +97,13 @@ export function App() {
   const subscribeNotifications = useNostrStore((s) => s.subscribeNotifications)
   const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
   const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
+  const activeListDTag = getListFeedDTag(activeFeedTab)
+  const activeListSyncKey = useListsStore((s) => {
+    if (!activeListDTag) return ''
+    const list = s.lists[activeListDTag]
+    if (!list) return s.loading ? 'loading' : 'missing'
+    return `${list.dTag}:${list.members.join(',')}`
+  })
   const followsLoaded = useNostrStore((s) => s.followsLoaded)
   const follows = useNostrStore((s) => s.follows)
   const followedHashtags = useNostrStore((s) => s.followedHashtags)
@@ -137,6 +145,7 @@ export function App() {
     followedHashtags,
     userReadRelays,
     extendedAuthors,
+    activeListSyncKey,
     feedRefreshTick,
     subscribeFeed,
   ])

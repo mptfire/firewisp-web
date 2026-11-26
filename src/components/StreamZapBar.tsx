@@ -6,6 +6,7 @@ import {
   payInvoiceWithWebln,
   requestZapInvoice,
 } from '../lib/nostr/nip57'
+import { stripTrackingParamsInText } from '../lib/nostr/urlClean'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -107,7 +108,7 @@ export function StreamZapBar({
               recipientPubkey,
               eventId,
               eventATag,
-              comment: comment.trim(),
+              comment: stripTrackingParamsInText(comment.trim()).text,
               relays: zapRelays,
               signer,
             })
