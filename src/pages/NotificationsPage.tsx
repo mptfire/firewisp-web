@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
+import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -25,6 +25,7 @@ export function NotificationsPage() {
   const markNotificationsRead = useNostrStore((s) => s.markNotificationsRead)
   const events = useNostrStore((s) => s.events)
   const profiles = useNostrStore((s) => s.profiles)
+  const blockPubkey = useNostrStore((s) => s.blockPubkey)
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
@@ -185,38 +186,58 @@ export function NotificationsPage() {
             notificationsLastSeenAt > 0 &&
             ev.created_at > notificationsLastSeenAt &&
             !readNotificationIds[ev.id]
+          const isMe = actorPubkey.toLowerCase() === pubkey.toLowerCase()
 
           return (
-            <Link
+            <div
               key={ev.id}
-              to={linkTarget}
-              onClick={() => {
-                if (isUnread) markNotificationRead(pubkey, ev.id)
-              }}
-              onAuxClick={() => {
-                if (isUnread) markNotificationRead(pubkey, ev.id)
-              }}
-              className={`flex items-start gap-3 px-4 py-3 border-b border-[#20222c] hover:bg-white/[0.03] transition ${
+              className={`flex items-start gap-2.5 px-4 py-3 border-b border-[#20222c] hover:bg-white/[0.03] transition ${
                 isUnread ? 'bg-emerald-500/[0.06] border-l-2 border-l-emerald-400' : ''
               }`}
             >
-              <Icon className={`w-4 h-4 mt-1.5 shrink-0 ${iconColor}`} />
-              <Avatar src={p?.picture} pubkey={actorPubkey} name={name} size="sm" />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-sm truncate">
-                    <span className="font-semibold text-white">{name}</span>{' '}
-                    <span className="text-[#9a9890]">{actionText}</span>
-                  </p>
-                  <span className="text-[11px] text-[#6f6d66] shrink-0">
-                    {formatRelative(ev.created_at)}
-                  </span>
+              <Link
+                to={linkTarget}
+                onClick={() => {
+                  if (isUnread) markNotificationRead(pubkey, ev.id)
+                }}
+                onAuxClick={() => {
+                  if (isUnread) markNotificationRead(pubkey, ev.id)
+                }}
+                className="flex items-start gap-3 min-w-0 flex-1"
+              >
+                <Icon className={`w-4 h-4 mt-1.5 shrink-0 ${iconColor}`} />
+                <Avatar src={p?.picture} pubkey={actorPubkey} name={name} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-sm truncate">
+                      <span className="font-semibold text-white">{name}</span>{' '}
+                      <span className="text-[#9a9890]">{actionText}</span>
+                    </p>
+                    <span className="text-[11px] text-[#6f6d66] shrink-0">
+                      {formatRelative(ev.created_at)}
+                    </span>
+                  </div>
+                  {previewText && (
+                    <p className="text-xs text-[#b5b3ab] truncate mt-0.5">{previewText}</p>
+                  )}
                 </div>
-                {previewText && (
-                  <p className="text-xs text-[#b5b3ab] truncate mt-0.5">{previewText}</p>
-                )}
-              </div>
-            </Link>
+              </Link>
+              {!isMe && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isUnread) markNotificationRead(pubkey, ev.id)
+                    void blockPubkey(actorPubkey, name)
+                  }}
+                  title={`Block & mute ${name}`}
+                  aria-label={`Block ${name}`}
+                  className="mt-0.5 shrink-0 px-2 py-0.5 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer bg-red-500/10 hover:bg-red-500/25 border-red-500/25 hover:border-red-500/50 text-red-400 hover:text-red-300"
+                >
+                  <Ban className="w-3 h-3" />
+                  <span className="hidden sm:inline">Block User</span>
+                </button>
+              )}
+            </div>
           )
         })
       )}

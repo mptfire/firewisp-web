@@ -29,6 +29,12 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
 import { sanitizePublicRelayUrl } from '../lib/sanitize'
 
+function relayHealthRow(st: string | undefined): string {
+  if (st === 'connected') return 'bg-emerald-500/10 border-emerald-500/35'
+  if (st === 'connecting') return 'bg-amber-500/10 border-amber-500/35'
+  return 'bg-red-500/10 border-red-500/30'
+}
+
 function SettingsSection({
   id,
   title,
@@ -161,6 +167,7 @@ export function SettingsPage() {
     settings.showBookmarksNav,
     settings.showLiveZaps,
     settings.showGlobalAudio,
+    settings.showWisps,
     settings.mobileDataSaving,
     settings.hoverStreamPreview,
     settings.inlineMediaPlayback,
@@ -284,6 +291,21 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.showGlobalAudio}
             onChange={(e) => settings.setShowGlobalAudio(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Show animated Fire Wisps</div>
+            <div className="text-[#8c8a82]">
+              Displays the roaming orange Fire Wisp sprite and unread notification/feed flame wisps.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showWisps}
+            onChange={(e) => settings.setShowWisps(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>
@@ -414,7 +436,8 @@ export function SettingsPage() {
             return (
               <div
                 key={r.url}
-                className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#15161c] border border-[#232530] text-xs"
+                className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-xs ${relayHealthRow(st)}`}
+                title={st === 'connected' ? 'Connected' : st === 'connecting' ? 'Connecting…' : 'Offline / unreachable'}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
@@ -613,7 +636,8 @@ export function SettingsPage() {
               return (
                 <div
                   key={url}
-                  className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-[#12131a] border border-[#20222c] text-xs"
+                  className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border text-xs ${relayHealthRow(st)}`}
+                  title={st === 'connected' ? 'Connected' : st === 'connecting' ? 'Connecting…' : 'Offline / unreachable'}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />

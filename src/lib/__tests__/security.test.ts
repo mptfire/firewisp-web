@@ -1574,10 +1574,13 @@ describe('Full code-audit regression & security hardening', () => {
     }
   })
 
-  it('defaults showLiveZaps to false for fresh users and renders Blossom, image, and YouTube links in zap announcements', async () => {
+  it('defaults showLiveZaps to false and showWisps to true for fresh users, and renders Blossom, image, and YouTube links in zap announcements', async () => {
     vi.resetModules()
     const { useSettingsStore } = await import('../store/useSettingsStore')
     expect(useSettingsStore.getState().showLiveZaps).toBe(false)
+    expect(useSettingsStore.getState().showWisps).toBe(true)
+    useSettingsStore.getState().setShowWisps(false)
+    expect(useSettingsStore.getState().showWisps).toBe(false)
 
     const { parseZapReceiptInfo } = await import('../store/useNostrStore')
     const hash = 'a'.repeat(64)

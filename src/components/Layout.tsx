@@ -61,6 +61,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
+  const showWisps = useSettingsStore((s) => s.showWisps)
   const showGlobalAudio = useSettingsStore((s) => s.showGlobalAudio)
   const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
@@ -331,7 +332,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-dvh bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
-      <RoamingFireWisp />
+      {showWisps && <RoamingFireWisp />}
       <div
         data-fw-shell=""
         className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-dvh`}
@@ -357,8 +358,10 @@ export function Layout({ children }: { children: ReactNode }) {
 
             <nav className="space-y-1">
               {navItems.map(({ to, label, icon: Icon, end, badge, badgeTone }) => {
-                const hasNotifFlame = to === '/notifications' && badge !== undefined
-                const hasFeedNew = to === '/' && badge !== undefined
+                const hasNotifFlame = showWisps && to === '/notifications' && badge !== undefined
+                const hasFeedNew = showWisps && to === '/' && badge !== undefined
+                const hasUnreadNotif = to === '/notifications' && badge !== undefined
+                const hasPendingFeed = to === '/' && badge !== undefined
                 return (
                   <NavLink
                     key={to}
@@ -373,7 +376,11 @@ export function Layout({ children }: { children: ReactNode }) {
                             ? 'fw-notif-flame bg-transparent border-transparent text-white hover:bg-white/5'
                             : isActive
                               ? 'bg-[#e8590c]/15 text-[#ff922b] border-[#e8590c]/25'
-                              : 'bg-transparent border-transparent text-[#c2bfb7] hover:bg-white/5 hover:text-white'
+                              : hasPendingFeed
+                                ? 'bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
+                                : hasUnreadNotif
+                                  ? 'bg-transparent border-transparent text-white hover:bg-white/5'
+                                  : 'bg-transparent border-transparent text-[#c2bfb7] hover:bg-white/5 hover:text-white'
                       }`
                     }
                   >
@@ -468,7 +475,16 @@ export function Layout({ children }: { children: ReactNode }) {
                 ) : (
                   <div className="max-h-40 overflow-y-auto space-y-1 pr-0.5 pt-0.5">
                     {sortedRelayEntries.map(([url, st]) => (
-                      <div key={url} className="flex items-center justify-between gap-1.5">
+                      <div
+                        key={url}
+                        className={`flex items-center justify-between gap-1.5 px-1.5 py-0.5 rounded-md ${
+                          st === 'connected'
+                            ? 'bg-emerald-500/10'
+                            : st === 'connecting'
+                              ? 'bg-amber-500/10'
+                              : 'bg-red-500/10'
+                        }`}
+                      >
                         <span className="truncate font-mono text-[10px] text-[#d4d2cb]">
                           {url.replace(/^wss?:\/\//, '')}
                         </span>
