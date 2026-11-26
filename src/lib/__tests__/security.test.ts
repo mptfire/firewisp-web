@@ -2237,4 +2237,85 @@ describe('Full code-audit regression & security hardening', () => {
       signer.destroy()
     }
   })
+
+  it('tracks and publishes per-emoji NIP-25 quick reactions safely', async () => {
+    const { normalizeReactionEmoji, useNostrStore } = await import('../store/useNostrStore')
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { nostrPool } = await import('../nostr/pool')
+
+    expect(normalizeReactionEmoji('')).toBe('+')
+    expect(normalizeReactionEmoji('+')).toBe('+')
+    expect(normalizeReactionEmoji('❤️')).toBe('+')
+    expect(normalizeReactionEmoji('-')).toBeNull()
+    expect(normalizeReactionEmoji('😂')).toBe('😂')
+    expect(normalizeReactionEmoji('🚀')).toBe('🚀')
+
+    const prevAuth = useAuthStore.getState()
+    const prevSettings = useSettingsStore.getState()
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const signer = new LocalKeySigner(generateSecretKey())
+    const published: Array<{ content: string; tags: string[][] }> = []
+
+    const targetId = 'e'.repeat(64)
+    const targetEv = {
+      id: targetId,
+      kind: 1,
+      pubkey: 'b'.repeat(64),
+      created_at: 1795700000,
+      tags: [],
+      content: 'gm',
+      sig: '0'.repeat(128),
+    }
+
+    try {
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+      useSettingsStore.setState({
+        reactionPowEnabled: false,
+        reactionPowBits: 0,
+        relays: [{ url: 'wss://relay.firewisp.de', read: true, write: true }],
+      })
+      nostrPool.publish = (async (relays, ev) => {
+        published.push({ content: ev.content, tags: ev.tags })
+        return relays.map((relay) => ({ relay, ok: true }))
+      }) as typeof nostrPool.publish
+
+      await useNostrStore.getState().toggleLike(targetEv, '🚀')
+      await useNostrStore.getState().toggleLike(targetEv, '🚀') // duplicate prevented
+      await useNostrStore.getState().toggleLike(targetEv, '😂')
+      await useNostrStore.getState().toggleLike(targetEv, '+')
+
+      expect(published.map((p) => p.content)).toEqual(['🚀', '😂', '+'])
+      expect(published[0].tags).toContainEqual(['k', '1'])
+      expect(useNostrStore.getState().reactionCounts[targetId]).toBe(3)
+      expect(useNostrStore.getState().reactionEmojiCounts[targetId]).toEqual({
+        '🚀': 1,
+        '😂': 1,
+        '+': 1,
+      })
+      expect(useNostrStore.getState().userReactions[targetId]).toEqual({
+        '🚀': true,
+        '😂': true,
+        '+': true,
+      })
+      expect(useNostrStore.getState().userLiked[targetId]).toBe(true)
+
+      useNostrStore.getState().resetUserState()
+      expect(useNostrStore.getState().userReactions).toEqual({})
+      expect(useNostrStore.getState().userLiked).toEqual({})
+    } finally {
+      nostrPool.publish = origPublish
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      useSettingsStore.setState({
+        reactionPowEnabled: prevSettings.reactionPowEnabled,
+        reactionPowBits: prevSettings.reactionPowBits,
+        relays: prevSettings.relays,
+      })
+      signer.destroy()
+    }
+  })
 })

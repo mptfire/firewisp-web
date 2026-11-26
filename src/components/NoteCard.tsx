@@ -17,6 +17,7 @@ import {
   PictureInPicture2,
   Play,
   Radio,
+  SmilePlus,
   UserMinus,
   UserPlus,
 } from 'lucide-react'
@@ -80,6 +81,17 @@ function queueParentEventFetch(eventId: string) {
 
 const LONG_NOTE_CHAR_LIMIT = 900
 const LONG_NOTE_LINE_LIMIT = 12
+
+const EMPTY_EMOJI_COUNTS: Record<string, number> = {}
+const EMPTY_USER_REACTIONS: Record<string, true> = {}
+const QUICK_BAR_EMOJIS = ['😂', '💯'] as const
+const PICKER_EMOJIS: Array<{ emoji: string; label: string }> = [
+  { emoji: '🚀', label: 'Rocket' },
+  { emoji: '🤗', label: 'Hug' },
+  { emoji: '👀', label: 'Eyes' },
+  { emoji: '🤔', label: 'Thinking' },
+  { emoji: '😱', label: 'Shocked' },
+]
 
 interface NoteCardProps {
   event: Event
@@ -680,7 +692,13 @@ export const NoteCard = memo(function NoteCard({
   )
   const replyCount = useNostrStore((s) => s.replyCounts[event.id] || 0)
   const reactionCount = useNostrStore((s) => s.reactionCounts[event.id] || 0)
+  const emojiCounts = useNostrStore(
+    (s) => s.reactionEmojiCounts[event.id] ?? EMPTY_EMOJI_COUNTS,
+  )
   const liked = useNostrStore((s) => Boolean(s.userLiked[event.id]))
+  const myReactions = useNostrStore(
+    (s) => s.userReactions[event.id] ?? EMPTY_USER_REACTIONS,
+  )
   const repostCount = useNostrStore((s) => s.repostCounts[event.id] || 0)
   const userReposted = useNostrStore((s) => (s.userRepostIds[event.id]?.length || 0) > 0)
   const zapSats = useNostrStore((s) => s.zapTotalsSats[event.id] || 0)
@@ -708,9 +726,11 @@ export const NoteCard = memo(function NoteCard({
   const [muteWordOpen, setMuteWordOpen] = useState(false)
   const [saveSetOpen, setSaveSetOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [reactPickerOpen, setReactPickerOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const reactPickerRef = useRef<HTMLDivElement>(null)
 
   const npub = useMemo(() => {
     try {
@@ -801,6 +821,24 @@ export const NoteCard = memo(function NoteCard({
       window.removeEventListener('keydown', onKey)
     }
   }, [menuOpen])
+
+  useEffect(() => {
+    if (!reactPickerOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (reactPickerRef.current && !reactPickerRef.current.contains(e.target as Node)) {
+        setReactPickerOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReactPickerOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [reactPickerOpen])
 
   // Lazily fetch quoted events & mentioned author profiles
   useEffect(() => {
@@ -1226,8 +1264,39 @@ export const NoteCard = memo(function NoteCard({
             </div>
           )}
 
+          {(() => {
+            const extraChips = Object.entries(emojiCounts)
+              .filter(([k, n]) => k !== '+' && k !== '😂' && k !== '💯' && n > 0)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 6)
+            if (extraChips.length === 0) return null
+            return (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {extraChips.map(([emoji, count]) => {
+                  const mine = Boolean(myReactions[emoji])
+                  return (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => void toggleLike(event, emoji)}
+                      title={`React with ${emoji}`}
+                      className={`px-2 py-0.5 rounded-full border text-[11px] flex items-center gap-1 transition cursor-pointer ${
+                        mine
+                          ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-white'
+                          : 'bg-[#171822] hover:bg-[#1e2030] border-[#262938] text-[#c7c4bc]'
+                      }`}
+                    >
+                      <span>{emoji}</span>
+                      <span>{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()}
+
           {/* Action bar */}
-          <div className="mt-3 flex items-center justify-between max-w-md text-[#8c8a82]">
+          <div className="mt-3 flex items-center justify-between max-w-lg text-[#8c8a82]">
             <Link
               to={`/e/${event.id}`}
               className="flex items-center gap-1.5 text-xs hover:text-[#ff8a3d] transition p-1 -ml-1 rounded-lg"
@@ -1250,16 +1319,96 @@ export const NoteCard = memo(function NoteCard({
               {repostCount > 0 && <span>{repostCount}</span>}
             </button>
 
-            <button
-              onClick={() => void toggleLike(event)}
-              className={`flex items-center gap-1.5 text-xs transition p-1 rounded-lg cursor-pointer ${
-                liked ? 'text-rose-500' : 'hover:text-rose-400'
-              }`}
-              title="Like (mines NIP-13 PoW if enabled)"
-            >
-              <Heart className={`w-4 h-4 ${liked ? 'fill-current' : ''}`} />
-              {reactionCount > 0 && <span>{reactionCount}</span>}
-            </button>
+            <div className="relative flex items-center gap-1" ref={reactPickerRef}>
+              {(() => {
+                const heartCount =
+                  emojiCounts['+'] ?? (Object.keys(emojiCounts).length === 0 ? reactionCount : 0)
+                const heartActive = liked || Boolean(myReactions['+'])
+                return (
+                  <button
+                    type="button"
+                    onClick={() => void toggleLike(event, '+')}
+                    className={`flex items-center gap-1 text-xs transition p-1 rounded-lg cursor-pointer ${
+                      heartActive ? 'text-rose-500' : 'hover:text-rose-400'
+                    }`}
+                    title="Like (mines NIP-13 PoW if enabled)"
+                  >
+                    <Heart className={`w-4 h-4 ${heartActive ? 'fill-current' : ''}`} />
+                    {heartCount > 0 && <span>{heartCount}</span>}
+                  </button>
+                )
+              })()}
+
+              {QUICK_BAR_EMOJIS.map((em) => {
+                const cnt = emojiCounts[em] || 0
+                const mine = Boolean(myReactions[em])
+                return (
+                  <button
+                    key={em}
+                    type="button"
+                    onClick={() => void toggleLike(event, em)}
+                    title={`React with ${em}`}
+                    aria-label={`React with ${em}`}
+                    className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-lg border transition cursor-pointer ${
+                      mine
+                        ? 'bg-[#f59f00]/15 border-[#f59f00]/45 text-white'
+                        : 'border-transparent opacity-70 hover:opacity-100 hover:bg-white/5 text-[#c7c4bc]'
+                    }`}
+                  >
+                    <span className="text-[13px] leading-none">{em}</span>
+                    {cnt > 0 && <span className="text-[11px]">{cnt}</span>}
+                  </button>
+                )
+              })}
+
+              <button
+                type="button"
+                onClick={() => setReactPickerOpen((o) => !o)}
+                title="More reactions"
+                aria-label="More reactions"
+                aria-expanded={reactPickerOpen}
+                className={`p-1 rounded-lg transition cursor-pointer ${
+                  reactPickerOpen
+                    ? 'text-[#f59f00] bg-white/5'
+                    : 'text-[#6f6d66] hover:text-[#d4d2cb] hover:bg-white/5'
+                }`}
+              >
+                <SmilePlus className="w-4 h-4" />
+              </button>
+
+              {reactPickerOpen && (
+                <div
+                  role="menu"
+                  aria-label="Quick emoji reactions"
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-1.5 py-1 rounded-xl bg-[#1a1c26] border border-[#2c2f40] shadow-xl flex items-center gap-1 z-30"
+                >
+                  {PICKER_EMOJIS.map(({ emoji, label }) => {
+                    const cnt = emojiCounts[emoji] || 0
+                    const mine = Boolean(myReactions[emoji])
+                    return (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => {
+                          setReactPickerOpen(false)
+                          void toggleLike(event, emoji)
+                        }}
+                        title={label}
+                        aria-label={`React with ${label}`}
+                        className={`px-1.5 py-1 rounded-lg text-sm flex items-center gap-0.5 transition cursor-pointer ${
+                          mine
+                            ? 'bg-[#e8590c]/25 ring-1 ring-[#e8590c]/60 text-white'
+                            : 'hover:bg-white/10 text-[#ece9e1]'
+                        }`}
+                      >
+                        <span className="leading-none">{emoji}</span>
+                        {cnt > 0 && <span className="text-[10px] text-[#9a9890]">{cnt}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
 
             <button
               disabled={!profile?.lud16}

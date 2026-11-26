@@ -14,7 +14,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
-import { parseNoteContent } from '../lib/nostr/content'
+import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import { isTopLevelNote } from '../lib/nostr/spamFilter'
 import { sanitizePublicHttpsUrl, sanitizePublicRelayUrl } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -22,6 +22,7 @@ import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
+import { MediaLightbox } from '../components/MediaLightbox'
 import { NoteCard } from '../components/NoteCard'
 import { ZapModal } from '../components/ZapModal'
 
@@ -77,6 +78,8 @@ export function ProfilePage() {
   const [noMoreOlder, setNoMoreOlder] = useState(false)
   const [zapOpen, setZapOpen] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
+  const [bannerFailed, setBannerFailed] = useState(false)
+  const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
   const loadGenRef = useRef(0)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -104,6 +107,10 @@ export function ProfilePage() {
   )
   const bannerUrl = sanitizePublicHttpsUrl(profile?.banner)
   const displayName = profile?.display_name || profile?.name || `${npub.slice(0, 14)}…`
+
+  useEffect(() => {
+    setBannerFailed(false)
+  }, [bannerUrl])
 
   const loadProfileData = useCallback(
     async (isRefresh: boolean) => {
@@ -147,9 +154,7 @@ export function ProfilePage() {
             { kinds: [1, 6, 20, 21, 22], authors: [hexPubkey], limit: 100 },
             5000,
           ),
-          isRefresh
-            ? nostrPool.query(queryRelays, { kinds: [0], authors: [hexPubkey], limit: 2 }, 3000)
-            : Promise.resolve([] as Event[]),
+          nostrPool.query(queryRelays, { kinds: [0], authors: [hexPubkey], limit: 3 }, 3000),
         ])
         if (loadGenRef.current !== gen) return
 
@@ -321,14 +326,29 @@ export function ProfilePage() {
       </div>
 
       {/* Banner */}
-      <div className="h-36 bg-gradient-to-r from-[#24140d] via-[#1c1622] to-[#141720] relative z-[6] overflow-hidden">
-        {bannerUrl && (
-          <img
-            src={bannerUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover"
-          />
+      <div className="aspect-[3/1] min-h-[144px] max-h-[240px] w-full bg-gradient-to-r from-[#24140d] via-[#1c1622] to-[#141720] relative z-[6] overflow-hidden">
+        {bannerUrl && !bannerFailed && (
+          <button
+            type="button"
+            onClick={() =>
+              setLightboxMedia({
+                url: bannerUrl,
+                kind: 'image',
+                alt: `${displayName} banner`,
+              })
+            }
+            className="block w-full h-full cursor-pointer"
+            title="View full banner"
+            aria-label={`View ${displayName} banner`}
+          >
+            <img
+              src={bannerUrl}
+              alt={`${displayName} banner`}
+              referrerPolicy="no-referrer"
+              onError={() => setBannerFailed(true)}
+              className="w-full h-full object-cover object-center"
+            />
+          </button>
         )}
       </div>
 
@@ -495,6 +515,8 @@ export function ProfilePage() {
           </div>
         </>
       )}
+
+      <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />
 
       {zapOpen && profile?.lud16 && (
         <ZapModal

@@ -122,7 +122,9 @@ export interface NostrState {
   // Social aggregates
   replyCounts: Record<string, number>
   reactionCounts: Record<string, number>
+  reactionEmojiCounts: Record<string, Record<string, number>>
   userLiked: Record<string, boolean>
+  userReactions: Record<string, Record<string, true>>
   repostCounts: Record<string, number>
   // targetEventId -> array of the current user's kind-6 repost event IDs (enables NIP-09 undo repost!)
   userRepostIds: Record<string, string[]>
@@ -203,7 +205,7 @@ export interface NostrState {
     replyTo?: Event
     kind?: number
   }) => Promise<Event>
-  toggleLike: (target: Event) => Promise<void>
+  toggleLike: (target: Event, emoji?: string) => Promise<void>
   toggleRepost: (target: Event) => Promise<void>
   toggleFollow: (targetPubkey: string) => Promise<void>
   toggleBookmark: (eventId: string) => Promise<void>
@@ -568,6 +570,15 @@ function clipStr(val: unknown, maxLen: number): string | undefined {
   return typeof val === 'string' && val.length > 0 ? val.slice(0, maxLen) : undefined
 }
 
+export function normalizeReactionEmoji(rawContent: string): string | null {
+  const clean = (rawContent || '').trim()
+  if (!clean || clean === '+' || clean === '❤️' || clean === '❤' || clean === '♥') {
+    return '+'
+  }
+  if (clean === '-') return null
+  return clean.slice(0, 16)
+}
+
 function parseProfileEvent(event: Event): NostrProfile | null {
   try {
     const raw = JSON.parse(event.content) as Record<string, unknown>
@@ -672,7 +683,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   replyCounts: {},
   reactionCounts: {},
+  reactionEmojiCounts: {},
   userLiked: {},
+  userReactions: {},
   repostCounts: {},
   userRepostIds: {},
   deletedEventIds: {},
@@ -825,6 +838,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       userWriteRelays: [],
       bookmarks: [],
       userLiked: {},
+      userReactions: {},
       userRepostIds: {},
       activeFeedTab: isAnyCustomFeedKey(s.activeFeedTab) ? 'foryou' : s.activeFeedTab,
       forYouFeedIds: [],
@@ -970,19 +984,37 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (event.kind === 7) {
       if (reactionSeen.has(event.id)) return
       reactionSeen.add(event.id)
+      const emoji = normalizeReactionEmoji(event.content || '')
+      if (!emoji) return
       const targetId = [...event.tags].reverse().find((t) => t[0] === 'e' && t[1])?.[1]
       if (!targetId) return
-      set((s) => ({
-        events: { ...s.events, [event.id]: event },
-        reactionCounts: {
-          ...s.reactionCounts,
-          [targetId]: (s.reactionCounts[targetId] || 0) + 1,
-        },
-        userLiked:
-          myPubkey && event.pubkey.toLowerCase() === myPubkey
-            ? { ...s.userLiked, [targetId]: true }
-            : s.userLiked,
-      }))
+      set((s) => {
+        const prevEmojiMap = s.reactionEmojiCounts[targetId] || {}
+        const isMine = Boolean(myPubkey && event.pubkey.toLowerCase() === myPubkey)
+        const prevMineMap = s.userReactions[targetId] || {}
+        return {
+          events: { ...s.events, [event.id]: event },
+          reactionCounts: {
+            ...s.reactionCounts,
+            [targetId]: (s.reactionCounts[targetId] || 0) + 1,
+          },
+          reactionEmojiCounts: {
+            ...s.reactionEmojiCounts,
+            [targetId]: {
+              ...prevEmojiMap,
+              [emoji]: (prevEmojiMap[emoji] || 0) + 1,
+            },
+          },
+          userLiked:
+            isMine && emoji === '+' ? { ...s.userLiked, [targetId]: true } : s.userLiked,
+          userReactions: isMine
+            ? {
+                ...s.userReactions,
+                [targetId]: { ...prevMineMap, [emoji]: true },
+              }
+            : s.userReactions,
+        }
+      })
       return
     }
 
@@ -2545,13 +2577,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     return signed
   },
 
-  toggleLike: async (target) => {
+  toggleLike: async (target, emoji = '+') => {
     const signer = useAuthStore.getState().signer
     if (!signer?.canSign) {
       useAuthStore.getState().openAuthModal()
       return
     }
-    if (get().userLiked[target.id]) return
+    const reactionKey = normalizeReactionEmoji(emoji) ?? '+'
+    if (get().userReactions[target.id]?.[reactionKey]) return
+    if (reactionKey === '+' && get().userLiked[target.id]) return
     const settings = useSettingsStore.getState()
 
     let unsigned: UnsignedEvent = {
@@ -2561,8 +2595,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       tags: [
         ['e', target.id],
         ['p', target.pubkey],
+        ['k', String(target.kind)],
       ],
-      content: '+',
+      content: reactionKey,
     }
 
     if (settings.reactionPowEnabled && settings.reactionPowBits > 0) {
