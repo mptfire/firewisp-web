@@ -37,6 +37,9 @@ import { MediaLightbox } from './MediaLightbox'
 import { YouTubeCard } from './YouTubeCard'
 
 const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
+const MuteWordModal = lazy(() =>
+  import('./MuteWordModal').then((m) => ({ default: m.MuteWordModal })),
+)
 
 const requestedQuotes = new Set<string>()
 const requestedParents = new Set<string>()
@@ -397,6 +400,10 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const authorProfile = useNostrStore((s) =>
     quoted ? s.profiles[quoted.pubkey] : undefined,
   )
@@ -408,7 +415,17 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   const hiddenQuoted = useMemo(() => {
     if (!quoted) return false
     return isEventDeleted(quoted) || isEventMuted(quoted)
-  }, [quoted, isEventDeleted, isEventMuted, mutedPubkeys, privateMutedPubkeys])
+  }, [
+    quoted,
+    isEventDeleted,
+    isEventMuted,
+    mutedPubkeys,
+    privateMutedPubkeys,
+    mutedHashtags,
+    privateMutedHashtags,
+    mutedWords,
+    privateMutedWords,
+  ])
 
   if (hiddenQuoted) {
     return (
@@ -506,6 +523,10 @@ const ReplyContextLine = memo(function ReplyContextLine({
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
+  const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
+  const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const fallbackPubkey = useMemo(() => {
     const pTag = event.tags.find((t) => t[0] === 'p' && t[1] && t[1] !== event.pubkey)?.[1]
     return pTag?.toLowerCase()
@@ -524,7 +545,17 @@ const ReplyContextLine = memo(function ReplyContextLine({
   const hiddenParent = useMemo(() => {
     if (!parentEvent) return false
     return isEventDeleted(parentEvent) || isEventMuted(parentEvent)
-  }, [parentEvent, isEventDeleted, isEventMuted, mutedPubkeys, privateMutedPubkeys])
+  }, [
+    parentEvent,
+    isEventDeleted,
+    isEventMuted,
+    mutedPubkeys,
+    privateMutedPubkeys,
+    mutedHashtags,
+    privateMutedHashtags,
+    mutedWords,
+    privateMutedWords,
+  ])
 
   const parsedParent = useMemo(
     () => (!hideParentPreview && parentEvent && !hiddenParent ? parseNoteContent(parentEvent) : null),
@@ -670,6 +701,7 @@ export const NoteCard = memo(function NoteCard({
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
   const [altPreview, setAltPreview] = useState<string | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
+  const [muteWordOpen, setMuteWordOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
@@ -923,7 +955,7 @@ export const NoteCard = memo(function NoteCard({
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
                 {menuOpen && (
-                  <div className="absolute right-0 mt-1 w-44 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
+                  <div className="absolute right-0 mt-1 w-48 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
                     {!isMyNote && (
                       <button
                         type="button"
@@ -967,6 +999,18 @@ export const NoteCard = memo(function NoteCard({
                       >
                         <Ban className="w-3.5 h-3.5" />
                         {isAuthorMuted ? 'Unblock user' : 'Block / Mute user'}
+                      </button>
+                    )}
+                    {!isMyNote && (
+                      <button
+                        onClick={() => {
+                          setMuteWordOpen(true)
+                          setMenuOpen(false)
+                        }}
+                        className="w-full px-3 py-2 text-left text-[#ff8a3d] hover:bg-[#e8590c]/15 hover:text-[#ffa94d] font-medium flex items-center gap-2 cursor-pointer"
+                      >
+                        <VolumeX className="w-3.5 h-3.5" />
+                        Mute word / domain…
                       </button>
                     )}
                     <button
@@ -1227,6 +1271,11 @@ export const NoteCard = memo(function NoteCard({
             eventId={event.id}
             onClose={() => setZapOpen(false)}
           />
+        </Suspense>
+      )}
+      {muteWordOpen && (
+        <Suspense fallback={null}>
+          <MuteWordModal noteContent={event.content} onClose={() => setMuteWordOpen(false)} />
         </Suspense>
       )}
     </article>

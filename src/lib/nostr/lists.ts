@@ -284,3 +284,68 @@ export function buildBud03BlossomListTags(servers: readonly string[]): {
 
   return { tags, servers: cleanServers }
 }
+
+const INVISIBLE_MUTE_CHARS_RE =
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g
+
+const CANDIDATE_HOST_RE =
+  /(?:^|[\s(<"'\u201c\u2018=])(?:https?:\/\/)?(?:www\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[/?#\s.,!?;:)\]"'\u201d\u2019]|$)/gi
+
+const FAKE_FILE_TLDS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'mp4', 'webm', 'mov',
+  'm4v', 'mp3', 'wav', 'm3u8', 'pdf', 'txt', 'json', 'js', 'ts', 'css', 'html',
+  'apk', 'zip',
+])
+
+const GENERIC_HOST_LABELS = new Set(['com', 'net', 'org', 'gov', 'edu', 'co', 'ac', 'www', 'app', 'web'])
+
+const SCAM_PHRASE_CANDIDATES = [
+  'wallet audit',
+  'ai audit',
+  'eth airdrop',
+  'free eth',
+  'claim yours',
+  'free btc',
+  'airdrop',
+]
+
+/**
+ * Extracts likely spam words and domains (both https:// and bare domains like ai.evmnest.cc)
+ * from note content for 1-tap NIP-51 word muting.
+ */
+export function extractMuteCandidates(content: string): string[] {
+  const cleaned = (content || '').replace(INVISIBLE_MUTE_CHARS_RE, '')
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string) => {
+    const val = normalizeMuteValue('word', raw)
+    if (!val || seen.has(val)) return
+    seen.add(val)
+    out.push(val)
+  }
+
+  CANDIDATE_HOST_RE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = CANDIDATE_HOST_RE.exec(cleaned)) !== null) {
+    const host = (match[1] || '').toLowerCase()
+    const labels = host.split('.')
+    if (labels.length < 2) continue
+    const tld = labels[labels.length - 1]
+    if (!/^[a-z]{2,12}$/.test(tld) || FAKE_FILE_TLDS.has(tld)) continue
+    // Second-level label first (e.g. "evmnest" from "ai.evmnest.cc") so 1 tap blocks all subdomains
+    const brandLabel = labels.length >= 2 ? labels[labels.length - 2] : ''
+    if (brandLabel.length >= 3 && !GENERIC_HOST_LABELS.has(brandLabel)) {
+      push(brandLabel)
+    }
+    push(host)
+  }
+
+  const lower = cleaned.toLowerCase()
+  for (const phrase of SCAM_PHRASE_CANDIDATES) {
+    if (lower.includes(phrase)) {
+      push(phrase)
+    }
+  }
+
+  return out.slice(0, 6)
+}

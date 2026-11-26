@@ -114,6 +114,7 @@ export interface SettingsState {
   unmutePubkey: (pubkey: string) => void
   muteHashtag: (tag: string) => void
   unmuteHashtag: (tag: string) => void
+  addMutedWord: (word: string) => void
   removeMutedWord: (word: string) => void
   mergeRemoteMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
   mergePrivateMutes: (mutes: { pubkeys?: string[]; hashtags?: string[]; words?: string[] }) => void
@@ -519,6 +520,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set((s) => ({
       mutedHashtags: s.mutedHashtags.filter((t) => t !== clean),
       privateMutedHashtags: s.privateMutedHashtags.filter((t) => t !== clean),
+    }))
+    persist(get())
+  },
+  addMutedWord: (word) => {
+    const clean = word.trim().toLowerCase()
+    if (clean.length < 2) return
+    set((s) => ({
+      mutedWords: s.mutedWords.includes(clean)
+        ? s.mutedWords
+        : [...s.mutedWords, clean],
     }))
     persist(get())
   },

@@ -42,6 +42,7 @@ export function SettingsPage() {
   const unblockPubkey = useNostrStore((s) => s.unblockPubkey)
   const muteHashtagGlobal = useNostrStore((s) => s.muteHashtagGlobal)
   const unmuteHashtagGlobal = useNostrStore((s) => s.unmuteHashtagGlobal)
+  const muteWordGlobal = useNostrStore((s) => s.muteWordGlobal)
   const unmuteWordGlobal = useNostrStore((s) => s.unmuteWordGlobal)
   const pushLocalMutesToNostr = useNostrStore((s) => s.pushLocalMutesToNostr)
   const rawMuteListEvent = useNostrStore((s) => s.rawMuteListEvent)
@@ -58,6 +59,7 @@ export function SettingsPage() {
   const [newRelay, setNewRelay] = useState('')
   const [newBlossom, setNewBlossom] = useState('')
   const [newMuteTag, setNewMuteTag] = useState('')
+  const [newMuteWord, setNewMuteWord] = useState('')
   const [mutedUsersOpen, setMutedUsersOpen] = useState(false)
   const [privateMutedUsersOpen, setPrivateMutedUsersOpen] = useState(false)
   const [mutedTagsOpen, setMutedTagsOpen] = useState(false)
@@ -886,8 +888,8 @@ export function SettingsPage() {
         </div>
         <p className="text-[11px] text-[#8c8a82]">
           {signer?.canSign
-            ? 'Global Nostr sync enabled (NIP-51 kind 10000): blocking, unblocking, and muting hashtags automatically encrypt (NIP-44) and sync across your Nostr clients while preserving all existing entries.'
-            : 'Sign in with a signing key to sync blocks & muted hashtags globally via encrypted Nostr kind 10000.'}
+            ? 'Global Nostr sync enabled (NIP-51 kind 10000): blocking users, hashtags, and words/domains automatically encrypts (NIP-44) and syncs across your Nostr clients while preserving all existing entries.'
+            : 'Sign in with a signing key to sync blocks, muted hashtags, and muted words globally via encrypted Nostr kind 10000.'}
         </p>
         {muteListSyncStatus === 'locked' && muteListHasRemoteEncrypted && (
           <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
@@ -920,6 +922,36 @@ export function SettingsPage() {
             Mute
           </button>
         </form>
+        <div className="space-y-1">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (newMuteWord.trim().length >= 2) {
+                void muteWordGlobal(newMuteWord)
+                setNewMuteWord('')
+              }
+            }}
+            className="flex gap-2"
+          >
+            <input
+              type="text"
+              value={newMuteWord}
+              onChange={(e) => setNewMuteWord(e.target.value)}
+              placeholder="Mute word or domain… (e.g. evmnest)"
+              className="flex-1 px-3 py-2 rounded-xl bg-[#15161c] border border-[#2a2d3a] text-xs focus:outline-none focus:border-[#e8590c]"
+            />
+            <button
+              type="submit"
+              disabled={muteListPublishing || newMuteWord.trim().length < 2}
+              className="px-3.5 py-2 rounded-xl bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+            >
+              Mute word
+            </button>
+          </form>
+          <p className="text-[11px] text-[#8c8a82]">
+            Hides matching posts, replies, quotes &amp; live chat across all relays (case-insensitive).
+          </p>
+        </div>
         {settings.mutedHashtags.length > 0 && (
           <div className="rounded-xl bg-[#15161c] border border-[#232530] overflow-hidden">
             <button

@@ -9,7 +9,7 @@ const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u20
 const FANCY_UNICODE_RE = /[\u{1D400}-\u{1D7FF}]/gu
 
 const SPAM_PHRASE_RE =
-  /(?:\b(?:airdrop|giveaway|claim\s+your\s+(?:free|reward|tokens?|btc|eth|sats)|free\s+(?:btc|eth|bitcoin|usdt|crypto|money)|guaranteed\s+(?:profit|returns?)|100x\s+gem|pump\s+signal|dm\s+(?:me\s+)?for\s+promo|whatsapp\s*\+?\d|casino\s+bonus|slot\s+gacor|judi\s+online|togel|betting\s+tips|double\s+your\s+(?:btc|eth|bitcoin|sats)|send\s+\d+\s*(?:btc|eth|sats)\s+get)\b|https?:\/\/(?:t\.me|wa\.me|tinyurl\.com|bit\.ly)\/)/i
+  /(?:\b(?:airdrop|giveaway|claim\s+your\s+(?:free|reward|tokens?|btc|eth|sats)|free\s+(?:btc|eth|bitcoin|usdt|crypto|money)|guaranteed\s+(?:profit|returns?)|100x\s+gem|pump\s+signal|dm\s+(?:me\s+)?for\s+promo|whatsapp\s*\+?\d|casino\s+bonus|slot\s+gacor|judi\s+online|togel|betting\s+tips|double\s+your\s+(?:btc|eth|bitcoin|sats)|send\s+\d+\s*(?:btc|eth|sats)\s+get|wallet\s+audit|ai\s+audit)\b|evmnest|https?:\/\/(?:t\.me|wa\.me|tinyurl\.com|bit\.ly)\/)/i
 
 const URL_RE = /https?:\/\/[^\s]+/gi
 

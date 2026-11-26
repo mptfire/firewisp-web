@@ -206,6 +206,11 @@ export interface NostrState {
     okCount: number
     totalRelays: number
   }>
+  muteWordGlobal: (word: string) => Promise<{
+    synced: boolean
+    okCount: number
+    totalRelays: number
+  }>
   unmuteWordGlobal: (word: string) => Promise<{
     synced: boolean
     okCount: number
@@ -805,7 +810,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         ? [...st.mutedWords, ...st.privateMutedWords]
         : st.mutedWords
     if (allWords.length > 0 && event.content) {
-      const lower = event.content.toLowerCase()
+      const lower = event.content
+        .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g, '')
+        .toLowerCase()
       if (allWords.some((w) => w.length >= 2 && lower.includes(w))) return true
     }
     return false
@@ -2539,6 +2546,37 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return { synced: true, okCount: 0, totalRelays: 0 }
     }
     set({ toastMessage: `Unmuted #${clean} locally — could not sync to Nostr` })
+    return { synced: false, okCount: 0, totalRelays: res.totalRelays }
+  },
+
+  muteWordGlobal: async (word) => {
+    const clean = normalizeMuteValue('word', word)
+    if (!clean) {
+      set({ toastMessage: 'Muted words must be at least 2 characters' })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    const signer = useAuthStore.getState().signer
+    if (!signer?.canSign) {
+      useSettingsStore.getState().addMutedWord(clean)
+      set({ toastMessage: `Muted word "${clean}" (local only)` })
+      return { synced: false, okCount: 0, totalRelays: 0 }
+    }
+    useSettingsStore.getState().addPrivateMute('word', clean)
+    const res = await enqueueMuteMutation(() =>
+      mutateNostrMuteList([{ op: 'add', type: 'word', value: clean }], get, set),
+    )
+    if (res.status === 'published') {
+      set({
+        toastMessage: `Muted word "${clean}" · Synced to Nostr (${res.okCount}/${res.totalRelays} relays)`,
+      })
+      return { synced: true, okCount: res.okCount, totalRelays: res.totalRelays }
+    }
+    if (res.status === 'unchanged') {
+      set({ toastMessage: `"${clean}" is already in your Nostr mute list` })
+      return { synced: true, okCount: 0, totalRelays: 0 }
+    }
+    useSettingsStore.getState().addMutedWord(clean)
+    set({ toastMessage: `Muted word "${clean}" locally — could not sync to Nostr` })
     return { synced: false, okCount: 0, totalRelays: res.totalRelays }
   },
 

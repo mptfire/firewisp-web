@@ -42,7 +42,11 @@ import {
   sortLiveStreams,
 } from '../nostr/nip53'
 import { extractYouTubeRefsFromText, extractYouTubeVideo } from '../nostr/youtube'
-import { buildBud03BlossomListTags, buildNip65RelayListTags } from '../nostr/lists'
+import {
+  buildBud03BlossomListTags,
+  buildNip65RelayListTags,
+  extractMuteCandidates,
+} from '../nostr/lists'
 import { mergeTrendingNotes } from '../nostr/trending'
 import { computeLiveZapsStats, parseLiveZapReceipt } from '../nostr/zapsFeed'
 import { selectDataSaverMaxLevel, selectLowestBitrateLevel } from '../mediaAudio'
@@ -1470,6 +1474,92 @@ describe('Full code-audit regression & security hardening', () => {
       expect(publishedEvents).toHaveLength(countBeforeLocked)
       // Still blocked locally so UX doesn't break
       expect(useSettingsStore.getState().mutedPubkeys).toContain(pkLocked)
+    } finally {
+      nostrPool.query = origQuery
+      nostrPool.publish = origPublish
+      useNostrStore.getState().resetUserState()
+      useSettingsStore.setState({ mutedPubkeys: [], mutedHashtags: [], mutedWords: [] })
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      signer.destroy()
+    }
+  })
+
+  it('extracts bare-domain mute candidates, flags evmnest spam, and syncs NIP-51 muted words', async () => {
+    const cands = extractMuteCandidates(
+      '💎 Wow, AI audit actually works. Claim yours here: ai.evmnest.cc/?ref=ps2svl https://example.com/pic.png',
+    )
+    expect(cands).toContain('evmnest')
+    expect(cands).toContain('ai.evmnest.cc')
+    expect(cands).toContain('ai audit')
+    expect(cands).not.toContain('pic.png')
+
+    const spam = evaluateNoteSpam(
+      {
+        id: 'c'.repeat(64),
+        pubkey: 'd'.repeat(64),
+        kind: 1,
+        tags: [],
+        content: 'Flash eth airdrop campaign. Register now: ai.evmnest.cc/?ref=tq92qo',
+      },
+      { myPubkey: 'a'.repeat(64), follows: new Set() },
+    )
+    expect(spam.isSpam).toBe(true)
+
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useNostrStore } = await import('../store/useNostrStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { nostrPool } = await import('../nostr/pool')
+
+    const prevAuth = useAuthStore.getState()
+    const origQuery = nostrPool.query.bind(nostrPool)
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const signer = new LocalKeySigner(generateSecretKey())
+    const publishedEvents: Array<Awaited<ReturnType<typeof signer.signEvent>>> = []
+
+    try {
+      // Signed-out local fallback + zero-width obfuscation check
+      useAuthStore.setState({ signer: null, pubkey: null, method: null })
+      useNostrStore.getState().resetUserState()
+      useSettingsStore.setState({ mutedPubkeys: [], mutedHashtags: [], mutedWords: [] })
+
+      const localRes = await useNostrStore.getState().muteWordGlobal('Evmnest')
+      expect(localRes.synced).toBe(false)
+      expect(useSettingsStore.getState().mutedWords).toContain('evmnest')
+      expect(
+        useNostrStore.getState().isEventMuted({
+          id: '1'.repeat(64),
+          pubkey: '2'.repeat(64),
+          created_at: 1795700000,
+          kind: 1,
+          tags: [],
+          content: 'Claim here: ai.e\u200Bvmnest.cc/?ref=abc',
+          sig: '3'.repeat(128),
+        }),
+      ).toBe(true)
+
+      // Signed-in encrypted NIP-51 kind-10000 sync
+      useSettingsStore.setState({ mutedPubkeys: [], mutedHashtags: [], mutedWords: [] })
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+      useSettingsStore.setState({
+        relays: [{ url: 'wss://relay.firewisp.de', read: true, write: true }],
+      })
+      nostrPool.query = (async () => [...publishedEvents]) as typeof nostrPool.query
+      nostrPool.publish = (async (relays, ev) => {
+        publishedEvents.push(ev as Awaited<ReturnType<typeof signer.signEvent>>)
+        return relays.map((relay) => ({ relay, ok: true }))
+      }) as typeof nostrPool.publish
+
+      const globalRes = await useNostrStore.getState().muteWordGlobal('evmnest')
+      expect(globalRes.synced).toBe(true)
+      expect(useSettingsStore.getState().privateMutedWords).toContain('evmnest')
+      const decrypted = JSON.parse(
+        await signer.nip44Decrypt(signer.pubkey, publishedEvents[0].content),
+      ) as string[][]
+      expect(decrypted).toContainEqual(['word', 'evmnest'])
     } finally {
       nostrPool.query = origQuery
       nostrPool.publish = origPublish
