@@ -216,7 +216,7 @@ interface PersistedSettings {
   mobileDataSaving: boolean
   mediaVolume: number
   mediaMuted: boolean
-  // SECURITY: nwcUri and privateMuted* are intentionally NEVER persisted to localStorage (session-only in memory).
+  // SECURITY: privateMuted* stays strictly in RAM; nwcUri is session-only unless user opts into "Remember on this device".
 }
 
 function loadInitial(): PersistedSettings & {

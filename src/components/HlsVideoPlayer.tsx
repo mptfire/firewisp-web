@@ -450,7 +450,7 @@ export function HlsVideoPlayer({
 
   // Notify global sidebar graphic equalizer whenever this player starts/stops outputting sound
   const audioLabel = useMemo(
-    () => formatAudioSourceLabel(sourceLabel, title, safeStreamUrl || streamUrl),
+    () => formatAudioSourceLabel(sourceLabel || title, undefined, safeStreamUrl || streamUrl),
     [sourceLabel, title, safeStreamUrl, streamUrl],
   )
   useEffect(() => {

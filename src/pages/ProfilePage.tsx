@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import { verifyEvent, type Event } from 'nostr-tools/pure'
@@ -24,7 +24,10 @@ import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { MediaLightbox } from '../components/MediaLightbox'
 import { NoteCard } from '../components/NoteCard'
-import { ZapModal } from '../components/ZapModal'
+
+const ZapModal = lazy(() =>
+  import('../components/ZapModal').then((m) => ({ default: m.ZapModal })),
+)
 
 type ProfileTab = 'notes' | 'replies' | 'media'
 
@@ -120,6 +123,9 @@ export function ProfilePage() {
         setRefreshing(true)
       } else {
         setLoading(true)
+        setLoadingMore(false)
+        setRefreshing(false)
+        setZapOpen(false)
         setNoMoreOlder(false)
         setTab('notes')
         setRawEvents([])
@@ -337,7 +343,7 @@ export function ProfilePage() {
                 alt: `${displayName} banner`,
               })
             }
-            className="block w-full h-full cursor-pointer"
+            className="absolute inset-0 w-full h-full cursor-pointer"
             title="View full banner"
             aria-label={`View ${displayName} banner`}
           >
@@ -519,12 +525,14 @@ export function ProfilePage() {
       <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />
 
       {zapOpen && profile?.lud16 && (
-        <ZapModal
-          recipientPubkey={hexPubkey}
-          recipientName={displayName}
-          lud16={profile.lud16}
-          onClose={() => setZapOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <ZapModal
+            recipientPubkey={hexPubkey}
+            recipientName={displayName}
+            lud16={profile.lud16}
+            onClose={() => setZapOpen(false)}
+          />
+        </Suspense>
       )}
     </div>
   )

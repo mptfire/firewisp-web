@@ -180,8 +180,12 @@ export function filterEventsForSearch(
       const hasTTag = ev.tags.some(
         (t) => t[0] === 't' && t[1]?.trim().toLowerCase().replace(/^#/, '') === cleanTag,
       )
-      const contentWithoutUrls = (ev.content || '').replace(/https?:\/\/\S+/gi, ' ').toLowerCase()
-      const hasInlineTag = contentWithoutUrls.includes(`#${cleanTag}`)
+      const contentWithoutUrls = (ev.content || '').replace(/https?:\/\/\S+/gi, ' ')
+      const escapedTag = cleanTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const hasInlineTag = new RegExp(
+        `(^|[^\\p{L}\\p{N}_])#${escapedTag}(?![\\p{L}\\p{N}_])`,
+        'iu',
+      ).test(contentWithoutUrls)
       if (!hasTTag && !hasInlineTag) continue
     } else if (lower) {
       if (!(ev.content || '').toLowerCase().includes(lower)) continue

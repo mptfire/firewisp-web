@@ -423,6 +423,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   const quoted = useNostrStore((s) => s.events[eventId])
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -442,6 +443,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
     return isEventDeleted(quoted) || isEventMuted(quoted)
   }, [
     quoted,
+    deletedByAuthor,
     isEventDeleted,
     isEventMuted,
     mutedPubkeys,
@@ -551,6 +553,7 @@ const ReplyContextLine = memo(function ReplyContextLine({
   )
   const isEventMuted = useNostrStore((s) => s.isEventMuted)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
+  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
@@ -577,6 +580,7 @@ const ReplyContextLine = memo(function ReplyContextLine({
     return isEventDeleted(parentEvent) || isEventMuted(parentEvent)
   }, [
     parentEvent,
+    deletedByAuthor,
     isEventDeleted,
     isEventMuted,
     mutedPubkeys,
@@ -780,13 +784,14 @@ export const NoteCard = memo(function NoteCard({
     )
   }, [event, parsed.segments])
 
+  const [mountSec] = useState(() => Math.floor(Date.now() / 1000))
+
   // Select only a primitive matching aTag string (null for 99.9% of notes -> zero spurious re-renders)
   const matchedAuthorLiveATag = useLiveStore((s) => {
     if (!isLiveAnnouncement) return null
     const authorPk = event.pubkey.toLowerCase()
-    const nowSec = Math.floor(Date.now() / 1000)
     for (const entry of Object.values(s.liveStreams)) {
-      if (!isLiveStreamFresh(entry, nowSec)) continue
+      if (!isLiveStreamFresh(entry, mountSec)) continue
       const matchAuthor =
         entry.activity.hostPubkey.toLowerCase() === authorPk ||
         entry.activity.streamerPubkey?.toLowerCase() === authorPk
@@ -893,7 +898,11 @@ export const NoteCard = memo(function NoteCard({
     const sel = window.getSelection()?.toString()
     if (sel && sel.length > 0) return
     const target = e.target as HTMLElement | null
-    if (target?.closest('a, button, img, video, audio, iframe, input, textarea, [role="dialog"]')) {
+    if (
+      target?.closest(
+        'a, button, img, video, audio, iframe, input, textarea, [role="dialog"], [role="menu"]',
+      )
+    ) {
       return
     }
     navigate(`/e/${event.id}`)
@@ -1033,7 +1042,11 @@ export const NoteCard = memo(function NoteCard({
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
                 {menuOpen && (
-                  <div className="absolute right-0 mt-1 w-48 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs">
+                  <div
+                    role="menu"
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-0 mt-1 w-48 rounded-xl bg-[#1a1c24] border border-[#2c2f3e] shadow-xl py-1 z-20 text-xs"
+                  >
                     {!isMyNote && (
                       <button
                         type="button"
@@ -1285,7 +1298,10 @@ export const NoteCard = memo(function NoteCard({
           )}
 
           {altPreview && (
-            <div className="mt-2 p-2.5 rounded-xl bg-[#181a22] border border-[#2c3040] text-xs text-[#d4d2cb]">
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="mt-2 p-2.5 rounded-xl bg-[#181a22] border border-[#2c3040] text-xs text-[#d4d2cb]"
+            >
               <span className="font-semibold text-[#f59f00] mr-1.5">ALT:</span>
               {altPreview}
             </div>

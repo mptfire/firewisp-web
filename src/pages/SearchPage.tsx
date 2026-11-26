@@ -230,6 +230,9 @@ export function SearchPage() {
 
   useEffect(() => {
     setQuery(initialQ)
+  }, [initialQ])
+
+  useEffect(() => {
     if (initialQ.trim()) {
       void runSearch(initialQ, true, selectedListDTag)
     } else {

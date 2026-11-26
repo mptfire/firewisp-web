@@ -281,6 +281,7 @@ export function TrendingSidebar() {
       ? selectedSetObj.items.join(',')
       : ''
   const attemptedKeyRef = useRef<string>('')
+  const attemptedModeRef = useRef<string>('')
 
   const isBusy =
     loading ||
@@ -291,10 +292,11 @@ export function TrendingSidebar() {
   useEffect(() => {
     if (isCustomSetMode) {
       if (!pubkey || (listsLoading && !selectedCustomObj) || !selectedCustomObj) return
-      const attemptKey = `${sidebarFeedMode}:${selectedCustomItemsKey}`
+      const attemptKey = `${sidebarFeedMode}\0${selectedCustomItemsKey}`
       if (attemptedKeyRef.current === attemptKey) return
-      const prevMode = attemptedKeyRef.current.split(':')[0]
+      const prevMode = attemptedModeRef.current
       attemptedKeyRef.current = attemptKey
+      attemptedModeRef.current = sidebarFeedMode
       const hasCached = (useNostrStore.getState().sidebarFeedIds[sidebarFeedMode]?.length ?? 0) > 0
       const itemsChanged = prevMode === sidebarFeedMode
       if (itemsChanged || !hasCached) {
@@ -309,6 +311,7 @@ export function TrendingSidebar() {
         : sidebarFeedMode
     if (attemptedKeyRef.current === attemptKey) return
     attemptedKeyRef.current = attemptKey
+    attemptedModeRef.current = sidebarFeedMode
     if ((useNostrStore.getState().sidebarFeedIds[sidebarFeedMode]?.length ?? 0) === 0) {
       void loadSidebarFeed(sidebarFeedMode)
     }

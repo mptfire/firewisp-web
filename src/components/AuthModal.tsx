@@ -53,12 +53,23 @@ export function AuthModal() {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     return () => {
       qrAbortRef.current?.abort()
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!open || pendingMnemonic) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, pendingMnemonic, close])
 
   useEffect(() => {
     if (!open && !pendingMnemonic) {
@@ -80,9 +91,17 @@ export function AuthModal() {
   const showOptionalPassphrase = isLikelyMnemonic(keyInput)
 
   const copyToClipboard = async (value: string, label: string) => {
-    await navigator.clipboard.writeText(value)
-    setCopiedText(label)
-    setTimeout(() => setCopiedText(null), 1800)
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedText(label)
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => {
+        copyTimerRef.current = null
+        setCopiedText(null)
+      }, 1800)
+    } catch {
+      setError('Clipboard unavailable — please copy manually')
+    }
   }
 
   const startBunkerQr = async () => {
@@ -239,6 +258,9 @@ export function AuthModal() {
       onClick={close}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sign in to Fire Wisp"
         className="w-full max-w-md rounded-2xl bg-[#15161c] border border-[#2a2d3a] p-5 shadow-2xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -248,7 +270,9 @@ export function AuthModal() {
             <h2 className="font-bold text-base">Sign in to Fire Wisp</h2>
           </div>
           <button
+            type="button"
             onClick={close}
+            aria-label="Close"
             className="p-1.5 rounded-lg text-[#9a9890] hover:text-white hover:bg-white/5 cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -472,8 +496,8 @@ export function AuthModal() {
             {saveToVault && !needsPassphrase && (
               <input
                 type="password"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
+                value={vaultPass}
+                onChange={(e) => setVaultPass(e.target.value)}
                 autoComplete="new-password"
                 spellCheck={false}
                 placeholder="Choose a vault passphrase (min 8 chars)"
@@ -484,15 +508,25 @@ export function AuthModal() {
             <button
               disabled={busy || !keyInput.trim() || (needsPassphrase && !passphrase)}
               onClick={async () => {
-                setBusy(true)
                 setError(null)
+                if (saveToVault && !needsPassphrase && vaultPass.length < 8) {
+                  setError('Vault passphrase must be at least 8 characters')
+                  return
+                }
+                setBusy(true)
                 try {
                   await loginWithKeyInput(keyInput, passphrase)
-                  if (saveToVault && passphrase.length >= 8 && useAuthStore.getState().signer?.exportSecretKey) {
-                    saveEncryptedVault(passphrase)
+                  const vaultSecret = needsPassphrase ? passphrase : vaultPass
+                  if (
+                    saveToVault &&
+                    vaultSecret.length >= 8 &&
+                    useAuthStore.getState().signer?.exportSecretKey
+                  ) {
+                    saveEncryptedVault(vaultSecret)
                   }
                   setKeyInput('')
                   setPassphrase('')
+                  setVaultPass('')
                 } catch (err) {
                   setError(err instanceof Error ? err.message : String(err))
                 } finally {

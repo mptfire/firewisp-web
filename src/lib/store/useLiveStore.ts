@@ -470,16 +470,18 @@ export const useLiveStore = create<LiveState>((set, get) => ({
           const pk = ev.pubkey.toLowerCase()
           const cur = get().liveStreams[aTag]
           if (cur) {
-            if (!cur.chatters.includes(pk)) {
+            if (!cur.chatters.includes(pk) || ev.created_at > cur.lastChatAt) {
               set((s) => {
                 const entry = s.liveStreams[aTag]
-                if (!entry || entry.chatters.includes(pk)) return s
+                if (!entry) return s
+                const hasChatter = entry.chatters.includes(pk)
+                if (hasChatter && ev.created_at <= entry.lastChatAt) return s
                 return {
                   liveStreams: {
                     ...s.liveStreams,
                     [aTag]: {
                       ...entry,
-                      chatters: [...entry.chatters, pk],
+                      chatters: hasChatter ? entry.chatters : [...entry.chatters, pk].slice(-200),
                       lastChatAt: Math.max(entry.lastChatAt, ev.created_at),
                     },
                   },
@@ -643,11 +645,15 @@ export const useLiveStore = create<LiveState>((set, get) => ({
     return () => {
       active = false
       for (const c of closers) c.close()
-      set({
-        activeATag: null,
-        activeActivity: null,
-        loadingStream: false,
-      })
+      set((s) =>
+        s.activeATag === aTag
+          ? {
+              activeATag: null,
+              activeActivity: null,
+              loadingStream: false,
+            }
+          : s,
+      )
     }
   },
 

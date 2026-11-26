@@ -16,10 +16,10 @@ interface VideoAudioGraph {
   freqData: Uint8Array<ArrayBuffer>
 }
 
-const graphByVideo = new WeakMap<HTMLVideoElement, VideoAudioGraph>()
-const failedVideos = new WeakSet<HTMLVideoElement>()
-const activeSoundVideos = new Set<HTMLVideoElement>()
-const soundSourceLabels = new Map<HTMLVideoElement, string>()
+const graphByVideo = new WeakMap<HTMLMediaElement, VideoAudioGraph>()
+const failedVideos = new WeakSet<HTMLMediaElement>()
+const activeSoundVideos = new Set<HTMLMediaElement>()
+const soundSourceLabels = new Map<HTMLMediaElement, string>()
 const audioActivityListeners = new Set<() => void>()
 
 // Single shared AudioContext across all Fire Wisp players (avoids Chrome's 6-context cap
@@ -96,7 +96,7 @@ export function formatAudioSourceLabel(
   if (p && s) {
     const pl = p.toLowerCase()
     const sl = s.toLowerCase()
-    out = pl === sl || sl.startsWith(pl) ? s : `${p} — ${s}`
+    out = pl === sl || pl.includes(sl) ? p : sl.includes(pl) ? s : `${p} — ${s}`
   } else {
     out = p || s
   }
@@ -112,7 +112,7 @@ export function formatAudioSourceLabel(
 }
 
 export function reportVideoSoundActive(
-  video: HTMLVideoElement | null,
+  video: HTMLMediaElement | null,
   active: boolean,
   sourceLabel?: string,
 ): void {
@@ -166,7 +166,7 @@ export function isWebAudioAvailable(): boolean {
   return Boolean(getAudioContextCtor())
 }
 
-export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph | null {
+export function ensureVideoAudioGraph(video: HTMLMediaElement): VideoAudioGraph | null {
   const existing = graphByVideo.get(video)
   if (existing) {
     if (existing.ctx.state === 'suspended') {
@@ -208,7 +208,7 @@ export function ensureVideoAudioGraph(video: HTMLVideoElement): VideoAudioGraph 
   }
 }
 
-export function resumeVideoAudioGraph(video: HTMLVideoElement): void {
+export function resumeVideoAudioGraph(video: HTMLMediaElement): void {
   unlockSharedAudioContext()
   const existing = graphByVideo.get(video)
   if (existing && existing.ctx.state === 'suspended') {
@@ -217,11 +217,11 @@ export function resumeVideoAudioGraph(video: HTMLVideoElement): void {
 }
 
 /**
- * Applies volume (0..2, where >1 is loudness boost) and mute state to a <video> element.
- * Uses Web Audio GainNode when `allowWebAudio` is true and boost or an existing graph is active.
+ * Applies volume (0..2, where >1 is loudness boost) and mute state to a <video>/<audio> element.
+ * Always updates any already-attached Web Audio GainNode so media is never left silenced at gain=0.
  */
 export function applyVideoAudioLevel(
-  video: HTMLVideoElement,
+  video: HTMLMediaElement,
   volume0to2: number,
   muted: boolean,
   allowWebAudio: boolean,
@@ -240,7 +240,7 @@ export function applyVideoAudioLevel(
 
   video.muted = false
 
-  const needsGraph = allowWebAudio && (clamped > 1 || wantAnalyser || Boolean(existing))
+  const needsGraph = Boolean(existing) || (allowWebAudio && (clamped > 1 || wantAnalyser))
   if (needsGraph) {
     const graph = ensureVideoAudioGraph(video)
     if (graph) {
@@ -258,11 +258,11 @@ export function applyVideoAudioLevel(
 }
 
 /**
- * Fills `outBands` with normalized 0..1 logarithmic frequency spectrum bands for a specific `<video>`.
+ * Fills `outBands` with normalized 0..1 logarithmic frequency spectrum bands for a specific media element.
  * Returns `true` when real Web Audio FFT spectrum data was written, or `false` if unavailable/suspended.
  */
 export function readVideoFrequencyBands(
-  video: HTMLVideoElement,
+  video: HTMLMediaElement,
   outBands: number[],
 ): boolean {
   const graph = graphByVideo.get(video)
@@ -301,7 +301,7 @@ export function readVideoFrequencyBands(
  * Uses logarithmic dB-scaled FFT bins (-85..-15 dB) so normal speech/stream audio registers cleanly
  * instead of quantizing to zero in 8-bit linear time-domain sampling.
  */
-export function readVideoVuLevel(video: HTMLVideoElement): number {
+export function readVideoVuLevel(video: HTMLMediaElement): number {
   const graph = graphByVideo.get(video)
   if (!graph || video.paused || video.muted) return 0
   if (graph.ctx.state === 'suspended') {
@@ -323,13 +323,13 @@ export function readVideoVuLevel(video: HTMLVideoElement): number {
 }
 
 /**
- * Reads normalized 0..1 logarithmic frequency spectrum bands from whichever video is currently outputting sound.
+ * Reads normalized 0..1 logarithmic frequency spectrum bands from whichever media element is currently outputting sound.
  * Reuses pre-allocated typed arrays to keep 30fps equalizer rendering allocation-light.
  */
 export function readActiveFrequencyBands(
   outBands: number[],
 ): { playing: boolean; hasSpectrum: boolean } {
-  let activeVideo: HTMLVideoElement | null = null
+  let activeVideo: HTMLMediaElement | null = null
 
   for (const v of activeSoundVideos) {
     if (v.paused || v.muted) continue

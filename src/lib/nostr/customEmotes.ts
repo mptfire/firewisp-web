@@ -68,17 +68,13 @@ export function getBuiltinEmoteByKey(key: string): CustomReactionEmote | undefin
 export function extractNip30EmojiUrl(tags: string[][], emojiKey: string): string | null {
   const shortcode = extractShortcode(emojiKey)
   if (!shortcode || !Array.isArray(tags)) return null
-  const emojiTags = tags.filter((t) => t[0] === 'emoji' && t[2])
-  for (const tag of emojiTags) {
+  for (const tag of tags) {
+    if (tag[0] !== 'emoji' || !tag[2]) continue
     const tagCode = (tag[1] || '').trim().replace(/^:+|:+$/g, '').toLowerCase()
     if (tagCode === shortcode) {
       const safe = sanitizePublicHttpsUrl(tag[2])
       if (safe) return safe
     }
-  }
-  if (emojiTags.length === 1) {
-    const safe = sanitizePublicHttpsUrl(emojiTags[0][2])
-    if (safe) return safe
   }
   return null
 }

@@ -2463,15 +2463,16 @@ describe('Full code-audit regression & security hardening', () => {
           ':emoji.20:',
         ),
       ).toBe('https://cdn.example.org/e20.png')
+      // Reject unrelated shortcodes and insecure HTTP URLs
       expect(
         extractNip30EmojiUrl(
           [['emoji', 'legacy_tag', 'https://cdn.example.org/chip.png']],
           ':chip:',
         ),
-      ).toBe('https://cdn.example.org/chip.png')
+      ).toBeNull()
       expect(
         extractNip30EmojiUrl(
-          [['emoji', 'legacy_tag', 'http://cdn.example.org/insecure.png']],
+          [['emoji', 'chip', 'http://cdn.example.org/insecure.png']],
           ':chip:',
         ),
       ).toBeNull()

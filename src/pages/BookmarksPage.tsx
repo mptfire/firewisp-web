@@ -27,20 +27,31 @@ export function BookmarksPage() {
 
   useEffect(() => {
     let active = true
+    const currentEvents = useNostrStore.getState().events
     const missing = bookmarks
-      .filter((id) => !events[id] && !queriedIdsRef.current.has(id))
+      .filter((id) => !currentEvents[id] && !queriedIdsRef.current.has(id))
       .slice(0, 60)
     if (missing.length === 0) return
     for (const id of missing) queriedIdsRef.current.add(id)
-    void nostrPool.query(readRelays, { ids: missing }, 4000).then((evs) => {
-      if (!active) return
-      for (const e of evs) ingestEvent(e)
-      if (evs.length > 0) void fetchProfiles(evs.map((e) => e.pubkey))
-    })
+    void nostrPool
+      .query(readRelays, { ids: missing }, 4000)
+      .then((evs) => {
+        if (!active) {
+          for (const id of missing) queriedIdsRef.current.delete(id)
+          return
+        }
+        for (const e of evs) ingestEvent(e)
+        if (evs.length > 0) void fetchProfiles(evs.map((e) => e.pubkey))
+      })
+      .catch(() => {
+        if (!active) {
+          for (const id of missing) queriedIdsRef.current.delete(id)
+        }
+      })
     return () => {
       active = false
     }
-  }, [bookmarks, readRelays, events, ingestEvent, fetchProfiles])
+  }, [bookmarks, readRelays, ingestEvent, fetchProfiles])
 
   const visibleBookmarkEvents = useMemo(() => {
     return bookmarks

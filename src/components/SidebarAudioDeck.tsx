@@ -141,6 +141,7 @@ export function SidebarAudioDeck() {
           {activeTitle ? (
             <span className="fw-audio-marquee min-w-0 flex-1 overflow-hidden" title={activeTitle}>
               <span
+                key={activeTitle}
                 className="fw-audio-marquee-track text-[10px] font-semibold tracking-wide text-[#f4f1ea]"
                 style={{
                   animationDuration: `${Math.max(12, Math.min(26, Math.round(activeTitle.length * 0.35 + 8)))}s`,

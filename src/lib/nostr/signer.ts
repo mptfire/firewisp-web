@@ -223,11 +223,18 @@ export class Nip46BunkerSigner implements FireWispSigner {
     const clientSk = generateSecretKey()
     const pool = new SimplePool()
     const bunker = BunkerSigner.fromBunker(clientSk, bp, { pool })
-    await bunker.connect()
-    const pubkey = await bunker.getPublicKey()
-    return {
-      signer: new Nip46BunkerSigner(pubkey, bunker, clientSk, pool),
-      bunkerUri: bunkerUri.trim(),
+    try {
+      await bunker.connect()
+      const pubkey = await bunker.getPublicKey()
+      return {
+        signer: new Nip46BunkerSigner(pubkey, bunker, clientSk, pool),
+        bunkerUri: bunkerUri.trim(),
+      }
+    } catch (err) {
+      clientSk.fill(0)
+      await bunker.close().catch(() => {})
+      pool.destroy()
+      throw err
     }
   }
 
@@ -252,22 +259,32 @@ export class Nip46BunkerSigner implements FireWispSigner {
     let cancelled = false
 
     const cancel = () => {
+      if (cancelled) return
       cancelled = true
       clientSk.fill(0)
       pool.close(relays)
     }
 
     const waitForConnection = async (signal?: AbortSignal): Promise<Nip46BunkerSigner> => {
+      if (signal?.aborted) {
+        cancel()
+        throw new DOMException('Cancelled', 'AbortError')
+      }
       if (signal) {
         signal.addEventListener('abort', cancel, { once: true })
       }
-      const bunker = await BunkerSigner.fromURI(clientSk, uri, { pool })
-      if (cancelled) {
-        await bunker.close().catch(() => {})
-        throw new DOMException('Cancelled', 'AbortError')
+      try {
+        const bunker = await BunkerSigner.fromURI(clientSk, uri, { pool })
+        if (cancelled) {
+          await bunker.close().catch(() => {})
+          throw new DOMException('Cancelled', 'AbortError')
+        }
+        const pubkey = await bunker.getPublicKey()
+        return new Nip46BunkerSigner(pubkey, bunker, clientSk, pool)
+      } catch (err) {
+        cancel()
+        throw err
       }
-      const pubkey = await bunker.getPublicKey()
-      return new Nip46BunkerSigner(pubkey, bunker, clientSk, pool)
     }
 
     return { uri, waitForConnection, cancel }

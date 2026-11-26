@@ -190,8 +190,12 @@ export async function payInvoiceWithNwc(nwcUri: string, invoice: string): Promis
       secretBytes,
     )
 
+    let cleanupSubs = () => {}
     const responsePromise = new Promise<string>((resolve, reject) => {
+      let settled = false
       const timeout = setTimeout(() => {
+        if (settled) return
+        settled = true
         sub.close()
         reject(new Error('NWC wallet payment timed out (25s)'))
       }, 25000)
@@ -207,9 +211,10 @@ export async function payInvoiceWithNwc(nwcUri: string, invoice: string): Promis
         },
         {
           onevent: async (ev) => {
-            if (!verifyEvent(ev) || ev.pubkey.toLowerCase() !== parsed.walletPubkey) {
+            if (settled || !verifyEvent(ev) || ev.pubkey.toLowerCase() !== parsed.walletPubkey) {
               return
             }
+            settled = true
             clearTimeout(timeout)
             sub.close()
             try {
@@ -229,10 +234,22 @@ export async function payInvoiceWithNwc(nwcUri: string, invoice: string): Promis
           },
         },
       )
-    })
 
-    await Promise.any(pool.publish([parsed.relay], reqEvent))
-    return await responsePromise
+      cleanupSubs = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        sub.close()
+      }
+    })
+    responsePromise.catch(() => {})
+
+    try {
+      await Promise.any(pool.publish([parsed.relay], reqEvent))
+      return await responsePromise
+    } finally {
+      cleanupSubs()
+    }
   } finally {
     secretBytes.fill(0)
     pool.close([parsed.relay])

@@ -82,6 +82,9 @@ export function minePowAsync(
   targetDifficulty: number,
   signal?: AbortSignal,
 ): Promise<{ event: UnsignedEvent; id: string; difficulty: number }> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException('PoW mining cancelled', 'AbortError'))
+  }
   if (targetDifficulty <= 0) {
     const id = getEventHash(event)
     return Promise.resolve({ event, id, difficulty: countLeadingZeroBits(id) })

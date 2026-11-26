@@ -22,6 +22,7 @@ import {
   type MuteListMutation,
 } from '../nostr/lists'
 import { evaluateNoteSpam, foldConfusables, isTopLevelNote } from '../nostr/spamFilter'
+import { parseBolt11AmountSats } from '../nostr/nip57'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
@@ -498,7 +499,7 @@ async function mutateNostrMuteList(
     })
 
     if (!changed) {
-      if (baseEvent) {
+      if (baseEvent && useAuthStore.getState().pubkey?.toLowerCase() === pubkey) {
         set({
           rawMuteListEvent: baseEvent,
           muteListSyncStatus: 'synced',
@@ -550,6 +551,10 @@ async function mutateNostrMuteList(
     const okCount = results.filter((r) => r.ok).length
     if (okCount === 0) {
       return { status: 'relay-failed', okCount: 0, totalRelays: targets.length }
+    }
+
+    if (useAuthStore.getState().pubkey?.toLowerCase() !== pubkey) {
+      return { status: 'published', okCount, totalRelays: targets.length }
     }
 
     decryptedMuteListCache = {
@@ -604,22 +609,7 @@ function parseProfileEvent(event: Event): NostrProfile | null {
 }
 
 export function parseBolt11Sats(bolt11: string): number {
-  const m = bolt11.toLowerCase().match(/^ln(?:bc|tb|bcrt)(\d+)([munp])/)
-  if (!m) return 0
-  const num = Number(m[1])
-  if (!Number.isFinite(num)) return 0
-  switch (m[2]) {
-    case 'm':
-      return Math.round(num * 100_000)
-    case 'u':
-      return Math.round(num * 100)
-    case 'n':
-      return Math.round(num * 0.1)
-    case 'p':
-      return Math.round(num * 0.0001)
-    default:
-      return 0
-  }
+  return parseBolt11AmountSats(bolt11) ?? 0
 }
 
 export function parseZapReceiptInfo(ev: Event): {
@@ -629,7 +619,7 @@ export function parseZapReceiptInfo(ev: Event): {
   tags?: string[][]
 } {
   const bolt11 = ev.tags.find((t) => t[0] === 'bolt11' && t[1])?.[1]
-  const sats = bolt11 ? parseBolt11Sats(bolt11) : 0
+  const rawSats = bolt11 ? parseBolt11Sats(bolt11) : 0
   const desc = ev.tags.find((t) => t[0] === 'description' && t[1])?.[1]
   if (desc) {
     try {
@@ -641,9 +631,23 @@ export function parseZapReceiptInfo(ev: Event): {
                 Array.isArray(t) && t.length > 0 && t.every((item) => typeof item === 'string'),
             )
           : undefined
+        let verifiedSats = rawSats
+        if (cleanTags) {
+          for (const t of cleanTags) {
+            if (t[0] === 'amount' && t[1]) {
+              const msats = Number(t[1])
+              if (Number.isFinite(msats) && msats > 0) {
+                const reqSats = Math.floor(msats / 1000)
+                if (rawSats > 0 && Math.abs(reqSats - rawSats) > 1) {
+                  verifiedSats = 0
+                }
+              }
+            }
+          }
+        }
         return {
           senderPubkey: parsed.pubkey.toLowerCase(),
-          sats,
+          sats: verifiedSats,
           comment:
             typeof parsed.content === 'string' && parsed.content.trim()
               ? parsed.content.trim()
@@ -655,7 +659,7 @@ export function parseZapReceiptInfo(ev: Event): {
       // fallback to receipt pubkey
     }
   }
-  return { senderPubkey: ev.pubkey.toLowerCase(), sats }
+  return { senderPubkey: ev.pubkey.toLowerCase(), sats: rawSats }
 }
 
 function insertSortedUnique(ids: string[], ev: Event, eventsMap: Record<string, Event>): string[] {
@@ -820,8 +824,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
   resetUserState: () => {
     seenDmWraps.clear()
+    requestedProfilesAt.clear()
+    replySeen.clear()
+    reactionSeen.clear()
+    repostSeen.clear()
+    zapSeen.clear()
+    if (profileSaveTimer) {
+      clearTimeout(profileSaveTimer)
+      profileSaveTimer = null
+    }
     decryptedMuteListCache = null
-    useSettingsStore.getState().clearPrivateSessionMutes()
+    const settings = useSettingsStore.getState()
+    settings.clearPrivateSessionMutes()
+    if (isAnyCustomFeedKey(settings.sidebarFeedMode)) {
+      settings.setSidebarFeedMode('trending')
+    }
     if (typeof localStorage !== 'undefined') {
       try {
         localStorage.removeItem(PROFILES_CACHE_KEY)
@@ -845,6 +862,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       userLiked: {},
       userReactions: {},
       userRepostIds: {},
+      loadingFeed: false,
+      loadingMore: false,
+      loadingExtendedGraph: false,
+      powBusyMessage: null,
       activeFeedTab: isAnyCustomFeedKey(s.activeFeedTab) ? 'foryou' : s.activeFeedTab,
       forYouFeedIds: [],
       forYouSuppIds: {},
@@ -1015,15 +1036,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
               [emoji]: (prevEmojiMap[emoji] || 0) + 1,
             },
           },
-          reactionEmojiUrls: nip30Url
-            ? {
-                ...s.reactionEmojiUrls,
-                [targetId]: {
-                  ...prevUrlMap,
-                  [emoji]: nip30Url,
-                },
-              }
-            : s.reactionEmojiUrls,
+          reactionEmojiUrls:
+            nip30Url && !prevUrlMap[emoji]
+              ? {
+                  ...s.reactionEmojiUrls,
+                  [targetId]: {
+                    ...prevUrlMap,
+                    [emoji]: nip30Url,
+                  },
+                }
+              : s.reactionEmojiUrls,
           userLiked:
             isMine && emoji === '+' ? { ...s.userLiked, [targetId]: true } : s.userLiked,
           userReactions: isMine
@@ -1161,6 +1183,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   loadUserGraph: async (pubkey) => {
+    const expectedPk = pubkey.toLowerCase()
+    const isSameAccount = () => useAuthStore.getState().pubkey?.toLowerCase() === expectedPk
     const relays = useSettingsStore.getState().getReadRelays()
     try {
       const [contactEvents, bookmarkEvents, relayListEvents, interestEvents, muteEvents, blossomEvents] = await Promise.all([
@@ -1171,6 +1195,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         nostrPool.query(relays, { kinds: [10000], authors: [pubkey], limit: 2 }, 3500),
         nostrPool.query(relays, { kinds: [10063], authors: [pubkey], limit: 3 }, 3500),
       ])
+
+      if (!isSameAccount()) return
 
       // Sync BUD-03 kind-10063 Blossom media server list (user's published servers prioritized first)
       if (blossomEvents.length > 0) {
@@ -1198,6 +1224,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           if (!marker || marker === 'write') writeList.push(clean)
         }
         nip65Read = [...new Set(readList)].slice(0, 12)
+        if (!isSameAccount()) return
         set({
           userReadRelays: nip65Read,
           userWriteRelays: [...new Set(writeList)].slice(0, 12),
@@ -1214,6 +1241,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             { kinds: [10000], authors: [pubkey], limit: 2 },
             3500,
           )
+          if (!isSameAccount()) return
           if (extraMutes.length > 0) {
             allMuteEvents = [...muteEvents, ...extraMutes]
           }
@@ -1226,6 +1254,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       // Public tags go to persisted settings; decrypted private tags stay strictly in RAM!
       if (allMuteEvents.length > 0) {
         const latestMute = [...allMuteEvents].sort((a, b) => b.created_at - a.created_at)[0]
+        if (!isSameAccount()) return
         set({ rawMuteListEvent: latestMute })
         const pubItems = extractMuteItemsFromTags(latestMute.tags)
         if (pubItems.pubkeys.length > 0 || pubItems.hashtags.length > 0 || pubItems.words.length > 0) {
@@ -1236,6 +1265,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           set({ muteListHasRemoteEncrypted: true })
           const signer = useAuthStore.getState().signer
           const dec = await decryptMuteListContent(signer, pubkey, latestMute.content)
+          if (!isSameAccount()) return
           if (dec) {
             decryptedMuteListCache = {
               eventId: latestMute.id,
@@ -1255,9 +1285,19 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         set({ muteListHasRemoteEncrypted: false, muteListSyncStatus: 'empty' })
       }
 
+      if (!isSameAccount()) return
+
       if (interestEvents.length > 0) {
-        const tagSet = new Set<string>()
+        // Keep only the latest replaceable event per (kind, dTag)
+        const latestInterest = new Map<string, Event>()
         for (const ev of interestEvents) {
+          const dTag = ev.kind === 30015 ? ev.tags.find((t) => t[0] === 'd')?.[1] || '' : ''
+          const key = `${ev.kind}:${dTag}`
+          const prev = latestInterest.get(key)
+          if (!prev || ev.created_at > prev.created_at) latestInterest.set(key, ev)
+        }
+        const tagSet = new Set<string>()
+        for (const ev of latestInterest.values()) {
           for (const t of ev.tags) {
             if (t[0] === 't' && t[1]) {
               const clean = t[1].trim().toLowerCase().replace(/^#/, '')
@@ -1292,15 +1332,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         const merged = [...new Set([...remoteIds, ...get().bookmarks])]
         set({ bookmarks: merged, rawBookmarksEvent: latestBm })
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(merged))
+          try {
+            localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(merged))
+          } catch {
+            // ignore quota errors
+          }
         }
       }
     } finally {
-      set({ followsLoaded: true })
+      if (isSameAccount()) set({ followsLoaded: true })
     }
   },
 
   syncMuteList: async (pubkey) => {
+    const expectedPk = pubkey.toLowerCase()
+    const isSameAccount = () => useAuthStore.getState().pubkey?.toLowerCase() === expectedPk
     set({ muteListSyncStatus: 'syncing' })
     const relays = [
       ...new Set([
@@ -1315,6 +1361,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         { kinds: [KIND_MUTE_LIST], authors: [pubkey], limit: 4 },
         4500,
       )
+      if (!isSameAccount()) {
+        return { publicCount: 0, privateCount: 0, status: 'empty' }
+      }
       if (muteEvents.length === 0) {
         set({ muteListSyncStatus: 'empty', muteListHasRemoteEncrypted: false })
         return { publicCount: 0, privateCount: 0, status: 'empty' }
@@ -1334,6 +1383,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       set({ muteListHasRemoteEncrypted: true })
       const signer = useAuthStore.getState().signer
       const dec = await decryptMuteListContent(signer, pubkey, latestMute.content)
+      if (!isSameAccount()) {
+        return { publicCount: pubItems.pubkeys.length, privateCount: 0, status: 'locked' }
+      }
       if (!dec) {
         set({ muteListSyncStatus: 'locked' })
         return { publicCount: pubItems.pubkeys.length, privateCount: 0, status: 'locked' }
@@ -1350,7 +1402,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         status: 'synced',
       }
     } catch {
-      set({ muteListSyncStatus: 'locked' })
+      if (isSameAccount()) set({ muteListSyncStatus: 'locked' })
       return { publicCount: 0, privateCount: 0, status: 'locked' }
     }
   },
@@ -1360,6 +1412,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (existing.length > 0 || get().loadingExtendedGraph) return existing
     const follows = get().follows
     if (follows.length === 0) return []
+    const startPk = useAuthStore.getState().pubkey?.toLowerCase() || ''
     set({ loadingExtendedGraph: true })
     try {
       const relays = [
@@ -1372,6 +1425,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         { kinds: [3], authors: sample, limit: sample.length * 2 },
         4500,
       )
+      if ((useAuthStore.getState().pubkey?.toLowerCase() || '') !== startPk) {
+        return []
+      }
       const latestByAuthor = new Map<string, Event>()
       for (const ev of contactLists) {
         const prev = latestByAuthor.get(ev.pubkey)
@@ -2527,9 +2583,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       } else {
         tags.push(['e', replyTo.id, FIREWISP_RELAY, 'root'])
       }
-      const pSet = new Set<string>([replyTo.pubkey])
+      const pSet = new Set<string>([replyTo.pubkey.toLowerCase()])
       for (const pt of replyTo.tags) {
-        if (pt[0] === 'p' && pt[1]) pSet.add(pt[1])
+        if (pt[0] === 'p' && pt[1] && /^[0-9a-f]{64}$/i.test(pt[1])) {
+          pSet.add(pt[1].toLowerCase())
+          if (pSet.size >= 10) break
+        }
       }
       for (const p of pSet) tags.push(['p', p])
     }
@@ -2742,7 +2801,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
       const ev = await signer.signEvent({
         kind: 3,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: computeNextReplaceableCreatedAt(baseEvent),
         tags: nextTags,
         content: baseEvent?.content || '',
       })
@@ -2767,7 +2826,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       : [eventId, ...current]
     set({ bookmarks: next })
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next))
+      try {
+        localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(next))
+      } catch {
+        // ignore quota errors
+      }
     }
     const signer = useAuthStore.getState().signer
     if (signer?.canSign) {
@@ -2798,13 +2861,17 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
         const ev = await signer.signEvent({
           kind: 10003,
-          created_at: Math.floor(Date.now() / 1000),
+          created_at: computeNextReplaceableCreatedAt(baseEvent),
           tags: nextTags,
           content: baseEvent?.content || '',
         })
         set({ bookmarks: mergedEIds, rawBookmarksEvent: ev })
         if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(mergedEIds))
+          try {
+            localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(mergedEIds))
+          } catch {
+            // ignore quota errors
+          }
         }
         const writeRelays = [
           ...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays]),
@@ -3055,7 +3122,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
     const signed = await signer.signEvent({
       kind: KIND_RELAY_LIST,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: computeNextReplaceableCreatedAt(null),
       tags,
       content: '',
     })
@@ -3092,7 +3159,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
     const signed = await signer.signEvent({
       kind: KIND_BLOSSOM_SERVER_LIST,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: computeNextReplaceableCreatedAt(null),
       tags,
       content: '',
     })
@@ -3119,11 +3186,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (!signer?.canEncrypt) {
       throw new Error('Your sign-in method does not support NIP-44 encrypted DMs')
     }
+    const cleanText = plaintext.trim()
+    if (!cleanText) {
+      throw new Error('Message cannot be empty')
+    }
     const { recipientWrap, selfWrap, dm } = await createGiftWrappedDm(
       signer,
       recipientPubkey,
-      plaintext.trim(),
+      cleanText,
     )
+    seenDmWraps.add(selfWrap.id)
     const writeRelays = [...new Set([...useSettingsStore.getState().getWriteRelays(), ...get().userWriteRelays])]
     // Resolve recipient's NIP-17 kind-10050 DM inbox relays so encrypted wraps route privately & reliably
     let recipientRelays = writeRelays
@@ -3148,9 +3220,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       nostrPool.publish(recipientRelays, recipientWrap),
       nostrPool.publish(writeRelays, selfWrap),
     ])
-    set((s) => ({
-      dms: [...s.dms, dm].sort((a, b) => a.createdAt - b.createdAt),
-    }))
+    set((s) => {
+      if (s.dms.some((existing) => existing.id === dm.id)) return s
+      return {
+        dms: [...s.dms, dm].sort((a, b) => a.createdAt - b.createdAt),
+      }
+    })
     return dm
   },
 }))

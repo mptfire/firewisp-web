@@ -162,7 +162,7 @@ export function NotificationsPage() {
           const actorPubkey = zapInfo ? zapInfo.senderPubkey : ev.pubkey
           const p = profiles[actorPubkey]
           const name = p?.display_name || p?.name || `${actorPubkey.slice(0, 10)}…`
-          const targetId = ev.tags.find((t) => t[0] === 'e' && t[1])?.[1]
+          const targetId = [...ev.tags].reverse().find((t) => t[0] === 'e' && t[1])?.[1]
           const linkTarget =
             ev.kind === 1 || ev.kind === 1111
               ? `/e/${ev.id}`

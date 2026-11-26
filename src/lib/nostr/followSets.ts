@@ -126,7 +126,7 @@ export function parseFollowSetEvent(
   }
 
   const hasEncryptedContent = Boolean(event.content && event.content.trim())
-  const isLocked = hasEncryptedContent && decryptedPrivateTags === null
+  const isLocked = hasEncryptedContent && decryptedPrivateTags == null
   const isPrivate = hasEncryptedContent && pubMembers.size === 0
 
   const allMembers = [...new Set([...pubMembers, ...privMembers])]
@@ -154,6 +154,7 @@ export function buildUpdatedFollowSetPayload(params: {
   title: string
   members: readonly string[]
   isPrivate: boolean
+  existingPrivateMembers?: readonly string[]
   basePublicTags?: readonly string[][]
   basePrivateTags?: readonly string[][]
   isLocked?: boolean
@@ -191,14 +192,23 @@ export function buildUpdatedFollowSetPayload(params: {
     }
   }
 
+  // Keep any previously encrypted members private on mixed lists imported from other clients
+  const privSet = new Set(
+    (params.existingPrivateMembers || [])
+      .map((m) => m.trim().toLowerCase())
+      .filter((m) => isValidHex64(m)),
+  )
+  const publicMembers = validMembers.filter((m) => !privSet.has(m))
+  const privateMembers = validMembers.filter((m) => privSet.has(m))
+
   return {
     publicTags: [
       ['d', params.dTag],
       ['title', cleanTitle],
-      ...validMembers.map((pk) => ['p', pk]),
+      ...publicMembers.map((pk) => ['p', pk]),
       ...preservedPublic,
     ],
-    privateTags: preservedPrivate,
+    privateTags: [...privateMembers.map((pk) => ['p', pk]), ...preservedPrivate],
   }
 }
 

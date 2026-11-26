@@ -191,7 +191,7 @@ export function parseNip51SetEvent(
   }
 
   const hasEncryptedContent = Boolean(event.content && event.content.trim())
-  const isLocked = hasEncryptedContent && decryptedPrivateTags === null
+  const isLocked = hasEncryptedContent && decryptedPrivateTags == null
   const isPrivate = hasEncryptedContent && pubItems.size === 0
 
   const allItems = [...new Set([...pubItems, ...privItems])]
@@ -222,6 +222,7 @@ export function buildUpdatedNip51SetPayload(params: {
   title: string
   items: readonly string[]
   isPrivate: boolean
+  existingPrivateItems?: readonly string[]
   basePublicTags?: readonly string[][]
   basePrivateTags?: readonly string[][]
   isLocked?: boolean
@@ -264,14 +265,23 @@ export function buildUpdatedNip51SetPayload(params: {
     }
   }
 
+  // Keep any previously encrypted entries private on mixed sets imported from other clients
+  const privSet = new Set(
+    (params.existingPrivateItems || [])
+      .map((raw) => normalizeNip51SetItem(params.kind, raw))
+      .filter((x): x is string => Boolean(x)),
+  )
+  const publicItems = validItems.filter((item) => !privSet.has(item))
+  const privateItems = validItems.filter((item) => privSet.has(item))
+
   return {
     publicTags: [
       ['d', params.dTag],
       ['title', cleanTitle],
-      ...validItems.map((item) => [itemTag, item]),
+      ...publicItems.map((item) => [itemTag, item]),
       ...preservedPublic,
     ],
-    privateTags: preservedPrivate,
+    privateTags: [...privateItems.map((item) => [itemTag, item]), ...preservedPrivate],
   }
 }
 

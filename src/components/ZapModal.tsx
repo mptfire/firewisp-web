@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { Zap, X, Copy, Check, Wallet } from 'lucide-react'
 import {
@@ -48,18 +48,40 @@ export function ZapModal({
   const [paid, setPaid] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasWebln = typeof window !== 'undefined' && Boolean(window.webln)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    }
+  }, [onClose])
 
   useEffect(() => {
     if (!invoice) {
       setQrDataUrl(null)
       return
     }
+    let active = true
     void QRCode.toDataURL(`lightning:${invoice}`, {
       width: 220,
       margin: 1,
       color: { dark: '#0e0e11', light: '#ffffff' },
-    }).then(setQrDataUrl)
+    })
+      .then((url) => {
+        if (active) setQrDataUrl(url)
+      })
+      .catch(() => {
+        if (active) setQrDataUrl(null)
+      })
+    return () => {
+      active = false
+    }
   }, [invoice])
 
   const handleGenerateOrPay = async (mode: 'qr' | 'webln' | 'nwc') => {
@@ -68,17 +90,18 @@ export function ZapModal({
     setBusy(true)
     try {
       const pr =
-        invoice ||
-        (await requestZapInvoice({
-          lud16,
-          amountSats: amount,
-          recipientPubkey,
-          eventId,
-          eventATag,
-          comment: stripTrackingParamsInText(comment.trim()).text,
-          relays: readRelays,
-          signer,
-        }))
+        mode !== 'qr' && invoice
+          ? invoice
+          : await requestZapInvoice({
+              lud16,
+              amountSats: amount,
+              recipientPubkey,
+              eventId,
+              eventATag,
+              comment: stripTrackingParamsInText(comment.trim()).text,
+              relays: readRelays,
+              signer,
+            })
       setInvoice(pr)
 
       if (mode === 'webln') {
@@ -97,17 +120,31 @@ export function ZapModal({
 
   const copyInvoice = async () => {
     if (!invoice) return
-    await navigator.clipboard.writeText(invoice)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1800)
+    try {
+      await navigator.clipboard.writeText(invoice)
+      setCopied(true)
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = setTimeout(() => {
+        copyTimerRef.current = null
+        setCopied(false)
+      }, 1800)
+    } catch {
+      setError('Clipboard access unavailable — copy the invoice manually.')
+    }
   }
 
   return (
     <div
       className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClose()
+      }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Zap ${recipientName}`}
         className="w-full max-w-md rounded-2xl bg-[#15161c] border border-[#2a2d3a] p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -117,7 +154,9 @@ export function ZapModal({
             <h2 className="font-semibold text-base">Zap {recipientName}</h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close"
             className="p-1.5 rounded-lg text-[#9a9890] hover:text-white hover:bg-white/5 cursor-pointer"
           >
             <X className="w-4 h-4" />

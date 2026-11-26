@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { Bookmark, Check, Loader2, Lock, Plus, X } from 'lucide-react'
@@ -72,15 +72,27 @@ export function SaveToBookmarkSetMenu({ noteId, onClose }: SaveToBookmarkSetMenu
     }
   }
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   if (typeof document === 'undefined') return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4"
-      onClick={onClose}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClose()
+      }}
     >
       <div
         role="dialog"
+        aria-modal="true"
         aria-label="Save note to bookmark list"
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-sm rounded-2xl bg-[#15161e] border border-[#2a2d3d] shadow-2xl overflow-hidden"

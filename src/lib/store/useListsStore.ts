@@ -41,10 +41,14 @@ const listMutationQueues = new Map<string, Promise<unknown>>()
 function enqueueListMutation<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prev = listMutationQueues.get(key) ?? Promise.resolve()
   const next = prev.then(fn, fn)
-  listMutationQueues.set(
-    key,
-    next.catch(() => undefined),
-  )
+  const tail = next
+    .catch(() => undefined)
+    .finally(() => {
+      if (listMutationQueues.get(key) === tail) {
+        listMutationQueues.delete(key)
+      }
+    })
+  listMutationQueues.set(key, tail)
   return next
 }
 
@@ -307,6 +311,7 @@ async function signAndPublishList(params: {
   title: string
   members: readonly string[]
   isPrivate: boolean
+  existingPrivateMembers?: readonly string[]
   baseEvent?: Pick<Event, 'created_at'> | null
   basePublicTags?: readonly string[][]
   basePrivateTags?: readonly string[][]
@@ -349,6 +354,7 @@ async function signAndPublishItemSet(params: {
   title: string
   items: readonly string[]
   isPrivate: boolean
+  existingPrivateItems?: readonly string[]
   baseEvent?: Pick<Event, 'created_at'> | null
   basePublicTags?: readonly string[][]
   basePrivateTags?: readonly string[][]
@@ -455,7 +461,8 @@ export const useListsStore = create<ListsState>((set, get) => ({
           const parts = t[1].split(':')
           const k = Number(parts[0])
           if (ALL_SET_KINDS.includes(k) && parts[1]?.toLowerCase() === pubkey) {
-            deletedMap[t[1]] = Math.max(deletedMap[t[1]] || 0, del.created_at)
+            const normCoord = `${parts[0]}:${parts[1].toLowerCase()}:${parts.slice(2).join(':')}`
+            deletedMap[normCoord] = Math.max(deletedMap[normCoord] || 0, del.created_at)
           }
         }
       }
@@ -570,15 +577,17 @@ export const useListsStore = create<ListsState>((set, get) => ({
 
     return enqueueListMutation(dTag, async () => {
       try {
+        const pk = signer.pubkey.toLowerCase()
         const { list, okCount, totalRelays } = await signAndPublishList({
           dTag,
           title: cleanName,
           members: [],
           isPrivate,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return null
         const nextLists = { ...get().lists, [dTag]: list }
-        savePublicListsCache(signer.pubkey, nextLists)
-        set({ lists: nextLists, ownerPubkey: signer.pubkey.toLowerCase(), syncStatus: 'synced' })
+        savePublicListsCache(pk, nextLists)
+        set({ lists: nextLists, ownerPubkey: pk, syncStatus: 'synced' })
         useNostrStore
           .getState()
           .setToast(
@@ -609,6 +618,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
           .setToast('Unlock & decrypt your encrypted list first before editing')
         return false
       }
+      const pk = signer.pubkey.toLowerCase()
       const optimistic: FollowSet = { ...prev, name: cleanName }
       set((s) => ({ lists: { ...s.lists, [dTag]: optimistic } }))
 
@@ -618,17 +628,21 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: cleanName,
           members: prev.members,
           isPrivate: prev.isPrivate,
+          existingPrivateMembers: prev.privateMembers,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextLists = { ...get().lists, [dTag]: list }
-        savePublicListsCache(signer.pubkey, nextLists)
+        savePublicListsCache(pk, nextLists)
         set({ lists: nextLists })
         useNostrStore.getState().setToast(`Renamed list to "${cleanName}"`)
         return true
       } catch (err) {
-        set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to rename list')
@@ -646,7 +660,8 @@ export const useListsStore = create<ListsState>((set, get) => ({
       if (!prev) return false
       const pk = signer.pubkey.toLowerCase()
       const coord = `${KIND_FOLLOW_SET}:${pk}:${dTag}`
-      const nowSec = Math.floor(Date.now() / 1000)
+      const nowSec = computeNextReplaceableCreatedAt({ created_at: prev.createdAt })
+      const prevDeletedTs = get().deletedCoords[coord]
 
       const remaining = { ...get().lists }
       delete remaining[dTag]
@@ -664,7 +679,12 @@ export const useListsStore = create<ListsState>((set, get) => ({
           content: '',
         })
         const { writeRelays } = getRelays()
-        await nostrPool.publish(writeRelays, delEvent)
+        const results = writeRelays.length > 0 ? await nostrPool.publish(writeRelays, delEvent) : []
+        const okCount = results.filter((r) => r.ok).length
+        if (okCount === 0) {
+          throw new Error('Relays did not accept list deletion')
+        }
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const feedKey = makeListFeedKey(dTag)
         const settings = useSettingsStore.getState()
         settings.unpinListTab(dTag)
@@ -679,9 +699,18 @@ export const useListsStore = create<ListsState>((set, get) => ({
         useNostrStore.getState().setToast(`Deleted list "${prev.name}"`)
         return true
       } catch (err) {
-        // Restore on sign failure
-        set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
-        savePublicListsCache(pk, get().lists)
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => {
+            const nextDeleted = { ...s.deletedCoords }
+            if (prevDeletedTs === undefined) delete nextDeleted[coord]
+            else nextDeleted[coord] = prevDeletedTs
+            return {
+              lists: { ...s.lists, [dTag]: prev },
+              deletedCoords: nextDeleted,
+            }
+          })
+          savePublicListsCache(pk, get().lists)
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to delete list')
@@ -707,11 +736,12 @@ export const useListsStore = create<ListsState>((set, get) => ({
       }
       if (prev.members.includes(member)) return true
 
+      const pk = signer.pubkey.toLowerCase()
       const nextMembers = [...prev.members, member]
       const optimistic: FollowSet = {
         ...prev,
         members: nextMembers,
-        publicMembers: prev.isPrivate ? prev.publicMembers : nextMembers,
+        publicMembers: prev.isPrivate ? prev.publicMembers : [...prev.publicMembers, member],
         privateMembers: prev.isPrivate ? nextMembers : prev.privateMembers,
       }
       set((s) => ({ lists: { ...s.lists, [dTag]: optimistic } }))
@@ -722,18 +752,22 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: prev.name,
           members: nextMembers,
           isPrivate: prev.isPrivate,
+          existingPrivateMembers: prev.privateMembers,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextLists = { ...get().lists, [dTag]: list }
-        savePublicListsCache(signer.pubkey, nextLists)
+        savePublicListsCache(pk, nextLists)
         set({ lists: nextLists })
         const label = displayName?.trim() || `${member.slice(0, 8)}…`
         useNostrStore.getState().setToast(`Added ${label} to ${list.name}`)
         return true
       } catch (err) {
-        set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to add person to list')
@@ -759,6 +793,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
       }
       if (!prev.members.includes(member)) return true
 
+      const pk = signer.pubkey.toLowerCase()
       const nextMembers = prev.members.filter((m) => m !== member)
       const optimistic: FollowSet = {
         ...prev,
@@ -774,18 +809,22 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: prev.name,
           members: nextMembers,
           isPrivate: prev.isPrivate,
+          existingPrivateMembers: prev.privateMembers,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextLists = { ...get().lists, [dTag]: list }
-        savePublicListsCache(signer.pubkey, nextLists)
+        savePublicListsCache(pk, nextLists)
         set({ lists: nextLists })
         const label = displayName?.trim() || `${member.slice(0, 8)}…`
         useNostrStore.getState().setToast(`Removed ${label} from ${list.name}`)
         return true
       } catch (err) {
-        set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ lists: { ...s.lists, [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to remove person from list')
@@ -807,6 +846,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
 
     return enqueueListMutation(`${kind}:${dTag}`, async () => {
       try {
+        const pk = signer.pubkey.toLowerCase()
         const { setObj, okCount, totalRelays } = await signAndPublishItemSet({
           kind,
           dTag,
@@ -814,6 +854,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
           items: [],
           isPrivate,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return null
         const nextBucket = { ...get()[bucketKey], [dTag]: setObj }
         const snapshot = {
           bookmarkSets: get().bookmarkSets,
@@ -821,10 +862,10 @@ export const useListsStore = create<ListsState>((set, get) => ({
           relaySets: get().relaySets,
           [bucketKey]: nextBucket,
         }
-        savePublicSetsCache(signer.pubkey, snapshot)
+        savePublicSetsCache(pk, snapshot)
         set({
           [bucketKey]: nextBucket,
-          ownerPubkey: signer.pubkey.toLowerCase(),
+          ownerPubkey: pk,
           syncStatus: 'synced',
         })
         useNostrStore
@@ -858,6 +899,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
           .setToast('Unlock & decrypt your encrypted list first before editing')
         return false
       }
+      const pk = signer.pubkey.toLowerCase()
       const optimistic: Nip51ItemSet = { ...prev, name: cleanName }
       set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: optimistic } }))
 
@@ -868,12 +910,14 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: cleanName,
           items: prev.items,
           isPrivate: prev.isPrivate,
+          existingPrivateItems: prev.privateItems,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextBucket = { ...get()[bucketKey], [dTag]: setObj }
-        savePublicSetsCache(signer.pubkey, {
+        savePublicSetsCache(pk, {
           bookmarkSets: get().bookmarkSets,
           interestSets: get().interestSets,
           relaySets: get().relaySets,
@@ -883,7 +927,9 @@ export const useListsStore = create<ListsState>((set, get) => ({
         useNostrStore.getState().setToast(`Renamed list to "${cleanName}"`)
         return true
       } catch (err) {
-        set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to rename list')
@@ -902,7 +948,8 @@ export const useListsStore = create<ListsState>((set, get) => ({
       if (!prev) return false
       const pk = signer.pubkey.toLowerCase()
       const coord = `${kind}:${pk}:${dTag}`
-      const nowSec = Math.floor(Date.now() / 1000)
+      const nowSec = computeNextReplaceableCreatedAt({ created_at: prev.createdAt })
+      const prevDeletedTs = get().deletedCoords[coord]
 
       const remaining = { ...get()[bucketKey] }
       delete remaining[dTag]
@@ -925,7 +972,12 @@ export const useListsStore = create<ListsState>((set, get) => ({
           content: '',
         })
         const { writeRelays } = getRelays()
-        await nostrPool.publish(writeRelays, delEvent)
+        const results = writeRelays.length > 0 ? await nostrPool.publish(writeRelays, delEvent) : []
+        const okCount = results.filter((r) => r.ok).length
+        if (okCount === 0) {
+          throw new Error('Relays did not accept list deletion')
+        }
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const feedKey = getCustomFeedKeyForItemSet(kind, dTag)
         if (feedKey) {
           const settings = useSettingsStore.getState()
@@ -942,12 +994,22 @@ export const useListsStore = create<ListsState>((set, get) => ({
         useNostrStore.getState().setToast(`Deleted list "${prev.name}"`)
         return true
       } catch (err) {
-        set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
-        savePublicSetsCache(pk, {
-          bookmarkSets: get().bookmarkSets,
-          interestSets: get().interestSets,
-          relaySets: get().relaySets,
-        })
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => {
+            const nextDeleted = { ...s.deletedCoords }
+            if (prevDeletedTs === undefined) delete nextDeleted[coord]
+            else nextDeleted[coord] = prevDeletedTs
+            return {
+              [bucketKey]: { ...s[bucketKey], [dTag]: prev },
+              deletedCoords: nextDeleted,
+            }
+          })
+          savePublicSetsCache(pk, {
+            bookmarkSets: get().bookmarkSets,
+            interestSets: get().interestSets,
+            relaySets: get().relaySets,
+          })
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to delete list')
@@ -974,11 +1036,12 @@ export const useListsStore = create<ListsState>((set, get) => ({
       }
       if (prev.items.includes(item)) return true
 
+      const pk = signer.pubkey.toLowerCase()
       const nextItems = [...prev.items, item]
       const optimistic: Nip51ItemSet = {
         ...prev,
         items: nextItems,
-        publicItems: prev.isPrivate ? prev.publicItems : nextItems,
+        publicItems: prev.isPrivate ? prev.publicItems : [...prev.publicItems, item],
         privateItems: prev.isPrivate ? nextItems : prev.privateItems,
       }
       set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: optimistic } }))
@@ -990,12 +1053,14 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: prev.name,
           items: nextItems,
           isPrivate: prev.isPrivate,
+          existingPrivateItems: prev.privateItems,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextBucket = { ...get()[bucketKey], [dTag]: setObj }
-        savePublicSetsCache(signer.pubkey, {
+        savePublicSetsCache(pk, {
           bookmarkSets: get().bookmarkSets,
           interestSets: get().interestSets,
           relaySets: get().relaySets,
@@ -1006,7 +1071,9 @@ export const useListsStore = create<ListsState>((set, get) => ({
         useNostrStore.getState().setToast(`Added ${label} to ${setObj.name}`)
         return true
       } catch (err) {
-        set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to update list')
@@ -1033,6 +1100,7 @@ export const useListsStore = create<ListsState>((set, get) => ({
       }
       if (!prev.items.includes(item)) return true
 
+      const pk = signer.pubkey.toLowerCase()
       const nextItems = prev.items.filter((x) => x !== item)
       const optimistic: Nip51ItemSet = {
         ...prev,
@@ -1049,12 +1117,14 @@ export const useListsStore = create<ListsState>((set, get) => ({
           title: prev.name,
           items: nextItems,
           isPrivate: prev.isPrivate,
+          existingPrivateItems: prev.privateItems,
           baseEvent: { created_at: prev.createdAt },
           basePublicTags: prev.rawPublicTags,
           basePrivateTags: prev.rawPrivateTags,
         })
+        if (useAuthStore.getState().pubkey?.toLowerCase() !== pk) return false
         const nextBucket = { ...get()[bucketKey], [dTag]: setObj }
-        savePublicSetsCache(signer.pubkey, {
+        savePublicSetsCache(pk, {
           bookmarkSets: get().bookmarkSets,
           interestSets: get().interestSets,
           relaySets: get().relaySets,
@@ -1065,7 +1135,9 @@ export const useListsStore = create<ListsState>((set, get) => ({
         useNostrStore.getState().setToast(`Removed ${label} from ${setObj.name}`)
         return true
       } catch (err) {
-        set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        if (useAuthStore.getState().pubkey?.toLowerCase() === pk) {
+          set((s) => ({ [bucketKey]: { ...s[bucketKey], [dTag]: prev } }))
+        }
         useNostrStore
           .getState()
           .setToast(err instanceof Error ? err.message : 'Failed to update list')

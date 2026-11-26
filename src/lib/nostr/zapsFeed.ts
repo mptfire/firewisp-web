@@ -56,45 +56,43 @@ export function parseLiveZapReceipt(
   let targetATag = ev.tags.find((t) => t[0] === 'a' && t[1])?.[1]?.trim()
 
   const desc = ev.tags.find((t) => t[0] === 'description' && t[1])?.[1]
-  if (desc) {
-    try {
-      const parsed = JSON.parse(desc) as {
-        pubkey?: unknown
-        content?: unknown
-        tags?: unknown
-      }
-      if (typeof parsed.pubkey === 'string' && isValidHex64(parsed.pubkey)) {
-        senderPubkey = parsed.pubkey.toLowerCase()
-      }
-      if (typeof parsed.content === 'string') {
-        const clean = parsed.content.trim()
-        if (clean) comment = clean.slice(0, 280)
-      }
-      if (Array.isArray(parsed.tags)) {
-        for (const t of parsed.tags) {
-          if (!Array.isArray(t) || typeof t[0] !== 'string' || typeof t[1] !== 'string') continue
-          if (t[0] === 'amount') {
-            const msats = Number(t[1])
-            if (Number.isFinite(msats) && msats > 0) {
-              const reqSats = Math.floor(msats / 1000)
-              if (Math.abs(reqSats - sats) > 1) return null
-            }
-          } else if (t[0] === 'e' && !targetEventId && isValidHex64(t[1])) {
-            targetEventId = t[1].toLowerCase()
-          } else if (t[0] === 'a' && !targetATag && t[1].trim()) {
-            targetATag = t[1].trim()
+  if (!desc) return null
+  try {
+    const parsed = JSON.parse(desc) as {
+      pubkey?: unknown
+      content?: unknown
+      tags?: unknown
+    }
+    if (typeof parsed.pubkey === 'string' && isValidHex64(parsed.pubkey)) {
+      senderPubkey = parsed.pubkey.toLowerCase()
+    }
+    if (typeof parsed.content === 'string') {
+      const clean = parsed.content.trim()
+      if (clean) comment = clean.slice(0, 280)
+    }
+    if (Array.isArray(parsed.tags)) {
+      for (const t of parsed.tags) {
+        if (!Array.isArray(t) || typeof t[0] !== 'string' || typeof t[1] !== 'string') continue
+        if (t[0] === 'amount') {
+          const msats = Number(t[1])
+          if (Number.isFinite(msats) && msats > 0) {
+            const reqSats = Math.floor(msats / 1000)
+            if (Math.abs(reqSats - sats) > 1) return null
           }
+        } else if (t[0] === 'e' && !targetEventId && isValidHex64(t[1])) {
+          targetEventId = t[1].toLowerCase()
+        } else if (t[0] === 'a' && !targetATag && t[1].trim()) {
+          targetATag = t[1].trim()
         }
       }
-    } catch {
-      // Malformed description JSON; reject receipt fail-closed
-      return null
     }
+  } catch {
+    // Malformed description JSON; reject receipt fail-closed
+    return null
   }
 
   if (!senderPubkey) {
-    if (!isValidHex64(ev.pubkey)) return null
-    senderPubkey = ev.pubkey.toLowerCase()
+    return null
   }
 
   const targetLiveNaddr = parseLiveATagToNaddr(targetATag)

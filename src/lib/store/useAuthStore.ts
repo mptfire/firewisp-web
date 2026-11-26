@@ -61,16 +61,32 @@ function readMeta(): StoredAuthMeta | null {
 
 function writeMeta(meta: StoredAuthMeta | null) {
   if (typeof localStorage === 'undefined') return
-  if (!meta) {
-    localStorage.removeItem(SESSION_META_KEY)
-  } else {
-    localStorage.setItem(SESSION_META_KEY, JSON.stringify(meta))
+  try {
+    if (!meta) {
+      localStorage.removeItem(SESSION_META_KEY)
+    } else {
+      localStorage.setItem(SESSION_META_KEY, JSON.stringify(meta))
+    }
+  } catch {
+    // ignore storage errors
   }
 }
 
 function hasVault(): boolean {
   if (typeof localStorage === 'undefined') return false
-  return Boolean(localStorage.getItem(ENCRYPTED_VAULT_KEY))
+  try {
+    return Boolean(localStorage.getItem(ENCRYPTED_VAULT_KEY))
+  } catch {
+    return false
+  }
+}
+
+function switchAccountIfNeeded(nextPubkey: string) {
+  const prevPk = useAuthStore.getState().pubkey
+  if (prevPk && prevPk.toLowerCase() !== nextPubkey.toLowerCase()) {
+    useNostrStore.getState().resetUserState()
+    useListsStore.getState().resetLists()
+  }
 }
 
 const initialMeta = readMeta()
@@ -113,9 +129,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loginWithNip07: async () => {
-    const prev = get().signer
     const signer = await Nip07Signer.connect()
-    prev?.destroy()
+    switchAccountIfNeeded(signer.pubkey)
+    get().signer?.destroy()
     writeMeta({ method: 'nip07', pubkey: signer.pubkey })
     set({
       signer,
@@ -127,9 +143,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   loginWithBunkerUri: async (uri: string) => {
-    const prev = get().signer
     const { signer } = await Nip46BunkerSigner.connectWithUri(uri)
-    prev?.destroy()
+    switchAccountIfNeeded(signer.pubkey)
+    get().signer?.destroy()
     writeMeta(null)
     set({
       signer,
@@ -141,6 +157,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   attachBunkerSigner: (signer: Nip46BunkerSigner) => {
+    switchAccountIfNeeded(signer.pubkey)
     get().signer?.destroy()
     writeMeta(null)
     set({
@@ -163,6 +180,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const priv = decryptNcryptsec(trimmed, passphrase)
       try {
         const signer = new LocalKeySigner(priv)
+        switchAccountIfNeeded(signer.pubkey)
         get().signer?.destroy()
         writeMeta(null)
         set({
@@ -183,6 +201,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const priv = derivePrivkeyFromMnemonic(trimmed, passphrase)
       try {
         const signer = new LocalKeySigner(priv)
+        switchAccountIfNeeded(signer.pubkey)
         get().signer?.destroy()
         writeMeta(null)
         set({
@@ -205,6 +224,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const priv = new Uint8Array(decoded.data)
       try {
         const signer = new LocalKeySigner(priv)
+        switchAccountIfNeeded(signer.pubkey)
         get().signer?.destroy()
         writeMeta(null)
         set({
@@ -225,6 +245,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const decoded = nip19.decode(lower)
       if (decoded.type !== 'npub') throw new Error('Invalid npub')
       const signer = new ReadOnlySigner(decoded.data)
+      switchAccountIfNeeded(signer.pubkey)
       get().signer?.destroy()
       writeMeta({ method: 'readonly', pubkey: signer.pubkey })
       set({
@@ -240,6 +261,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 5. 64-char hex pubkey (watch-only)
     if (isValidHex64(lower)) {
       const signer = new ReadOnlySigner(lower)
+      switchAccountIfNeeded(signer.pubkey)
       get().signer?.destroy()
       writeMeta({ method: 'readonly', pubkey: signer.pubkey })
       set({
@@ -257,6 +279,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const priv = hexToBytes(lower.slice(7))
       try {
         const signer = new LocalKeySigner(priv)
+        switchAccountIfNeeded(signer.pubkey)
         get().signer?.destroy()
         writeMeta(null)
         set({
@@ -278,21 +301,38 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   unlockEncryptedVault: async (passphrase: string) => {
-    const encrypted = localStorage.getItem(ENCRYPTED_VAULT_KEY)
+    let encrypted: string | null = null
+    try {
+      encrypted = typeof localStorage !== 'undefined' ? localStorage.getItem(ENCRYPTED_VAULT_KEY) : null
+    } catch {
+      encrypted = null
+    }
     if (!encrypted) throw new Error('No saved encrypted vault found in this browser')
     await get().loginWithKeyInput(encrypted, passphrase)
   },
 
   saveEncryptedVault: (passphrase: string) => {
     const ncryptsec = get().exportNcryptsec(passphrase)
-    localStorage.setItem(ENCRYPTED_VAULT_KEY, ncryptsec)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(ENCRYPTED_VAULT_KEY, ncryptsec)
+      }
+    } catch {
+      throw new Error('Browser storage unavailable or full; could not save vault')
+    }
     writeMeta({ method: 'vault', pubkey: get().pubkey || undefined })
     set({ hasEncryptedVault: true })
     return ncryptsec
   },
 
   clearEncryptedVault: () => {
-    localStorage.removeItem(ENCRYPTED_VAULT_KEY)
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(ENCRYPTED_VAULT_KEY)
+      }
+    } catch {
+      // ignore storage errors
+    }
     set({ hasEncryptedVault: false })
   },
 
@@ -301,6 +341,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const priv = derivePrivkeyFromMnemonic(mnemonic)
     try {
       const signer = new LocalKeySigner(priv)
+      switchAccountIfNeeded(signer.pubkey)
       get().signer?.destroy()
       writeMeta(null)
       set({

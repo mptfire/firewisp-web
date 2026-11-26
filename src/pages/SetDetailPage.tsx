@@ -127,20 +127,31 @@ export function SetDetailPage() {
   useEffect(() => {
     if (setType !== 'bookmarks' || !setObj || setObj.items.length === 0) return
     let active = true
+    const currentEvents = useNostrStore.getState().events
     const missing = setObj.items
-      .filter((id) => !events[id] && !queriedIdsRef.current.has(id))
+      .filter((id) => !currentEvents[id] && !queriedIdsRef.current.has(id))
       .slice(0, 60)
     if (missing.length === 0) return
     for (const id of missing) queriedIdsRef.current.add(id)
-    void nostrPool.query(readRelays, { ids: missing }, 4000).then((evs) => {
-      if (!active) return
-      for (const ev of evs) ingestEvent(ev)
-      if (evs.length > 0) void fetchProfiles(evs.map((e) => e.pubkey))
-    })
+    void nostrPool
+      .query(readRelays, { ids: missing }, 4000)
+      .then((evs) => {
+        if (!active) {
+          for (const id of missing) queriedIdsRef.current.delete(id)
+          return
+        }
+        for (const ev of evs) ingestEvent(ev)
+        if (evs.length > 0) void fetchProfiles(evs.map((e) => e.pubkey))
+      })
+      .catch(() => {
+        if (!active) {
+          for (const id of missing) queriedIdsRef.current.delete(id)
+        }
+      })
     return () => {
       active = false
     }
-  }, [setType, setObj, readRelays, events, ingestEvent, fetchProfiles])
+  }, [setType, setObj, readRelays, ingestEvent, fetchProfiles])
 
   const visibleBookmarkEvents = useMemo(() => {
     if (setType !== 'bookmarks' || !setObj) return []
@@ -450,14 +461,18 @@ export function SetDetailPage() {
             </div>
           ) : (
             setObj.items.map((noteId) => {
-              const ev = visibleBookmarkEvents.find((e) => e.id === noteId)
+              const ev = events[noteId]
+              if (ev && isEventDeleted(ev)) return null
+              const queried = queriedIdsRef.current.has(noteId)
               return (
                 <div key={noteId} className="relative border-b border-[#20222c]">
                   {ev ? (
                     <NoteCard event={ev} />
                   ) : (
                     <div className="px-4 py-4 text-xs text-[#8c8a82] font-mono truncate pr-24">
-                      Loading note {noteId.slice(0, 16)}…
+                      {queried
+                        ? `Note unavailable on connected relays (${noteId.slice(0, 16)}…)`
+                        : `Loading note ${noteId.slice(0, 16)}…`}
                     </div>
                   )}
                   <div className="px-4 pb-2.5 flex justify-end bg-[#0e0e11]">
