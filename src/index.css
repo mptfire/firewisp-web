@@ -502,127 +502,97 @@
     will-change: offset-distance;
     animation: fw-flame-orbit 24s linear infinite;
   }
-}
-
-.fw-notif-wisp {
-  z-index: 3;
-  width: 24px;
-  height: 17px;
-  align-items: center;
-  justify-content: center;
-  transform-origin: 70% 50%;
-  filter: drop-shadow(0 0 4px rgba(255, 212, 59, 0.85))
-    drop-shadow(0 0 9px rgba(232, 89, 12, 0.65));
-  will-change: offset-distance, transform, opacity;
-  animation:
-    fw-flame-orbit 24s linear infinite,
-    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
-  animation-delay: -1.4s, 0s;
-}
-
-@supports (offset-path: inset(1px round 0.75rem)) {
-  .fw-notif-wisp {
+  .fw-orbit-head {
+    z-index: 3;
+    width: 24px;
+    height: 17px;
     display: flex;
+    align-items: center;
+    justify-content: center;
     offset-anchor: 55% 50%;
+    animation-delay: -1.4s;
   }
 }
 
-.fw-notif-tail-1 {
-  width: 11px;
-  height: 3.5px;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(232, 89, 12, 0.35), #ff922b 55%, #ffd43b);
-  box-shadow: 0 0 6px 1px rgba(255, 146, 43, 0.55);
+.fw-orbit-tail-1 {
   animation-delay: -0.95s;
 }
 
-.fw-notif-tail-2 {
-  width: 9px;
-  height: 2.25px;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(185, 28, 28, 0.12), #e8590c 65%, rgba(255, 146, 43, 0.85));
-  box-shadow: 0 0 4px 0.5px rgba(232, 89, 12, 0.4);
+.fw-orbit-tail-2 {
   animation-delay: -0.58s;
 }
 
-.fw-notif-tail-3 {
-  width: 7px;
-  height: 1.5px;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(185, 28, 28, 0), rgba(201, 42, 42, 0.55) 70%, rgba(232, 89, 12, 0.65));
+.fw-orbit-tail-3 {
   animation-delay: -0.26s;
 }
 
-/* White luminous wisp variant orbiting Feed when new notes arrive (zero highlight box/outline) */
-.fw-white-wisp {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
-    drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
-  animation:
-    fw-flame-orbit 24s linear infinite,
-    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
-  animation-delay: -1.4s, 0s;
+.fw-wisp-head-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 70% 50%;
+  will-change: transform, opacity;
 }
 
+.fw-wisp-head-inner.fw-white-glow {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+    drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
+  animation: fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+}
+
+.fw-wisp-head-inner.fw-green-glow {
+  filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.9))
+    drop-shadow(0 0 9px rgba(16, 185, 129, 0.68));
+  animation: fw-notif-wisp-flicker 2.2s ease-in-out infinite;
+}
+
+.fw-tail-pill {
+  display: block;
+  border-radius: 9999px;
+}
+
+/* White luminous tail pills orbiting Feed when new notes arrive (zero highlight box/outline) */
 .fw-white-tail-1 {
   width: 11px;
   height: 3.5px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(226, 232, 240, 0.32), #e2e8f0 55%, #ffffff);
   box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.58);
-  animation-delay: -0.95s;
 }
 
 .fw-white-tail-2 {
   width: 9px;
   height: 2.25px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(148, 163, 184, 0.14), #cbd5e1 65%, rgba(255, 255, 255, 0.85));
   box-shadow: 0 0 4px 0.5px rgba(226, 232, 240, 0.42);
-  animation-delay: -0.58s;
 }
 
 .fw-white-tail-3 {
   width: 7px;
   height: 1.5px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(148, 163, 184, 0), rgba(203, 213, 225, 0.55) 70%, rgba(241, 245, 249, 0.72));
-  animation-delay: -0.26s;
 }
 
-/* Emerald green luminous wisp variant orbiting Notifications when unread alerts exist */
-.fw-green-wisp {
-  filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.9))
-    drop-shadow(0 0 9px rgba(16, 185, 129, 0.68));
-  animation:
-    fw-flame-orbit 24s linear infinite,
-    fw-notif-wisp-flicker 2.2s ease-in-out infinite;
-  animation-delay: -1.4s, 0s;
-}
-
+/* Emerald green luminous tail pills orbiting Notifications when unread alerts exist */
 .fw-green-tail-1 {
   width: 11px;
   height: 3.5px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(16, 185, 129, 0.35), #34d399 55%, #a7f3d0);
   box-shadow: 0 0 6px 1px rgba(52, 211, 153, 0.58);
-  animation-delay: -0.95s;
 }
 
 .fw-green-tail-2 {
   width: 9px;
   height: 2.25px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(4, 120, 87, 0.14), #10b981 65%, rgba(52, 211, 153, 0.85));
   box-shadow: 0 0 4px 0.5px rgba(16, 185, 129, 0.45);
-  animation-delay: -0.58s;
 }
 
 .fw-green-tail-3 {
   width: 7px;
   height: 1.5px;
-  border-radius: 9999px;
   background: linear-gradient(90deg, rgba(4, 120, 87, 0), rgba(5, 150, 105, 0.55) 70%, rgba(16, 185, 129, 0.7));
-  animation-delay: -0.26s;
 }
 
 /* Free-roaming main orange Fire Wisp sprite across the viewport */
@@ -648,13 +618,15 @@
 }
 
 .fw-tab-hidden .fw-notif-seg,
+.fw-tab-hidden .fw-wisp-head-inner,
+.fw-tab-hidden .fw-tail-pill,
 .fw-tab-hidden .fw-notif-wisp,
 .fw-tab-hidden .fw-roam-wisp,
 .fw-tab-hidden .fw-audio-marquee-track {
   animation-play-state: paused !important;
 }
 
-/* 7-second wisp power-down sequence: 0–4s sputtering electrical flash -> 4–7s dark outline -> gone */
+/* 7-second wisp power-down sequence (inner children ONLY — outer .fw-notif-seg keeps orbiting uninterrupted) */
 @keyframes fw-wisp-powerloss-4s {
   0% {
     opacity: 1;
@@ -718,16 +690,33 @@
   }
 }
 
-@keyframes fw-wisp-glow-loss-4s {
+@keyframes fw-wisp-glow-loss-white-4s {
   0% {
-    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85))
-      drop-shadow(0 0 8px rgba(16, 185, 129, 0.5));
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.92))
+      drop-shadow(0 0 9px rgba(226, 232, 240, 0.65));
   }
   25% {
-    filter: drop-shadow(0 0 1.5px rgba(226, 232, 240, 0.35));
+    filter: drop-shadow(0 0 1.5px rgba(226, 232, 240, 0.32));
   }
   42% {
-    filter: drop-shadow(0 0 3px rgba(226, 232, 240, 0.55));
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.55));
+  }
+  100% {
+    filter: drop-shadow(0 0 1.2px rgba(180, 190, 210, 0.5))
+      drop-shadow(0 0 2.5px rgba(0, 0, 0, 0.95));
+  }
+}
+
+@keyframes fw-wisp-glow-loss-green-4s {
+  0% {
+    filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.9))
+      drop-shadow(0 0 9px rgba(16, 185, 129, 0.68));
+  }
+  25% {
+    filter: drop-shadow(0 0 1.5px rgba(52, 211, 153, 0.32));
+  }
+  42% {
+    filter: drop-shadow(0 0 3px rgba(110, 231, 183, 0.52));
   }
   100% {
     filter: drop-shadow(0 0 1.2px rgba(180, 190, 210, 0.5))
@@ -743,35 +732,16 @@
   animation: fw-wisp-outline-7s 7s linear forwards;
 }
 
-.fw-notif-wisp.fw-wisp-dying {
-  animation:
-    fw-flame-orbit 24s linear infinite,
-    fw-wisp-glow-loss-4s 4s linear forwards;
-  animation-delay: -1.4s, 0s;
+.fw-wisp-head-inner.fw-white-glow.fw-wisp-dying {
+  animation: fw-wisp-glow-loss-white-4s 4s linear forwards;
 }
 
-.fw-notif-seg.fw-tail-dying {
-  animation:
-    fw-flame-orbit 24s linear infinite,
-    fw-wisp-powerloss-4s 4s linear forwards;
+.fw-wisp-head-inner.fw-green-glow.fw-wisp-dying {
+  animation: fw-wisp-glow-loss-green-4s 4s linear forwards;
 }
 
-.fw-white-tail-1.fw-tail-dying,
-.fw-green-tail-1.fw-tail-dying,
-.fw-notif-tail-1.fw-tail-dying {
-  animation-delay: -0.95s, 0s;
-}
-
-.fw-white-tail-2.fw-tail-dying,
-.fw-green-tail-2.fw-tail-dying,
-.fw-notif-tail-2.fw-tail-dying {
-  animation-delay: -0.58s, 0s;
-}
-
-.fw-white-tail-3.fw-tail-dying,
-.fw-green-tail-3.fw-tail-dying,
-.fw-notif-tail-3.fw-tail-dying {
-  animation-delay: -0.26s, 0s;
+.fw-tail-pill.fw-tail-dying {
+  animation: fw-wisp-powerloss-4s 4s linear forwards;
 }
 
 /* Slow-scrolling source title marquee inside Global Audio deck */

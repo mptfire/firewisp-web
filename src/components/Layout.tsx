@@ -141,20 +141,6 @@ export function Layout({ children }: { children: ReactNode }) {
     privateMutedWords,
   ])
 
-  // Clicking Feed flushes any queued new posts; clicking the nav item (or logo) for the page you're already on scrolls to top
-  const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
-    if (to === '/' && pendingFeedCount > 0) {
-      flushPendingFeed(activeFeedTab)
-    }
-    if (to === '/notifications' && notifWispActive && latestUnreadNotifKey) {
-      setNotifWispAckKey(latestUnreadNotifKey)
-    }
-    if (location.pathname === to && !location.search && !location.hash) {
-      e.preventDefault()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-  }
-
   const powBusyMessage = useNostrStore((s) => s.powBusyMessage)
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
@@ -237,6 +223,42 @@ export function Layout({ children }: { children: ReactNode }) {
     showWisps && unreadNotificationCount > 0 && latestUnreadNotifKey !== notifWispAckKey
   const prevFeedWispActiveRef = useRef(feedWispActive)
   const prevNotifWispActiveRef = useRef(notifWispActive)
+  const feedJustDeactivated = showWisps && prevFeedWispActiveRef.current && !feedWispActive
+  const notifJustDeactivated = showWisps && prevNotifWispActiveRef.current && !notifWispActive
+
+  const startFeedWispPowerDown = () => {
+    if (feedWispTimerRef.current) clearTimeout(feedWispTimerRef.current)
+    setFeedWispDying(true)
+    feedWispTimerRef.current = setTimeout(() => {
+      feedWispTimerRef.current = null
+      setFeedWispDying(false)
+    }, 7000)
+  }
+
+  const startNotifWispPowerDown = () => {
+    if (notifWispTimerRef.current) clearTimeout(notifWispTimerRef.current)
+    setNotifWispDying(true)
+    notifWispTimerRef.current = setTimeout(() => {
+      notifWispTimerRef.current = null
+      setNotifWispDying(false)
+    }, 7000)
+  }
+
+  // Clicking Feed flushes any queued new posts and starts wisp power-down without unmounting or resetting orbit
+  const scrollTopIfCurrent = (e: MouseEvent, to: string) => {
+    if (to === '/' && pendingFeedCount > 0) {
+      if (feedWispActive) startFeedWispPowerDown()
+      flushPendingFeed(activeFeedTab)
+    }
+    if (to === '/notifications' && notifWispActive && latestUnreadNotifKey) {
+      startNotifWispPowerDown()
+      setNotifWispAckKey(latestUnreadNotifKey)
+    }
+    if (location.pathname === to && !location.search && !location.hash) {
+      e.preventDefault()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
 
   useEffect(() => {
     const wasActive = prevFeedWispActiveRef.current
@@ -256,12 +278,7 @@ export function Layout({ children }: { children: ReactNode }) {
       }
       setFeedWispDying(false)
     } else if (wasActive) {
-      if (feedWispTimerRef.current) clearTimeout(feedWispTimerRef.current)
-      setFeedWispDying(true)
-      feedWispTimerRef.current = setTimeout(() => {
-        feedWispTimerRef.current = null
-        setFeedWispDying(false)
-      }, 7000)
+      startFeedWispPowerDown()
     }
   }, [feedWispActive, showWisps])
 
@@ -283,12 +300,7 @@ export function Layout({ children }: { children: ReactNode }) {
       }
       setNotifWispDying(false)
     } else if (wasActive) {
-      if (notifWispTimerRef.current) clearTimeout(notifWispTimerRef.current)
-      setNotifWispDying(true)
-      notifWispTimerRef.current = setTimeout(() => {
-        notifWispTimerRef.current = null
-        setNotifWispDying(false)
-      }, 7000)
+      startNotifWispPowerDown()
     }
   }, [notifWispActive, showWisps])
 
@@ -468,10 +480,15 @@ export function Layout({ children }: { children: ReactNode }) {
                 const hasNotifFlame = showWisps && to === '/notifications' && notifWispActive
                 const hasFeedNew = showWisps && to === '/' && feedWispActive
                 const showNotifWisp =
-                  showWisps && to === '/notifications' && (notifWispActive || notifWispDying)
-                const showFeedWisp = showWisps && to === '/' && (feedWispActive || feedWispDying)
-                const notifDying = showNotifWisp && !notifWispActive && notifWispDying
-                const feedDying = showFeedWisp && !feedWispActive && feedWispDying
+                  showWisps &&
+                  to === '/notifications' &&
+                  (notifWispActive || notifWispDying || notifJustDeactivated)
+                const showFeedWisp =
+                  showWisps &&
+                  to === '/' &&
+                  (feedWispActive || feedWispDying || feedJustDeactivated)
+                const notifDying = showNotifWisp && !notifWispActive
+                const feedDying = showFeedWisp && !feedWispActive
                 const hasUnreadNotif = to === '/notifications' && badge !== undefined
                 const hasPendingFeed = to === '/' && badge !== undefined
                 return (
@@ -498,45 +515,37 @@ export function Layout({ children }: { children: ReactNode }) {
                   >
                     {showNotifWisp && (
                       <>
-                        <span
-                          className={`fw-notif-seg fw-green-tail-3 ${notifDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-green-tail-2 ${notifDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-green-tail-1 ${notifDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-notif-wisp fw-green-wisp ${notifDying ? 'fw-wisp-dying' : ''}`}
-                          aria-hidden="true"
-                        >
-                          <FireWispFlameSprite idPrefix="fw-notif" variant="green" powerDown={notifDying} />
+                        <span className="fw-notif-seg fw-orbit-tail-3" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-green-tail-3 ${notifDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-tail-2" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-green-tail-2 ${notifDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-tail-1" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-green-tail-1 ${notifDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-head" aria-hidden="true">
+                          <span className={`fw-wisp-head-inner fw-green-glow ${notifDying ? 'fw-wisp-dying' : ''}`}>
+                            <FireWispFlameSprite idPrefix="fw-notif" variant="green" powerDown={notifDying} />
+                          </span>
                         </span>
                       </>
                     )}
                     {showFeedWisp && (
                       <>
-                        <span
-                          className={`fw-notif-seg fw-white-tail-3 ${feedDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-white-tail-2 ${feedDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-white-tail-1 ${feedDying ? 'fw-tail-dying' : ''}`}
-                          aria-hidden="true"
-                        />
-                        <span
-                          className={`fw-notif-seg fw-notif-wisp fw-white-wisp ${feedDying ? 'fw-wisp-dying' : ''}`}
-                          aria-hidden="true"
-                        >
-                          <FireWispFlameSprite idPrefix="fw-feed" variant="white" powerDown={feedDying} />
+                        <span className="fw-notif-seg fw-orbit-tail-3" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-white-tail-3 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-tail-2" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-white-tail-2 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-tail-1" aria-hidden="true">
+                          <span className={`fw-tail-pill fw-white-tail-1 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                        </span>
+                        <span className="fw-notif-seg fw-orbit-head" aria-hidden="true">
+                          <span className={`fw-wisp-head-inner fw-white-glow ${feedDying ? 'fw-wisp-dying' : ''}`}>
+                            <FireWispFlameSprite idPrefix="fw-feed" variant="white" powerDown={feedDying} />
+                          </span>
                         </span>
                       </>
                     )}
