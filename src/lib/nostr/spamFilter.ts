@@ -34,6 +34,9 @@ const CONFUSABLE_MAP: Record<string, string> = {
   'А': 'a', 'а': 'a', 'В': 'b', 'Е': 'e', 'е': 'e', 'К': 'k', 'к': 'k', 'М': 'm',
   'Н': 'h', 'О': 'o', 'о': 'o', 'Р': 'p', 'р': 'p', 'С': 'c', 'с': 'c', 'Т': 't',
   'У': 'y', 'у': 'y', 'Х': 'x', 'х': 'x', 'І': 'i', 'і': 'i', 'Ј': 'j', 'ј': 'j',
+  'Ѕ': 's', 'ѕ': 's',
+  // Armenian
+  'Օ': 'o', 'օ': 'o',
 }
 
 export function foldConfusables(text: string): string {

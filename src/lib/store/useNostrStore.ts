@@ -20,7 +20,7 @@ import {
   normalizeMuteValue,
   type MuteListMutation,
 } from '../nostr/lists'
-import { evaluateNoteSpam, isTopLevelNote } from '../nostr/spamFilter'
+import { evaluateNoteSpam, foldConfusables, isTopLevelNote } from '../nostr/spamFilter'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
@@ -825,10 +825,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         ? [...st.mutedWords, ...st.privateMutedWords]
         : st.mutedWords
     if (allWords.length > 0 && event.content) {
-      const lower = event.content
+      const stripped = event.content
         .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g, '')
-        .toLowerCase()
-      if (allWords.some((w) => w.length >= 2 && lower.includes(w))) return true
+      const lower = stripped.toLowerCase()
+      const folded = foldConfusables(stripped).toLowerCase()
+      if (allWords.some((w) => w.length >= 2 && (lower.includes(w) || folded.includes(w)))) {
+        return true
+      }
     }
     return false
   },

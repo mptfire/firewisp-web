@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
+import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 
@@ -35,6 +36,8 @@ export function NotificationsPage() {
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
+  const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
+  const follows = useNostrStore((s) => s.follows)
   const [loading, setLoading] = useState(() => notificationIds.length === 0)
 
   useEffect(() => {
@@ -42,6 +45,8 @@ export function NotificationsPage() {
     const timer = setTimeout(() => setLoading(false), 1800)
     return () => clearTimeout(timer)
   }, [pubkey])
+
+  const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
 
   const visibleNotificationIds = useMemo(() => {
     const allMutedPks =
@@ -52,6 +57,12 @@ export function NotificationsPage() {
       if (ev.kind === 9735) {
         const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
         if (allMutedPks.includes(actorPk)) return false
+      } else if (
+        spamFilterEnabled &&
+        (ev.kind === 1 || ev.kind === 1111) &&
+        evaluateNoteSpam(ev, { myPubkey: pubkey, follows: followSet }).isSpam
+      ) {
+        return false
       }
       return true
     })
@@ -67,6 +78,9 @@ export function NotificationsPage() {
     privateMutedPubkeys,
     privateMutedHashtags,
     privateMutedWords,
+    spamFilterEnabled,
+    pubkey,
+    followSet,
   ])
 
   useEffect(() => {

@@ -27,7 +27,7 @@ import {
 import { isIosDevice } from '../lib/mediaAudio'
 import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { getStreamPrimaryPubkey, isLiveStreamFresh } from '../lib/nostr/nip53'
-import { isTopLevelNote } from '../lib/nostr/spamFilter'
+import { isTopLevelNote, evaluateNoteSpam } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
@@ -65,6 +65,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const showGlobalAudio = useSettingsStore((s) => s.showGlobalAudio)
   const showBookmarksNav = useSettingsStore((s) => s.showBookmarksNav)
   const hideRepliesInExplore = useSettingsStore((s) => s.hideRepliesInExplore)
+  const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
+  const follows = useNostrStore((s) => s.follows)
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
@@ -171,6 +173,8 @@ export function Layout({ children }: { children: ReactNode }) {
     return count
   }, [liveStreams, mutedPubkeys, privateMutedPubkeys])
 
+  const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
+
   const unreadNotificationCount = useMemo(() => {
     if (!pubkey || notificationsLastSeenAt <= 0) return 0
     const allMutedPks =
@@ -185,6 +189,12 @@ export function Layout({ children }: { children: ReactNode }) {
       if (ev.kind === 9735) {
         const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
         if (allMutedPks.includes(actorPk)) continue
+      } else if (
+        spamFilterEnabled &&
+        (ev.kind === 1 || ev.kind === 1111) &&
+        evaluateNoteSpam(ev, { myPubkey: pubkey, follows: followSet }).isSpam
+      ) {
+        continue
       }
       count++
     }
@@ -204,6 +214,8 @@ export function Layout({ children }: { children: ReactNode }) {
     privateMutedPubkeys,
     privateMutedHashtags,
     privateMutedWords,
+    spamFilterEnabled,
+    followSet,
   ])
 
   useEffect(() => {

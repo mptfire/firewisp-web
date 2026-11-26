@@ -1651,4 +1651,47 @@ describe('Full code-audit regression & security hardening', () => {
     const pt = grid.pickLeastVisitedPoint(bounds, { top: 0, bottom: 100 }, () => 0.5)
     expect(pt.x).toBeGreaterThanOrEqual(500)
   })
+
+  it('catches homoglyph evmnest replies via evaluateNoteSpam (unfollowed only) and folds homoglyphs in isEventMuted', async () => {
+    const scamEvent = {
+      id: '1cbc7fa47ef456630c92502073504ccb6e9574c8bf750a7ba79dd8694d36fd88',
+      pubkey: '5b841ed297797280c8bae503dd258af8b62e69435b1708ea6f038bf36bae5c6b',
+      created_at: 1795727908,
+      kind: 1,
+      tags: [['t', 'airdrop']],
+      content:
+        '🤖 AI Οn-CНain Audit: FrΕe ETH iЅ LIVE! https://ai.evmnest.cc/?ref=o8lz38\n⏳ Only 24 hՕurЅ lefᎢ! Claim fast!',
+      sig: '2'.repeat(128),
+    }
+
+    expect(
+      evaluateNoteSpam(scamEvent, { myPubkey: 'a'.repeat(64), follows: new Set() }).isSpam,
+    ).toBe(true)
+    expect(
+      evaluateNoteSpam(scamEvent, {
+        myPubkey: 'a'.repeat(64),
+        follows: new Set([scamEvent.pubkey]),
+      }).isSpam,
+    ).toBe(false)
+
+    const { useNostrStore } = await import('../store/useNostrStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    try {
+      useSettingsStore.setState({ mutedWords: ['free eth'], privateMutedWords: [] })
+      expect(useNostrStore.getState().isEventMuted(scamEvent)).toBe(true)
+
+      useSettingsStore.setState({ mutedWords: ['hours'], privateMutedWords: [] })
+      expect(useNostrStore.getState().isEventMuted(scamEvent)).toBe(true)
+
+      useSettingsStore.setState({ mutedWords: [], privateMutedWords: ['evmnest'] })
+      expect(
+        useNostrStore.getState().isEventMuted({
+          ...scamEvent,
+          content: 'Check https://еvmnеst.example/claim',
+        }),
+      ).toBe(true)
+    } finally {
+      useSettingsStore.setState({ mutedWords: [], privateMutedWords: [] })
+    }
+  })
 })

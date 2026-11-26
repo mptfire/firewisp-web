@@ -4,6 +4,8 @@ import type { Event } from 'nostr-tools/pure'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { extractReplyRefs } from '../lib/nostr/content'
+import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
+import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { NoteCard } from '../components/NoteCard'
@@ -34,6 +36,9 @@ export function ThreadPage() {
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const relays = useSettingsStore((s) => s.relays)
+  const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
+  const myPubkey = useAuthStore((s) => s.pubkey)
+  const follows = useNostrStore((s) => s.follows)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const readRelays = useMemo(
     () => [...new Set([...relays.filter((r) => r.read).map((r) => r.url), ...userReadRelays])].slice(0, 10),
@@ -112,8 +117,17 @@ export function ThreadPage() {
     }
   }, [eventId, readRelays])
 
+  const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
+
   const visibleReplies = useMemo(
-    () => replies.filter((r) => !isEventDeleted(r) && !isEventMuted(r)),
+    () =>
+      replies.filter((r) => {
+        if (isEventDeleted(r) || isEventMuted(r)) return false
+        if (spamFilterEnabled && evaluateNoteSpam(r, { myPubkey, follows: followSet }).isSpam) {
+          return false
+        }
+        return true
+      }),
     [
       replies,
       isEventDeleted,
@@ -125,6 +139,9 @@ export function ThreadPage() {
       privateMutedPubkeys,
       privateMutedHashtags,
       privateMutedWords,
+      spamFilterEnabled,
+      myPubkey,
+      followSet,
     ],
   )
 

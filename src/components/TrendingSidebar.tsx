@@ -55,7 +55,9 @@ const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: 
   const mutedPubkeys = useSettingsStore((s) => s.mutedPubkeys)
   const privateMutedPubkeys = useSettingsStore((s) => s.privateMutedPubkeys)
   const mutedHashtags = useSettingsStore((s) => s.mutedHashtags)
+  const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const mutedWords = useSettingsStore((s) => s.mutedWords)
+  const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const profile = useNostrStore((s) => (ev ? s.profiles[ev.pubkey] : undefined))
   const likes = useNostrStore((s) => s.reactionCounts[eventId] || 0)
   const reposts = useNostrStore((s) => s.repostCounts[eventId] || 0)
@@ -74,7 +76,9 @@ const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: 
     mutedPubkeys,
     privateMutedPubkeys,
     mutedHashtags,
+    privateMutedHashtags,
     mutedWords,
+    privateMutedWords,
   ])
 
   if (!ev || !parsed || hidden) return null
