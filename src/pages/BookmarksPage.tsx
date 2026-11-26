@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Bookmark } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Bookmark, List } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
@@ -49,9 +50,18 @@ export function BookmarksPage() {
 
   return (
     <div>
-      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5 flex items-center gap-2">
-        <Bookmark className="w-4 h-4 text-[#f59f00]" />
-        <h1 className="font-bold text-base">Bookmarks ({bookmarks.length})</h1>
+      <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] px-4 py-3.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Bookmark className="w-4 h-4 text-[#f59f00]" />
+          <h1 className="font-bold text-base">Bookmarks ({bookmarks.length})</h1>
+        </div>
+        <Link
+          to="/lists?tab=bookmarks"
+          className="px-2.5 py-1 rounded-lg bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-[11px] font-medium text-purple-300 hover:text-purple-200 flex items-center gap-1.5 transition"
+        >
+          <List className="w-3 h-3" />
+          Bookmark Lists →
+        </Link>
       </div>
 
       {bookmarks.length === 0 ? (

@@ -27,6 +27,16 @@ import { useAuthStore } from './useAuthStore'
 import { useListsStore } from './useListsStore'
 import { useSettingsStore, type SidebarFeedMode } from './useSettingsStore'
 import { getListFeedDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
+import {
+  capActiveRelaySetUrls,
+  getCustomFeedStorageKey,
+  getInterestFeedDTag,
+  getRelaySetFeedDTag,
+  isAnyCustomFeedKey,
+  isInterestFeedKey,
+  isRelaySetFeedKey,
+  type CustomFeedKey,
+} from '../nostr/nip51Sets'
 import { stripTrackingParamsInText } from '../nostr/urlClean'
 
 export interface NostrProfile {
@@ -53,7 +63,7 @@ export type FeedTab =
   | 'firewisp'
   | 'following'
   | 'extended'
-  | ListFeedKey
+  | CustomFeedKey
 
 function loadBookmarks(): string[] {
   if (typeof localStorage === 'undefined') return []
@@ -739,12 +749,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return merged.slice(0, 500)
       }
       const nextPending = { ...s.pendingFeedIds, [tab]: [] }
-      if (isListFeedKey(tab)) {
-        const dTag = getListFeedDTag(tab)!
+      if (isAnyCustomFeedKey(tab)) {
+        const storageKey = getCustomFeedStorageKey(tab)
         return {
           listFeedIds: {
             ...s.listFeedIds,
-            [dTag]: mergeInto(s.listFeedIds[dTag] ?? []),
+            [storageKey]: mergeInto(s.listFeedIds[storageKey] ?? []),
           },
           pendingFeedIds: nextPending,
         }
@@ -774,10 +784,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   clearFeedTab: (tab) => {
     set((s) => {
       const nextPending = { ...s.pendingFeedIds, [tab]: [] }
-      if (isListFeedKey(tab)) {
-        const dTag = getListFeedDTag(tab)!
+      if (isAnyCustomFeedKey(tab)) {
+        const storageKey = getCustomFeedStorageKey(tab)
         return {
-          listFeedIds: { ...s.listFeedIds, [dTag]: [] },
+          listFeedIds: { ...s.listFeedIds, [storageKey]: [] },
           pendingFeedIds: nextPending,
         }
       }
@@ -816,7 +826,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       bookmarks: [],
       userLiked: {},
       userRepostIds: {},
-      activeFeedTab: isListFeedKey(s.activeFeedTab) ? 'foryou' : s.activeFeedTab,
+      activeFeedTab: isAnyCustomFeedKey(s.activeFeedTab) ? 'foryou' : s.activeFeedTab,
       forYouFeedIds: [],
       forYouSuppIds: {},
       followingFeedIds: [],
@@ -1507,6 +1517,52 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             if (picked.length >= 6) break
           }
         }
+      } else if (isInterestFeedKey(mode)) {
+        const dTag = getInterestFeedDTag(mode)!
+        const setObj = useListsStore.getState().interestSets[dTag]
+        if (setObj && setObj.items.length > 0) {
+          const allowedTags = new Set(setObj.items.map((t) => t.toLowerCase()))
+          const since7d = Math.floor(Date.now() / 1000) - 7 * 86400
+          const raw = await nostrPool.query(
+            readRelays,
+            { kinds: [1, 20, 21, 22], '#t': [...allowedTags].slice(0, 50), since: since7d, limit: 60 },
+            4000,
+          )
+          const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+          for (const ev of sorted) {
+            if (seenIds.has(ev.id) || get().isEventDeleted(ev) || get().isEventMuted(ev)) continue
+            if (ev.kind === 1 && !isTopLevelNote(ev)) continue
+            if (!extractEventHashtags(ev).some((h) => allowedTags.has(h))) continue
+            if (!ev.content.trim()) continue
+            const pk = ev.pubkey.toLowerCase()
+            const count = authorCounts.get(pk) || 0
+            if (count >= 2) continue
+            seenIds.add(ev.id)
+            authorCounts.set(pk, count + 1)
+            picked.push(ev)
+            if (picked.length >= 6) break
+          }
+        }
+      } else if (isRelaySetFeedKey(mode)) {
+        const dTag = getRelaySetFeedDTag(mode)!
+        const setObj = useListsStore.getState().relaySets[dTag]
+        const targetUrls = setObj ? capActiveRelaySetUrls(setObj.items) : []
+        if (targetUrls.length > 0) {
+          const raw = await nostrPool.query(targetUrls, { kinds: [1, 20, 21, 22], limit: 50 }, 4000)
+          const sorted = [...raw].sort((a, b) => b.created_at - a.created_at)
+          for (const ev of sorted) {
+            if (seenIds.has(ev.id) || get().isEventDeleted(ev) || get().isEventMuted(ev)) continue
+            if (ev.kind === 1 && !isTopLevelNote(ev)) continue
+            if (!ev.content.trim()) continue
+            const pk = ev.pubkey.toLowerCase()
+            const count = authorCounts.get(pk) || 0
+            if (count >= 2) continue
+            seenIds.add(ev.id)
+            authorCounts.set(pk, count + 1)
+            picked.push(ev)
+            if (picked.length >= 6) break
+          }
+        }
       } else {
         // Fire Wisp Relay (wss://relay.firewisp.de)
         const raw = await nostrPool.query([FIREWISP_RELAY], { kinds: [1], limit: 50 }, 4000)
@@ -1549,7 +1605,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         const eventsMap = { ...s.events }
         for (const ev of picked) eventsMap[ev.id] = ev
         const resolvedIds =
-          nextIds.length > 0 || mode === 'extended' || mode === 'firewisp' || isListFeedKey(mode)
+          nextIds.length > 0 ||
+          mode === 'extended' ||
+          mode === 'firewisp' ||
+          isAnyCustomFeedKey(mode)
             ? nextIds
             : (s.sidebarFeedIds[mode] ?? [])
         return {
@@ -1570,8 +1629,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     if (get().loadingMore) return 0
     const s = get()
     const listDTag = getListFeedDTag(tab)
-    const currentIds = listDTag
-      ? (s.listFeedIds[listDTag] ?? [])
+    const interestDTag = getInterestFeedDTag(tab)
+    const relaySetDTag = getRelaySetFeedDTag(tab)
+    const customStorageKey = isAnyCustomFeedKey(tab) ? getCustomFeedStorageKey(tab) : null
+    const currentIds = customStorageKey
+      ? (s.listFeedIds[customStorageKey] ?? [])
       : tab === 'foryou'
         ? s.forYouFeedIds
         : tab === 'firewisp'
@@ -1595,6 +1657,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     const readRelays = useSettingsStore.getState().getReadRelays()
     const mergedFollowingRelays = [...new Set([...readRelays, ...s.userReadRelays])].slice(0, 10)
+    const relaySetUrls = relaySetDTag
+      ? capActiveRelaySetUrls(useListsStore.getState().relaySets[relaySetDTag]?.items ?? [])
+      : []
     const targetRelays =
       tab === 'firewisp'
         ? [FIREWISP_RELAY]
@@ -1602,7 +1667,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           ? [TRENDING_RELAY]
           : tab === 'global'
             ? CURATED_EXPLORE_RELAYS
-            : mergedFollowingRelays
+            : relaySetDTag
+              ? relaySetUrls
+              : mergedFollowingRelays
 
     const myPubkey = useAuthStore.getState().pubkey
     set({ loadingMore: true })
@@ -1668,6 +1735,23 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
         const results = await Promise.all(queries)
         fetched = results.flat().filter((ev) => allowed.has(ev.pubkey.toLowerCase()))
+      } else if (interestDTag) {
+        const setObj = useListsStore.getState().interestSets[interestDTag]
+        if (!setObj || setObj.items.length === 0) return 0
+        const allowedTags = new Set(setObj.items.map((t) => t.toLowerCase()))
+        const res = await nostrPool.query(
+          targetRelays,
+          { kinds: [1, 6, 20, 21, 22], '#t': [...allowedTags].slice(0, 50), until, limit: 40 },
+          4500,
+        )
+        fetched = res.filter((ev) => extractEventHashtags(ev).some((h) => allowedTags.has(h)))
+      } else if (relaySetDTag) {
+        if (targetRelays.length === 0) return 0
+        fetched = await nostrPool.query(
+          targetRelays,
+          { kinds: [1, 6, 20, 21, 22], until, limit: 50 },
+          4500,
+        )
       } else if (tab === 'extended') {
         const allowed = new Set(s.extendedAuthors.map((p) => p.toLowerCase()))
         const res = await nostrPool.query(
@@ -1714,12 +1798,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           merged.sort((a, b) => (eventsMap[b]?.created_at || 0) - (eventsMap[a]?.created_at || 0))
           return merged.slice(0, 800)
         }
-        if (listDTag) {
+        if (customStorageKey) {
           return {
             events: eventsMap,
             listFeedIds: {
               ...st.listFeedIds,
-              [listDTag]: mergeOlder(st.listFeedIds[listDTag] ?? []),
+              [customStorageKey]: mergeOlder(st.listFeedIds[customStorageKey] ?? []),
             },
           }
         }
@@ -1742,6 +1826,18 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const readRelays = useSettingsStore.getState().getReadRelays()
     const userReadRelays = get().userReadRelays
     const mergedFollowingRelays = [...new Set([...readRelays, ...userReadRelays])].slice(0, 10)
+    const follows = get().follows
+    const followedHashtags = get().followedHashtags
+    const extendedAuthors = get().extendedAuthors
+    const myPubkey = useAuthStore.getState().pubkey
+    const listDTag = getListFeedDTag(tab)
+    const interestDTag = getInterestFeedDTag(tab)
+    const relaySetDTag = getRelaySetFeedDTag(tab)
+    const customStorageKey = isAnyCustomFeedKey(tab) ? getCustomFeedStorageKey(tab) : null
+    const listState = useListsStore.getState()
+    const relaySetUrls = relaySetDTag
+      ? capActiveRelaySetUrls(listState.relaySets[relaySetDTag]?.items ?? [])
+      : []
     const targetRelays =
       tab === 'firewisp'
         ? [FIREWISP_RELAY]
@@ -1749,12 +1845,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           ? [TRENDING_RELAY]
           : tab === 'global'
             ? CURATED_EXPLORE_RELAYS
-            : mergedFollowingRelays
-    const follows = get().follows
-    const followedHashtags = get().followedHashtags
-    const extendedAuthors = get().extendedAuthors
-    const myPubkey = useAuthStore.getState().pubkey
-    const listDTag = getListFeedDTag(tab)
+            : relaySetDTag
+              ? relaySetUrls
+              : mergedFollowingRelays
 
     if (tab === 'following' && !myPubkey) {
       set({ loadingFeed: false })
@@ -1766,12 +1859,41 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         set({ loadingFeed: false })
         return () => {}
       }
-      const listState = useListsStore.getState()
       const listObj = listState.lists[listDTag]
       if (!listObj && listState.loading) {
         return () => {}
       }
       if (!listObj || listObj.members.length === 0) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
+    }
+
+    if (interestDTag) {
+      if (!myPubkey) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
+      const setObj = listState.interestSets[interestDTag]
+      if (!setObj && listState.loading) {
+        return () => {}
+      }
+      if (!setObj || setObj.items.length === 0) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
+    }
+
+    if (relaySetDTag) {
+      if (!myPubkey) {
+        set({ loadingFeed: false })
+        return () => {}
+      }
+      const setObj = listState.relaySets[relaySetDTag]
+      if (!setObj && listState.loading) {
+        return () => {}
+      }
+      if (!setObj || relaySetUrls.length === 0) {
         set({ loadingFeed: false })
         return () => {}
       }
@@ -1816,7 +1938,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         ? new Set(extendedAuthors.map((p) => p.toLowerCase()))
         : null
     const allowedListAuthors = listDTag
-      ? new Set((useListsStore.getState().lists[listDTag]?.members ?? []).map((p) => p.toLowerCase()))
+      ? new Set((listState.lists[listDTag]?.members ?? []).map((p) => p.toLowerCase()))
+      : null
+    const allowedInterestHashtags = interestDTag
+      ? new Set((listState.interestSets[interestDTag]?.items ?? []).map((t) => t.toLowerCase()))
       : null
 
     const authorBatch = new Set<string>()
@@ -1844,6 +1969,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (allowedListAuthors && !allowedListAuthors.has(ev.pubkey.toLowerCase())) {
         return
       }
+      if (
+        allowedInterestHashtags &&
+        !extractEventHashtags(ev).some((h) => allowedInterestHashtags.has(h))
+      ) {
+        return
+      }
 
       get().ingestEvent(ev)
       authorBatch.add(ev.pubkey)
@@ -1857,8 +1988,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22 || ev.kind === 6) {
         set((s) => {
           const eventsMap = { ...s.events, [ev.id]: ev }
-          const existingList = listDTag
-            ? (s.listFeedIds[listDTag] ?? [])
+          const existingList = customStorageKey
+            ? (s.listFeedIds[customStorageKey] ?? [])
             : tab === 'foryou'
               ? s.forYouFeedIds
               : tab === 'firewisp'
@@ -1887,12 +2018,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             }
           }
 
-          if (listDTag) {
+          if (customStorageKey) {
             return {
               events: eventsMap,
               listFeedIds: {
                 ...s.listFeedIds,
-                [listDTag]: insertSortedUnique(s.listFeedIds[listDTag] ?? [], ev, eventsMap),
+                [customStorageKey]: insertSortedUnique(
+                  s.listFeedIds[customStorageKey] ?? [],
+                  ev,
+                  eventsMap,
+                ),
               },
             }
           }
@@ -1994,6 +2129,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
         return chunks
       }
+      if (interestDTag) {
+        const allTags = [...(allowedInterestHashtags || [])].slice(0, 50)
+        if (allTags.length === 0) return []
+        const since = Math.floor(Date.now() / 1000) - 7 * 86400
+        return [{ kinds: [1, 6, 20, 21, 22], '#t': allTags, since, limit: 60 }]
+      }
+      if (relaySetDTag) {
+        return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
+      }
       if (tab === 'extended') {
         return [{ kinds: [1, 20, 21, 22], authors: extendedAuthors.slice(0, 200), limit: 80 }]
       }
@@ -2019,8 +2163,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       flushAuthors()
       set({ loadingFeed: false })
       const s = get()
-      const ids = listDTag
-        ? (s.listFeedIds[listDTag] ?? []).slice(0, 50)
+      const ids = customStorageKey
+        ? (s.listFeedIds[customStorageKey] ?? []).slice(0, 50)
         : tab === 'foryou'
           ? s.forYouFeedIds.slice(0, 50)
           : tab === 'firewisp'

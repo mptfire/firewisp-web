@@ -41,6 +41,9 @@ const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapMo
 const MuteWordModal = lazy(() =>
   import('./MuteWordModal').then((m) => ({ default: m.MuteWordModal })),
 )
+const SaveToBookmarkSetMenu = lazy(() =>
+  import('./SaveToBookmarkSetMenu').then((m) => ({ default: m.SaveToBookmarkSetMenu })),
+)
 
 const requestedQuotes = new Set<string>()
 const requestedParents = new Set<string>()
@@ -703,6 +706,7 @@ export const NoteCard = memo(function NoteCard({
   const [altPreview, setAltPreview] = useState<string | null>(null)
   const [zapOpen, setZapOpen] = useState(false)
   const [muteWordOpen, setMuteWordOpen] = useState(false)
+  const [saveSetOpen, setSaveSetOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [followBusy, setFollowBusy] = useState(false)
@@ -1028,6 +1032,16 @@ export const NoteCard = memo(function NoteCard({
                       </button>
                     )}
                     <button
+                      onClick={() => {
+                        setSaveSetOpen(true)
+                        setMenuOpen(false)
+                      }}
+                      className="w-full px-3 py-2 text-left text-[#f59f00] hover:bg-[#f59f00]/10 font-medium flex items-center gap-2 cursor-pointer"
+                    >
+                      <Bookmark className="w-3.5 h-3.5" />
+                      Save to bookmark list…
+                    </button>
+                    <button
                       onClick={async () => {
                         try {
                           await navigator.clipboard.writeText(nip19.noteEncode(event.id))
@@ -1290,6 +1304,11 @@ export const NoteCard = memo(function NoteCard({
       {muteWordOpen && (
         <Suspense fallback={null}>
           <MuteWordModal noteContent={event.content} onClose={() => setMuteWordOpen(false)} />
+        </Suspense>
+      )}
+      {saveSetOpen && (
+        <Suspense fallback={null}>
+          <SaveToBookmarkSetMenu noteId={event.id} onClose={() => setSaveSetOpen(false)} />
         </Suspense>
       )}
     </article>

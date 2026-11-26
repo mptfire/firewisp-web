@@ -2,6 +2,7 @@ import { Component, Suspense, lazy, useEffect, type ErrorInfo, type ReactNode } 
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { parseSharedQueryParams } from './lib/shareTarget'
 import { getListFeedDTag } from './lib/nostr/followSets'
+import { getInterestFeedDTag, getRelaySetFeedDTag } from './lib/nostr/nip51Sets'
 import { useAuthStore } from './lib/store/useAuthStore'
 import { useListsStore } from './lib/store/useListsStore'
 import { useLiveStore } from './lib/store/useLiveStore'
@@ -29,6 +30,9 @@ const ListsPage = lazy(() =>
 )
 const ListDetailPage = lazy(() =>
   import('./pages/ListDetailPage').then((m) => ({ default: m.ListDetailPage })),
+)
+const SetDetailPage = lazy(() =>
+  import('./pages/SetDetailPage').then((m) => ({ default: m.SetDetailPage })),
 )
 const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
@@ -98,11 +102,25 @@ export function App() {
   const subscribeFeed = useNostrStore((s) => s.subscribeFeed)
   const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
   const activeListDTag = getListFeedDTag(activeFeedTab)
+  const activeInterestDTag = getInterestFeedDTag(activeFeedTab)
+  const activeRelaySetDTag = getRelaySetFeedDTag(activeFeedTab)
   const activeListSyncKey = useListsStore((s) => {
-    if (!activeListDTag) return ''
-    const list = s.lists[activeListDTag]
-    if (!list) return s.loading ? 'loading' : 'missing'
-    return `${list.dTag}:${list.members.join(',')}`
+    if (activeListDTag) {
+      const list = s.lists[activeListDTag]
+      if (!list) return s.loading ? 'loading' : 'missing'
+      return `${list.dTag}:${list.members.join(',')}`
+    }
+    if (activeInterestDTag) {
+      const setObj = s.interestSets[activeInterestDTag]
+      if (!setObj) return s.loading ? 'loading' : 'missing'
+      return `interest:${setObj.dTag}:${setObj.items.join(',')}`
+    }
+    if (activeRelaySetDTag) {
+      const setObj = s.relaySets[activeRelaySetDTag]
+      if (!setObj) return s.loading ? 'loading' : 'missing'
+      return `relayset:${setObj.dTag}:${setObj.items.join(',')}`
+    }
+    return ''
   })
   const followsLoaded = useNostrStore((s) => s.followsLoaded)
   const follows = useNostrStore((s) => s.follows)
@@ -182,6 +200,7 @@ export function App() {
               <Route path="/search" element={<SearchPage />} />
               <Route path="/bookmarks" element={<BookmarksPage />} />
               <Route path="/lists" element={<ListsPage />} />
+              <Route path="/lists/:setType/:dTag" element={<SetDetailPage />} />
               <Route path="/lists/:dTag" element={<ListDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/live" element={<LiveDirectoryPage />} />

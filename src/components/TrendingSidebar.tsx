@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Flame,
   Globe,
+  Hash,
   Heart,
   List,
   MessageCircle,
@@ -11,10 +12,17 @@ import {
   Radio,
   RefreshCw,
   Repeat2,
+  Server,
   Zap,
 } from 'lucide-react'
 import { parseNoteContent } from '../lib/nostr/content'
 import { getListFeedDTag, makeListFeedKey } from '../lib/nostr/followSets'
+import {
+  getInterestFeedDTag,
+  getRelaySetFeedDTag,
+  makeInterestFeedKey,
+  makeRelaySetFeedKey,
+} from '../lib/nostr/nip51Sets'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
@@ -238,33 +246,59 @@ export function TrendingSidebar() {
   const loadSidebarFeed = useNostrStore((s) => s.loadSidebarFeed)
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
   const listsMap = useListsStore((s) => s.lists)
+  const interestSets = useListsStore((s) => s.interestSets)
+  const relaySets = useListsStore((s) => s.relaySets)
   const listsLoading = useListsStore((s) => s.loading)
   const sortedLists = useMemo(
     () => Object.values(listsMap).sort((a, b) => a.name.localeCompare(b.name)),
     [listsMap],
   )
+  const sortedInterestSets = useMemo(
+    () => Object.values(interestSets).sort((a, b) => a.name.localeCompare(b.name)),
+    [interestSets],
+  )
+  const sortedRelaySets = useMemo(
+    () => Object.values(relaySets).sort((a, b) => a.name.localeCompare(b.name)),
+    [relaySets],
+  )
   const selectedListDTag = getListFeedDTag(sidebarFeedMode)
+  const selectedInterestDTag = getInterestFeedDTag(sidebarFeedMode)
+  const selectedRelaySetDTag = getRelaySetFeedDTag(sidebarFeedMode)
   const selectedList = selectedListDTag ? listsMap[selectedListDTag] : undefined
-  const selectedListMembersKey = selectedList ? selectedList.members.join(',') : ''
+  const selectedInterest = selectedInterestDTag ? interestSets[selectedInterestDTag] : undefined
+  const selectedRelaySet = selectedRelaySetDTag ? relaySets[selectedRelaySetDTag] : undefined
+  const selectedSetObj = selectedInterest || selectedRelaySet
+  const isCustomSetMode = Boolean(selectedListDTag || selectedInterestDTag || selectedRelaySetDTag)
+  const selectedCustomObj = selectedList || selectedSetObj
+  const selectedCustomCount = selectedList
+    ? selectedList.members.length
+    : selectedSetObj
+      ? selectedSetObj.items.length
+      : 0
+  const selectedCustomItemsKey = selectedList
+    ? selectedList.members.join(',')
+    : selectedSetObj
+      ? selectedSetObj.items.join(',')
+      : ''
   const attemptedKeyRef = useRef<string>('')
 
   const isBusy =
     loading ||
     (sidebarFeedMode === 'extended' && loadingExtendedGraph) ||
-    (Boolean(selectedListDTag) && listsLoading && !selectedList)
+    (isCustomSetMode && listsLoading && !selectedCustomObj)
 
   // Initial load whenever the user switches mode (and once follows / lists finish loading)
   useEffect(() => {
-    if (selectedListDTag) {
-      if (!pubkey || (listsLoading && !selectedList) || !selectedList) return
-      const attemptKey = `${sidebarFeedMode}:${selectedListMembersKey}`
+    if (isCustomSetMode) {
+      if (!pubkey || (listsLoading && !selectedCustomObj) || !selectedCustomObj) return
+      const attemptKey = `${sidebarFeedMode}:${selectedCustomItemsKey}`
       if (attemptedKeyRef.current === attemptKey) return
       const prevMode = attemptedKeyRef.current.split(':')[0]
       attemptedKeyRef.current = attemptKey
       const hasCached = (useNostrStore.getState().sidebarFeedIds[sidebarFeedMode]?.length ?? 0) > 0
-      const membersChanged = prevMode === sidebarFeedMode
-      if (membersChanged || !hasCached) {
-        void loadSidebarFeed(sidebarFeedMode, membersChanged)
+      const itemsChanged = prevMode === sidebarFeedMode
+      if (itemsChanged || !hasCached) {
+        void loadSidebarFeed(sidebarFeedMode, itemsChanged)
       }
       return
     }
@@ -280,9 +314,9 @@ export function TrendingSidebar() {
     }
   }, [
     sidebarFeedMode,
-    selectedListDTag,
-    selectedList,
-    selectedListMembersKey,
+    isCustomSetMode,
+    selectedCustomObj,
+    selectedCustomItemsKey,
     listsLoading,
     pubkey,
     followsLoaded,
@@ -301,13 +335,17 @@ export function TrendingSidebar() {
 
   const ModeIcon = selectedListDTag
     ? List
-    : sidebarFeedMode === 'extended'
-      ? Network
-      : sidebarFeedMode === 'global'
-        ? Globe
-        : sidebarFeedMode === 'firewisp'
-          ? Radio
-          : Flame
+    : selectedInterestDTag
+      ? Hash
+      : selectedRelaySetDTag
+        ? Server
+        : sidebarFeedMode === 'extended'
+          ? Network
+          : sidebarFeedMode === 'global'
+            ? Globe
+            : sidebarFeedMode === 'firewisp'
+              ? Radio
+              : Flame
 
   const handleSeeAll = () => {
     setActiveFeedTab(sidebarFeedMode)
@@ -315,16 +353,22 @@ export function TrendingSidebar() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const emptyMessage = selectedListDTag
+  const emptyMessage = isCustomSetMode
     ? !pubkey
-      ? 'Sign in to view posts from this list.'
-      : listsLoading && !selectedList
-        ? 'Syncing your lists from relays…'
-        : !selectedList
-          ? 'This list was not found on your relays.'
-          : selectedList.members.length === 0
-            ? 'No people in this list yet.'
-            : 'No recent posts from this list in the last 7 days.'
+      ? 'Sign in to view posts from this set.'
+      : listsLoading && !selectedCustomObj
+        ? 'Syncing your sets from relays…'
+        : !selectedCustomObj
+          ? 'This set was not found on your relays.'
+          : selectedCustomCount === 0
+            ? selectedInterestDTag
+              ? 'No hashtags in this set yet.'
+              : selectedRelaySetDTag
+                ? 'No relays in this set yet.'
+                : 'No people in this list yet.'
+            : selectedRelaySetDTag
+              ? 'No recent posts loaded from these relays yet.'
+              : 'No recent posts in the last 7 days.'
     : sidebarFeedMode === 'extended'
       ? !pubkey
         ? 'Sign in to see posts from your Extended Web of Trust.'
@@ -337,12 +381,28 @@ export function TrendingSidebar() {
           ? 'No recent posts on Wisp Relay yet.'
           : 'No trending posts loaded yet.'
 
+  const emptyManageLink = selectedListDTag
+    ? `/lists/${encodeURIComponent(selectedListDTag)}`
+    : selectedInterestDTag
+      ? `/lists/interests/${encodeURIComponent(selectedInterestDTag)}`
+      : selectedRelaySetDTag
+        ? `/lists/relays/${encodeURIComponent(selectedRelaySetDTag)}`
+        : '/lists'
+
   return (
     <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530]">
       <div className="flex items-center justify-between gap-2 mb-2.5">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <ModeIcon
-            className={`w-3.5 h-3.5 shrink-0 ${selectedListDTag ? 'text-purple-400' : 'text-[#e8590c]'}`}
+            className={`w-3.5 h-3.5 shrink-0 ${
+              selectedInterestDTag
+                ? 'text-amber-400'
+                : selectedRelaySetDTag
+                  ? 'text-cyan-400'
+                  : selectedListDTag
+                    ? 'text-purple-400'
+                    : 'text-[#e8590c]'
+            }`}
           />
           <select
             aria-label="Sidebar feed source"
@@ -372,6 +432,42 @@ export function TrendingSidebar() {
                 {selectedListDTag && !selectedList && (
                   <option value={sidebarFeedMode} className="bg-[#14151e] text-white">
                     {listsLoading ? 'Loading list…' : 'Saved list'}
+                  </option>
+                )}
+              </optgroup>
+            )}
+            {((pubkey && sortedInterestSets.length > 0) || Boolean(selectedInterestDTag)) && (
+              <optgroup label="Interest Sets" className="bg-[#14151e] text-[#9a9890]">
+                {sortedInterestSets.map((s) => (
+                  <option
+                    key={s.dTag}
+                    value={makeInterestFeedKey(s.dTag)}
+                    className="bg-[#14151e] text-white"
+                  >
+                    {s.name} (#{s.items.length})
+                  </option>
+                ))}
+                {selectedInterestDTag && !selectedInterest && (
+                  <option value={sidebarFeedMode} className="bg-[#14151e] text-white">
+                    {listsLoading ? 'Loading interests…' : 'Saved interest set'}
+                  </option>
+                )}
+              </optgroup>
+            )}
+            {((pubkey && sortedRelaySets.length > 0) || Boolean(selectedRelaySetDTag)) && (
+              <optgroup label="Relay Sets" className="bg-[#14151e] text-[#9a9890]">
+                {sortedRelaySets.map((s) => (
+                  <option
+                    key={s.dTag}
+                    value={makeRelaySetFeedKey(s.dTag)}
+                    className="bg-[#14151e] text-white"
+                  >
+                    {s.name} ({s.items.length})
+                  </option>
+                ))}
+                {selectedRelaySetDTag && !selectedRelaySet && (
+                  <option value={sidebarFeedMode} className="bg-[#14151e] text-white">
+                    {listsLoading ? 'Loading relays…' : 'Saved relay set'}
                   </option>
                 )}
               </optgroup>
@@ -416,15 +512,15 @@ export function TrendingSidebar() {
       ) : postIds.length === 0 ? (
         <div className="space-y-2">
           <p className="text-xs text-[#6f6d66]">{emptyMessage}</p>
-          {selectedListDTag && selectedList && selectedList.members.length === 0 && (
+          {isCustomSetMode && selectedCustomObj && selectedCustomCount === 0 && (
             <Link
-              to={`/lists/${encodeURIComponent(selectedListDTag)}`}
+              to={emptyManageLink}
               className="inline-block text-[11px] text-purple-300 hover:underline font-medium"
             >
-              Add people →
+              {selectedInterestDTag ? 'Add hashtags →' : selectedRelaySetDTag ? 'Add relays →' : 'Add people →'}
             </Link>
           )}
-          {selectedListDTag && !listsLoading && !selectedList && (
+          {isCustomSetMode && !listsLoading && !selectedCustomObj && (
             <button
               type="button"
               onClick={() => setSidebarFeedMode('trending')}

@@ -2076,4 +2076,165 @@ describe('Full code-audit regression & security hardening', () => {
     const filteredTag = filterEventsForSearch([evOld, evNew, evStranger], '#nostr', allowed)
     expect(filteredTag.map((e) => e.id)).toEqual([evOld.id])
   })
+
+  it('parses, validates, encrypts, caps, and manages NIP-51 kind 30002/30003/30015 sets (Phase D)', async () => {
+    const {
+      KIND_BOOKMARK_SET,
+      KIND_INTEREST_SET,
+      KIND_RELAY_SET,
+      buildNip51SetDeletionTags,
+      buildUpdatedNip51SetPayload,
+      capActiveRelaySetUrls,
+      getCustomFeedStorageKey,
+      isAnyCustomFeedKey,
+      isInterestFeedKey,
+      isRelaySetFeedKey,
+      makeInterestFeedKey,
+      makeRelaySetFeedKey,
+      normalizeNip51SetItem,
+      parseNip51SetEvent,
+    } = await import('../nostr/nip51Sets')
+
+    const pk = 'a'.repeat(64)
+    const noteId = 'b'.repeat(64)
+
+    // Strict item validation
+    expect(normalizeNip51SetItem(KIND_BOOKMARK_SET, noteId.toUpperCase())).toBe(noteId)
+    expect(normalizeNip51SetItem(KIND_BOOKMARK_SET, 'bad-id')).toBeNull()
+    expect(normalizeNip51SetItem(KIND_INTEREST_SET, ' #Nostr-Dev ')).toBe('nostr-dev')
+    expect(normalizeNip51SetItem(KIND_INTEREST_SET, 'has spaces!')).toBeNull()
+    expect(normalizeNip51SetItem(KIND_RELAY_SET, 'wss://nos.lol/')).toBe('wss://nos.lol')
+    expect(normalizeNip51SetItem(KIND_RELAY_SET, 'ws://insecure.example')).toBeNull()
+    expect(normalizeNip51SetItem(KIND_RELAY_SET, 'wss://192.168.1.10')).toBeNull()
+    expect(normalizeNip51SetItem(KIND_RELAY_SET, 'wss://127.0.0.1:8080')).toBeNull()
+
+    // Active relay-set cap <= 8 & SSRF filter
+    const tenRelays = [
+      'wss://nos.lol',
+      'ws://bad.example',
+      'wss://192.168.1.5',
+      'wss://r1.example.com',
+      'wss://r2.example.com',
+      'wss://r3.example.com',
+      'wss://r4.example.com',
+      'wss://r5.example.com',
+      'wss://r6.example.com',
+      'wss://r7.example.com',
+      'wss://r8.example.com',
+      'wss://r9.example.com',
+    ]
+    const capped = capActiveRelaySetUrls(tenRelays)
+    expect(capped).toHaveLength(8)
+    expect(capped[0]).toBe('wss://nos.lol')
+    expect(capped[7]).toBe('wss://r7.example.com')
+
+    // Reject app-state / dTag
+    expect(
+      parseNip51SetEvent({
+        id: '1'.repeat(64),
+        kind: KIND_BOOKMARK_SET,
+        pubkey: pk,
+        created_at: 1795700000,
+        content: '',
+        tags: [['d', 'app/state']],
+      }),
+    ).toBeNull()
+
+    // Preserve unknown / `a` tags in Bookmark set
+    const builtBookmark = buildUpdatedNip51SetPayload({
+      kind: KIND_BOOKMARK_SET,
+      dTag: 'reading',
+      title: 'Reading List',
+      items: [noteId, 'bad'],
+      isPrivate: false,
+      basePublicTags: [
+        ['d', 'reading'],
+        ['a', `30023:${pk}:article-1`],
+      ],
+    })
+    expect(builtBookmark.publicTags).toContainEqual(['a', `30023:${pk}:article-1`])
+    expect(builtBookmark.publicTags.filter((t) => t[0] === 'e')).toEqual([['e', noteId]])
+
+    // Fail-closed on locked set
+    expect(() =>
+      buildUpdatedNip51SetPayload({
+        kind: KIND_INTEREST_SET,
+        dTag: 'p-1234567890ab',
+        title: 'Locked',
+        items: ['bitcoin'],
+        isPrivate: true,
+        isLocked: true,
+      }),
+    ).toThrow()
+
+    // Feed keys & storage keys
+    expect(isInterestFeedKey(makeInterestFeedKey('tech'))).toBe(true)
+    expect(isRelaySetFeedKey(makeRelaySetFeedKey('rel'))).toBe(true)
+    expect(isAnyCustomFeedKey('interest:tech')).toBe(true)
+    expect(isAnyCustomFeedKey('relayset:bad/slash')).toBe(false)
+    expect(getCustomFeedStorageKey('list:friends')).toBe('friends')
+    expect(getCustomFeedStorageKey('interest:tech')).toBe('interest:tech')
+    expect(getCustomFeedStorageKey('relayset:rel')).toBe('relayset:rel')
+
+    // Store CRUD + Settings pin/sidebar cleanup on deletion
+    const { useAuthStore } = await import('../store/useAuthStore')
+    const { useListsStore } = await import('../store/useListsStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { useNostrStore } = await import('../store/useNostrStore')
+    const { nostrPool } = await import('../nostr/pool')
+
+    const prevAuth = useAuthStore.getState()
+    const prevSettings = useSettingsStore.getState()
+    const prevNostr = useNostrStore.getState()
+    const origPublish = nostrPool.publish.bind(nostrPool)
+    const signer = new LocalKeySigner(generateSecretKey())
+
+    try {
+      useListsStore.getState().resetLists()
+      useAuthStore.setState({ signer, pubkey: signer.pubkey, method: 'local' })
+      useSettingsStore.setState({
+        relays: [{ url: 'wss://relay.firewisp.de', read: true, write: true }],
+        pinnedListTabs: [],
+        sidebarFeedMode: 'trending',
+      })
+      nostrPool.publish = (async (relays) =>
+        relays.map((relay) => ({ relay, ok: true }))) as typeof nostrPool.publish
+
+      const intSet = await useListsStore.getState().createItemSet(KIND_INTEREST_SET, 'Bitcoin Dev', false)
+      expect(intSet).not.toBeNull()
+      await useListsStore.getState().addItemToSet(KIND_INTEREST_SET, intSet!.dTag, '#Lightning')
+      expect(useListsStore.getState().interestSets[intSet!.dTag].items).toEqual(['lightning'])
+
+      const feedKey = makeInterestFeedKey(intSet!.dTag)
+      useSettingsStore.getState().togglePinnedListTab(feedKey)
+      useSettingsStore.getState().setSidebarFeedMode(feedKey)
+      useNostrStore.getState().setActiveFeedTab(feedKey)
+      expect(useSettingsStore.getState().pinnedListTabs).toContain(feedKey)
+      expect(useSettingsStore.getState().sidebarFeedMode).toBe(feedKey)
+
+      const delTags = buildNip51SetDeletionTags(KIND_INTEREST_SET, signer.pubkey, intSet!.dTag)
+      expect(delTags).toContainEqual(['k', String(KIND_INTEREST_SET)])
+
+      await useListsStore.getState().deleteItemSet(KIND_INTEREST_SET, intSet!.dTag)
+      expect(useListsStore.getState().interestSets[intSet!.dTag]).toBeUndefined()
+      expect(useSettingsStore.getState().pinnedListTabs).not.toContain(feedKey)
+      expect(useSettingsStore.getState().sidebarFeedMode).toBe('trending')
+      expect(useNostrStore.getState().activeFeedTab).toBe('foryou')
+    } finally {
+      nostrPool.publish = origPublish
+      useListsStore.getState().resetLists()
+      useSettingsStore.setState({
+        pinnedListTabs: prevSettings.pinnedListTabs,
+        sidebarFeedMode: prevSettings.sidebarFeedMode,
+        relays: prevSettings.relays,
+      })
+      useNostrStore.setState({ activeFeedTab: prevNostr.activeFeedTab })
+      useAuthStore.setState({
+        signer: prevAuth.signer,
+        pubkey: prevAuth.pubkey,
+        method: prevAuth.method,
+      })
+      signer.destroy()
+    }
+  })
 })

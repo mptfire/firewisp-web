@@ -7,9 +7,11 @@ import {
   Globe,
   TrendingUp,
   Network,
+  Hash,
   List,
   Lock,
   Pin,
+  Server,
   Loader2,
   ShieldCheck,
   RefreshCw,
@@ -19,7 +21,19 @@ import {
   ChevronUp,
 } from 'lucide-react'
 import type { Event } from 'nostr-tools/pure'
+import { extractEventHashtags } from '../lib/nostr/content'
 import { getListFeedDTag, isListFeedKey, makeListFeedKey } from '../lib/nostr/followSets'
+import {
+  capActiveRelaySetUrls,
+  getCustomFeedStorageKey,
+  getInterestFeedDTag,
+  getRelaySetFeedDTag,
+  isAnyCustomFeedKey,
+  isInterestFeedKey,
+  isRelaySetFeedKey,
+  makeInterestFeedKey,
+  makeRelaySetFeedKey,
+} from '../lib/nostr/nip51Sets'
 import { evaluateNoteSpam, isTopLevelNote } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
@@ -57,9 +71,16 @@ export function FeedPage() {
   const tab = useNostrStore((s) => s.activeFeedTab)
   const setTab = useNostrStore((s) => s.setActiveFeedTab)
   const activeListDTag = getListFeedDTag(tab)
+  const activeInterestDTag = getInterestFeedDTag(tab)
+  const activeRelaySetDTag = getRelaySetFeedDTag(tab)
+  const customStorageKey = isAnyCustomFeedKey(tab) ? getCustomFeedStorageKey(tab) : null
   const listsMap = useListsStore((s) => s.lists)
+  const interestSets = useListsStore((s) => s.interestSets)
+  const relaySets = useListsStore((s) => s.relaySets)
   const listsLoading = useListsStore((s) => s.loading)
   const activeList = activeListDTag ? listsMap[activeListDTag] : undefined
+  const activeInterestSet = activeInterestDTag ? interestSets[activeInterestDTag] : undefined
+  const activeRelaySet = activeRelaySetDTag ? relaySets[activeRelaySetDTag] : undefined
   const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
   const setShowRepliesInFollows = useNostrStore((s) => s.setShowRepliesInFollows)
   const follows = useNostrStore((s) => s.follows)
@@ -77,7 +98,7 @@ export function FeedPage() {
   const trendingFeedIds = useNostrStore((s) => s.trendingFeedIds)
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
   const activeListFeedIds = useNostrStore((s) =>
-    activeListDTag ? (s.listFeedIds[activeListDTag] ?? EMPTY_IDS) : EMPTY_IDS,
+    customStorageKey ? (s.listFeedIds[customStorageKey] ?? EMPTY_IDS) : EMPTY_IDS,
   )
   const pendingIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab] ?? EMPTY_IDS)
   const loadingFeed = useNostrStore((s) => s.loadingFeed)
@@ -109,7 +130,11 @@ export function FeedPage() {
 
   const visibleTabs = useMemo(() => {
     const sbDTag = getListFeedDTag(sidebarFeedMode)
+    const sbIntDTag = getInterestFeedDTag(sidebarFeedMode)
+    const sbRelayDTag = getRelaySetFeedDTag(sidebarFeedMode)
     const sbList = sbDTag ? listsMap[sbDTag] : undefined
+    const sbInt = sbIntDTag ? interestSets[sbIntDTag] : undefined
+    const sbRelay = sbRelayDTag ? relaySets[sbRelayDTag] : undefined
     const thirdTab: [FeedTab, string, typeof Flame] =
       sidebarFeedMode === 'extended'
         ? ['extended', 'Extended', Network]
@@ -119,7 +144,11 @@ export function FeedPage() {
             ? ['firewisp', 'Wisp Relay', Flame]
             : sbDTag && (sbList || listsLoading)
               ? [sidebarFeedMode, sbList?.name || 'List', List]
-              : ['trending', 'Trending', TrendingUp]
+              : sbIntDTag && (sbInt || listsLoading)
+                ? [sidebarFeedMode, sbInt?.name || 'Interests', Hash]
+                : sbRelayDTag && (sbRelay || listsLoading)
+                  ? [sidebarFeedMode, sbRelay?.name || 'Relays', Server]
+                  : ['trending', 'Trending', TrendingUp]
 
     const list: [FeedTab, string, typeof Flame][] = [
       ['foryou', 'For You', Sparkles],
@@ -136,17 +165,30 @@ export function FeedPage() {
     if (showExtendedTab) addTab('extended', 'Extended', Network)
     if (showExploreTab) addTab('global', 'Explore', Globe)
 
-    for (const dTag of pinnedListTabs) {
-      const pinned = listsMap[dTag]
-      if (pinned) addTab(makeListFeedKey(dTag), pinned.name, List)
+    for (const pinKey of pinnedListTabs) {
+      if (isInterestFeedKey(pinKey)) {
+        const dTag = getInterestFeedDTag(pinKey)!
+        const pinned = interestSets[dTag]
+        if (pinned) addTab(makeInterestFeedKey(dTag), pinned.name, Hash)
+      } else if (isRelaySetFeedKey(pinKey)) {
+        const dTag = getRelaySetFeedDTag(pinKey)!
+        const pinned = relaySets[dTag]
+        if (pinned) addTab(makeRelaySetFeedKey(dTag), pinned.name, Server)
+      } else {
+        const pinned = listsMap[pinKey]
+        if (pinned) addTab(makeListFeedKey(pinKey), pinned.name, List)
+      }
     }
 
     if (activeListDTag && !seen.has(tab)) {
-      if (activeList) {
-        addTab(tab, activeList.name, List)
-      } else if (listsLoading) {
-        addTab(tab, 'List', List)
-      }
+      if (activeList) addTab(tab, activeList.name, List)
+      else if (listsLoading) addTab(tab, 'List', List)
+    } else if (activeInterestDTag && !seen.has(tab)) {
+      if (activeInterestSet) addTab(tab, activeInterestSet.name, Hash)
+      else if (listsLoading) addTab(tab, 'Interests', Hash)
+    } else if (activeRelaySetDTag && !seen.has(tab)) {
+      if (activeRelaySet) addTab(tab, activeRelaySet.name, Server)
+      else if (listsLoading) addTab(tab, 'Relays', Server)
     }
     return list
   }, [
@@ -156,9 +198,15 @@ export function FeedPage() {
     showExploreTab,
     pinnedListTabs,
     listsMap,
+    interestSets,
+    relaySets,
     listsLoading,
     activeListDTag,
     activeList,
+    activeInterestDTag,
+    activeInterestSet,
+    activeRelaySetDTag,
+    activeRelaySet,
     tab,
   ])
 
@@ -207,7 +255,7 @@ export function FeedPage() {
     else setVisibleCount((n) => n + PAGE_SIZE)
   }
 
-  const ids = activeListDTag
+  const ids = customStorageKey
     ? activeListFeedIds
     : tab === 'foryou'
       ? forYouFeedIds
@@ -230,6 +278,9 @@ export function FeedPage() {
     const extendedSet = new Set(extendedAuthors.map((p) => p.toLowerCase()))
     const listMemberSet = activeList
       ? new Set(activeList.members.map((p) => p.toLowerCase()))
+      : null
+    const interestTagSet = activeInterestSet
+      ? new Set(activeInterestSet.items.map((t) => t.toLowerCase()))
       : null
     const myPk = pubkey?.toLowerCase()
     let blocked = 0
@@ -254,6 +305,13 @@ export function FeedPage() {
       // STRICT LIST GATE: only members of the selected NIP-51 list appear here
       if (activeListDTag) {
         if (!listMemberSet || !listMemberSet.has(ev.pubkey.toLowerCase())) return null
+      }
+
+      // STRICT INTEREST GATE: must match at least one hashtag from the active Interest set
+      if (activeInterestDTag) {
+        if (!interestTagSet || !extractEventHashtags(ev).some((h) => interestTagSet.has(h))) {
+          return null
+        }
       }
 
       // STRICT FOR YOU GATE (when signed in): only Follows, loaded Extended WoT, or vetted Trending/Topic picks
@@ -281,13 +339,13 @@ export function FeedPage() {
 
       if (seen.has(targetEv.id)) return null
 
-      // Hide replies (including reposted replies) in Follows, For You, Extended, Fire Wisp & Lists when replies are hidden
+      // Hide replies (including reposted replies) in Follows, For You, Extended, Fire Wisp & Custom Sets when replies are hidden
       if (
         (tab === 'following' ||
           tab === 'foryou' ||
           tab === 'extended' ||
           tab === 'firewisp' ||
-          Boolean(activeListDTag)) &&
+          Boolean(customStorageKey)) &&
         !showRepliesInFollows &&
         targetEv.kind === 1 &&
         !isTopLevelNote(targetEv)
@@ -367,18 +425,49 @@ export function FeedPage() {
     follows,
     extendedAuthors,
     forYouSuppIds,
+    customStorageKey,
     activeListDTag,
     activeList,
+    activeInterestDTag,
+    activeInterestSet,
   ])
 
-  const isPinnedActiveList = activeListDTag ? pinnedListTabs.includes(activeListDTag) : false
+  const activeCustomPinKey = activeListDTag
+    ? activeListDTag
+    : activeInterestDTag || activeRelaySetDTag
+      ? tab
+      : null
+  const activeCustomExists = activeListDTag
+    ? Boolean(activeList)
+    : activeInterestDTag
+      ? Boolean(activeInterestSet)
+      : activeRelaySetDTag
+        ? Boolean(activeRelaySet)
+        : false
+  const activeCustomManagePath = activeListDTag
+    ? `/lists/${encodeURIComponent(activeListDTag)}`
+    : activeInterestDTag
+      ? `/lists/interests/${encodeURIComponent(activeInterestDTag)}`
+      : activeRelaySetDTag
+        ? `/lists/relays/${encodeURIComponent(activeRelaySetDTag)}`
+        : '/lists'
+  const isPinnedActiveList = activeCustomPinKey
+    ? pinnedListTabs.includes(activeCustomPinKey)
+    : false
 
   return (
     <div>
       {/* Sticky Feed Tabs */}
       <div className="sticky top-[calc(52px+env(safe-area-inset-top,0px))] md:top-0 z-20 bg-[#0e0e11]/90 backdrop-blur-md border-b border-[#20222c] flex overflow-x-auto text-xs sm:text-sm font-medium">
         {visibleTabs.map(([id, label, Icon]) => {
-          const isListTab = isListFeedKey(id)
+          const isCustomTab = isAnyCustomFeedKey(id)
+          const inactiveAccent = isInterestFeedKey(id)
+            ? 'text-amber-400'
+            : isRelaySetFeedKey(id)
+              ? 'text-cyan-400'
+              : isCustomTab
+                ? 'text-purple-400'
+                : ''
           return (
             <button
               key={id}
@@ -398,7 +487,7 @@ export function FeedPage() {
             >
               <Icon
                 className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${
-                  tab === id ? 'text-[#f59f00]' : isListTab ? 'text-purple-400' : ''
+                  tab === id ? 'text-[#f59f00]' : inactiveAccent
                 }`}
               />
               <span className="max-w-[140px] truncate">{label}</span>
@@ -460,6 +549,34 @@ export function FeedPage() {
                     : 'List not found'}
               </span>
             </>
+          ) : activeInterestDTag ? (
+            <>
+              <Hash className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              {activeInterestSet?.isPrivate && (
+                <Lock className="w-3 h-3 text-emerald-400 shrink-0" aria-label="Private set" />
+              )}
+              <span className="truncate">
+                {activeInterestSet
+                  ? `${activeInterestSet.name} · ${activeInterestSet.items.length} ${activeInterestSet.items.length === 1 ? 'hashtag' : 'hashtags'}`
+                  : listsLoading
+                    ? 'Loading interest set…'
+                    : 'Interest set not found'}
+              </span>
+            </>
+          ) : activeRelaySetDTag ? (
+            <>
+              <Server className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              {activeRelaySet?.isPrivate && (
+                <Lock className="w-3 h-3 text-emerald-400 shrink-0" aria-label="Private set" />
+              )}
+              <span className="truncate">
+                {activeRelaySet
+                  ? `${activeRelaySet.name} · ${capActiveRelaySetUrls(activeRelaySet.items).length} active relays`
+                  : listsLoading
+                    ? 'Loading relay set…'
+                    : 'Relay set not found'}
+              </span>
+            </>
           ) : tab === 'firewisp' ? (
             <>
               <Flame className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
@@ -484,12 +601,12 @@ export function FeedPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {activeListDTag && activeList && (
+          {activeCustomPinKey && activeCustomExists && (
             <>
               <button
                 type="button"
-                onClick={() => togglePinnedListTab(activeListDTag)}
-                title={isPinnedActiveList ? 'Unpin list from Feed tabs' : 'Pin list to Feed tabs'}
+                onClick={() => togglePinnedListTab(activeCustomPinKey)}
+                title={isPinnedActiveList ? 'Unpin from Feed tabs' : 'Pin to Feed tabs'}
                 className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition inline-flex items-center gap-1 cursor-pointer ${
                   isPinnedActiveList
                     ? 'bg-purple-500/20 border-purple-400/50 text-purple-200'
@@ -500,7 +617,7 @@ export function FeedPage() {
                 {isPinnedActiveList ? 'Pinned' : 'Pin'}
               </button>
               <Link
-                to={`/lists/${encodeURIComponent(activeListDTag)}`}
+                to={activeCustomManagePath}
                 className="text-[11px] text-purple-300 hover:underline whitespace-nowrap"
               >
                 Manage
@@ -511,7 +628,7 @@ export function FeedPage() {
             tab === 'foryou' ||
             tab === 'extended' ||
             tab === 'firewisp' ||
-            Boolean(activeListDTag)) && (
+            Boolean(customStorageKey)) && (
             <div
               className="inline-flex items-center gap-1.5"
               title="Show (On) or hide (Off) replies in this feed"
@@ -624,17 +741,29 @@ export function FeedPage() {
                 : activeList.members.length === 0
                   ? `No people in "${activeList.name}" yet.`
                   : `No recent notes from "${activeList.name}" in the last 7 days.`
-              : tab === 'firewisp'
-                ? 'No posts on relay.firewisp.de yet — be the first to ignite it!'
-                : tab === 'following'
-                  ? pubkey
-                    ? 'No recent notes from your follows loaded yet.'
-                    : 'Sign in and follow people on Nostr to fill your Follows feed.'
-                  : 'No notes received from your configured relays yet.'}
+              : activeInterestDTag
+                ? !activeInterestSet
+                  ? 'Interest set not found or still syncing from relays.'
+                  : activeInterestSet.items.length === 0
+                    ? `No hashtags in "${activeInterestSet.name}" yet.`
+                    : `No recent notes matching "${activeInterestSet.name}" hashtags in the last 7 days.`
+                : activeRelaySetDTag
+                  ? !activeRelaySet
+                    ? 'Relay set not found or still syncing from relays.'
+                    : capActiveRelaySetUrls(activeRelaySet.items).length === 0
+                      ? `No valid wss:// relays in "${activeRelaySet.name}" yet.`
+                      : `No notes received from "${activeRelaySet.name}" relays yet.`
+                  : tab === 'firewisp'
+                    ? 'No posts on relay.firewisp.de yet — be the first to ignite it!'
+                    : tab === 'following'
+                      ? pubkey
+                        ? 'No recent notes from your follows loaded yet.'
+                        : 'Sign in and follow people on Nostr to fill your Follows feed.'
+                      : 'No notes received from your configured relays yet.'}
           </p>
-          {activeListDTag && (
+          {customStorageKey && (
             <Link
-              to={activeList ? `/lists/${encodeURIComponent(activeListDTag)}` : '/lists'}
+              to={activeCustomExists ? activeCustomManagePath : '/lists'}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-semibold text-white transition"
             >
               <List className="w-3.5 h-3.5" />
@@ -642,7 +771,15 @@ export function FeedPage() {
                 ? activeList.members.length === 0
                   ? 'Add people'
                   : 'Manage list'
-                : 'Back to Lists'}
+                : activeInterestSet
+                  ? activeInterestSet.items.length === 0
+                    ? 'Add hashtags'
+                    : 'Manage interests'
+                  : activeRelaySet
+                    ? activeRelaySet.items.length === 0
+                      ? 'Add relays'
+                      : 'Manage relays'
+                    : 'Back to Lists'}
             </Link>
           )}
           {tab === 'firewisp' && (

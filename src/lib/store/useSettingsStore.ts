@@ -10,12 +10,22 @@ import {
 } from '../constants'
 import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
 import { isAppStateDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
+import {
+  isInterestFeedKey,
+  isRelaySetFeedKey,
+  type InterestFeedKey,
+  type RelaySetFeedKey,
+} from '../nostr/nip51Sets'
 
 const STORAGE_KEY = 'firewisp_settings_v1'
 const NWC_STORAGE_KEY = 'firewisp_nwc_v1'
 
 export type BuiltinSidebarFeedMode = 'trending' | 'extended' | 'global' | 'firewisp'
-export type SidebarFeedMode = BuiltinSidebarFeedMode | ListFeedKey
+export type SidebarFeedMode =
+  | BuiltinSidebarFeedMode
+  | ListFeedKey
+  | InterestFeedKey
+  | RelaySetFeedKey
 const VALID_SIDEBAR_FEED_MODES: readonly BuiltinSidebarFeedMode[] = [
   'trending',
   'extended',
@@ -27,8 +37,18 @@ function isValidSidebarFeedMode(mode: unknown): mode is SidebarFeedMode {
   return (
     (typeof mode === 'string' &&
       (VALID_SIDEBAR_FEED_MODES as readonly string[]).includes(mode)) ||
-    isListFeedKey(mode)
+    isListFeedKey(mode) ||
+    isInterestFeedKey(mode) ||
+    isRelaySetFeedKey(mode)
   )
+}
+
+function isValidPinnedTabKey(raw: unknown): raw is string {
+  if (typeof raw !== 'string') return false
+  const clean = raw.trim()
+  if (!clean) return false
+  if (isInterestFeedKey(clean) || isRelaySetFeedKey(clean)) return true
+  return !clean.includes(':') && !isAppStateDTag(clean)
 }
 
 function loadStoredNwc(): { nwcUri: string; remember: boolean } {
@@ -307,9 +327,8 @@ function loadInitial(): PersistedSettings & {
       ? [
           ...new Set(
             parsed.pinnedListTabs
-              .filter((d): d is string => typeof d === 'string')
-              .map((d) => d.trim())
-              .filter((d) => d.length > 0 && !isAppStateDTag(d)),
+              .filter((d): d is string => isValidPinnedTabKey(d))
+              .map((d) => d.trim()),
           ),
         ].slice(0, 12)
       : []
@@ -739,7 +758,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   togglePinnedListTab: (rawDTag) => {
     const clean = rawDTag.trim()
-    if (!clean || isAppStateDTag(clean)) return
+    if (!isValidPinnedTabKey(clean)) return
     const cur = get().pinnedListTabs
     const next = cur.includes(clean)
       ? cur.filter((d) => d !== clean)
