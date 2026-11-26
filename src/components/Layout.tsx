@@ -332,7 +332,10 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh bg-[#0e0e11] text-[#f4f1ea] flex justify-center">
       <RoamingFireWisp />
-      <div className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-dvh`}>
+      <div
+        data-fw-shell=""
+        className={`w-full ${isTheaterMode ? 'max-w-[1680px]' : 'max-w-[1440px]'} flex min-h-dvh`}
+      >
         {/* Left Sidebar (desktop) */}
         <aside className="hidden md:flex flex-col w-60 shrink-0 border-r border-[#20222c] px-3 py-4 sticky top-0 h-dvh overflow-y-auto gap-3.5">
           <div>

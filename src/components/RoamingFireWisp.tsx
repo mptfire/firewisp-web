@@ -6,135 +6,292 @@ interface Point {
   y: number
 }
 
-interface BezierSegment {
-  p0: Point
-  p1: Point
-  p2: Point
-  p3: Point
-  durationSec: number
+interface PathSample {
+  x: number
+  y: number
+  cumDist: number
 }
 
-const TAIL_TIME_OFFSETS = [0.028, 0.056, 0.088, 0.124, 0.165] as const
-
-function randomWaypoint(width: number, height: number, from?: Point): Point {
-  const minX = Math.max(24, width * 0.04)
-  const maxX = Math.max(minX + 40, width * 0.96)
-  const minY = Math.max(24, height * 0.06)
-  const maxY = Math.max(minY + 40, height * 0.92)
-  const minDist = Math.min(width, height) * 0.35
-
-  let best: Point = {
-    x: minX + Math.random() * (maxX - minX),
-    y: minY + Math.random() * (maxY - minY),
-  }
-  if (!from) return best
-
-  for (let i = 0; i < 8; i++) {
-    const candidate = {
-      x: minX + Math.random() * (maxX - minX),
-      y: minY + Math.random() * (maxY - minY),
-    }
-    const dist = Math.hypot(candidate.x - from.x, candidate.y - from.y)
-    best = candidate
-    if (dist >= minDist) break
-  }
-  return best
+interface BoxRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+  pane: 'left' | 'main' | 'right'
+  isBrand?: boolean
 }
 
-function createNextSegment(
-  prev: BezierSegment | null,
-  width: number,
-  height: number,
-): BezierSegment {
-  const p0 = prev ? prev.p3 : randomWaypoint(width, height)
-  const p3 = randomWaypoint(width, height, p0)
-  const dx = p3.x - p0.x
-  const dy = p3.y - p0.y
-  const dist = Math.max(120, Math.hypot(dx, dy))
+// Matches the original 24s brand-box orbit (~544px / 24s ≈ 22.7 px/s)
+const WISP_SPEED_PX_PER_SEC = 23
+const SAMPLE_STEP_PX = 3.5
+const TAIL_DIST_OFFSETS = [11, 19, 27, 35, 43] as const
 
-  // C1 continuity: mirror the exit handle of the previous cubic Bezier across p0
-  let p1: Point
-  if (prev) {
-    const outX = prev.p3.x - prev.p2.x
-    const outY = prev.p3.y - prev.p2.y
-    const outLen = Math.hypot(outX, outY) || 1
-    const handleLen = Math.min(dist * 0.42, Math.max(60, outLen))
-    p1 = {
-      x: p0.x + (outX / outLen) * handleLen,
-      y: p0.y + (outY / outLen) * handleLen,
-    }
-  } else {
-    const perpX = -dy / dist
-    const perpY = dx / dist
-    const curveSign = Math.random() > 0.5 ? 1 : -1
-    const sway = dist * (0.2 + Math.random() * 0.25) * curveSign
-    p1 = {
-      x: p0.x + dx * 0.32 + perpX * sway,
-      y: p0.y + dy * 0.32 + perpY * sway,
-    }
-  }
+const BOX_SELECTOR =
+  '.fw-flame-box, aside .rounded-2xl, aside .rounded-xl, aside nav, main article, main section, main .rounded-2xl, main .rounded-xl, main img, main video'
 
-  const perpX = -dy / dist
-  const perpY = dx / dist
-  const sway2 = dist * (0.18 + Math.random() * 0.28) * (Math.random() > 0.5 ? 1 : -1)
-  const p2 = {
-    x: p0.x + dx * 0.68 + perpX * sway2,
-    y: p0.y + dy * 0.68 + perpY * sway2,
-  }
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v))
+}
 
-  // Clamp control handles safely inside padded viewport bounds so turns stay visible
-  const clampX = (v: number) => Math.min(width - 16, Math.max(16, v))
-  const clampY = (v: number) => Math.min(height - 16, Math.max(16, v))
-  p1 = { x: clampX(p1.x), y: clampY(p1.y) }
+function getShellBounds(): BoxRect {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const shell = document.querySelector('[data-fw-shell]')
+  const r = shell?.getBoundingClientRect()
+  const rawLeft = r ? Math.max(0, r.left) : 0
+  const rawRight = r ? Math.min(vw, r.right) : vw
 
-  // Wandering speed ~95-140 px/s -> calm 4.5s to 8.5s arcs
-  const speed = 95 + Math.random() * 45
-  const approxLength = dist * 1.18
-  const durationSec = Math.min(8.5, Math.max(4.5, approxLength / speed))
+  const left = rawLeft + 10
+  const right = Math.max(left + 80, rawRight - 10)
+  const top = 14
+  const bottom = Math.max(top + 80, vh - 14)
 
   return {
-    p0,
-    p1,
-    p2: { x: clampX(p2.x), y: clampY(p2.y) },
-    p3,
-    durationSec,
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    pane: 'main',
   }
 }
 
-function evalBezier(seg: BezierSegment, t: number): { x: number; y: number; angleDeg: number } {
-  const u = Math.min(1, Math.max(0, t))
-  const m = 1 - u
-  const mm = m * m
-  const uu = u * u
+function discoverVisibleBoxes(bounds: BoxRect): BoxRect[] {
+  const shell = document.querySelector('[data-fw-shell]') || document
+  const candidates = Array.from(shell.querySelectorAll(BOX_SELECTOR))
+  const found: BoxRect[] = []
+  const midX = (bounds.left + bounds.right) / 2
 
-  const x =
-    mm * m * seg.p0.x +
-    3 * mm * u * seg.p1.x +
-    3 * m * uu * seg.p2.x +
-    uu * u * seg.p3.x
-  const y =
-    mm * m * seg.p0.y +
-    3 * mm * u * seg.p1.y +
-    3 * m * uu * seg.p2.y +
-    uu * u * seg.p3.y
+  for (const el of candidates) {
+    const r = el.getBoundingClientRect()
+    if (r.width < 60 || r.height < 32) continue
+    if (r.bottom <= bounds.top + 8 || r.top >= bounds.bottom - 8) continue
+    if (r.right <= bounds.left + 8 || r.left >= bounds.right - 8) continue
 
-  const dxdt =
-    3 * mm * (seg.p1.x - seg.p0.x) +
-    6 * m * u * (seg.p2.x - seg.p1.x) +
-    3 * uu * (seg.p3.x - seg.p2.x)
-  const dydt =
-    3 * mm * (seg.p1.y - seg.p0.y) +
-    6 * m * u * (seg.p2.y - seg.p1.y) +
-    3 * uu * (seg.p3.y - seg.p2.y)
+    const left = clamp(r.left, bounds.left, bounds.right)
+    const right = clamp(r.right, bounds.left, bounds.right)
+    const top = clamp(r.top, bounds.top, bounds.bottom)
+    const bottom = clamp(r.bottom, bounds.top, bounds.bottom)
+    const width = right - left
+    const height = bottom - top
 
-  const angleDeg = (Math.atan2(dydt, dxdt) * 180) / Math.PI
-  return { x, y, angleDeg }
+    if (width < 72 || height < 36) continue
+
+    // Deduplicate overlapping parent/child wrappers with nearly identical bounds
+    const duplicate = found.some(
+      (b) =>
+        Math.abs(b.left - left) < 12 &&
+        Math.abs(b.top - top) < 12 &&
+        Math.abs(b.right - right) < 12 &&
+        Math.abs(b.bottom - bottom) < 12,
+    )
+    if (duplicate) continue
+
+    let pane: 'left' | 'main' | 'right' = 'main'
+    if (el.closest('aside')) {
+      pane = left + width / 2 < midX ? 'left' : 'right'
+    }
+
+    found.push({
+      left,
+      top,
+      right,
+      bottom,
+      width,
+      height,
+      pane,
+      isBrand: el.classList.contains('fw-flame-box'),
+    })
+  }
+
+  if (found.length > 0) return found
+
+  // Safe fallback rectangle inside the 3-pane shell if no boxes are mounted yet
+  const pad = 18
+  const fbLeft = bounds.left + pad
+  const fbRight = Math.max(fbLeft + 120, bounds.right - pad)
+  const fbTop = bounds.top + pad
+  const fbBottom = Math.max(fbTop + 120, Math.min(bounds.bottom - pad, fbTop + 320))
+  return [
+    {
+      left: fbLeft,
+      top: fbTop,
+      right: fbRight,
+      bottom: fbBottom,
+      width: fbRight - fbLeft,
+      height: fbBottom - fbTop,
+      pane: 'main',
+    },
+  ]
+}
+
+function buildRoundedRectLoop(rect: BoxRect): Point[] {
+  const rad = Math.min(14, rect.width * 0.22, rect.height * 0.22)
+  const pts: Point[] = []
+
+  const pushArc = (cx: number, cy: number, startRad: number, endRad: number) => {
+    const arcLen = Math.max(4, Math.abs(endRad - startRad) * rad)
+    const steps = Math.max(3, Math.round(arcLen / SAMPLE_STEP_PX))
+    for (let i = 0; i < steps; i++) {
+      const a = startRad + ((endRad - startRad) * i) / steps
+      pts.push({ x: cx + Math.cos(a) * rad, y: cy + Math.sin(a) * rad })
+    }
+  }
+
+  const pushLine = (x1: number, y1: number, x2: number, y2: number) => {
+    const dist = Math.hypot(x2 - x1, y2 - y1)
+    const steps = Math.max(1, Math.round(dist / SAMPLE_STEP_PX))
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps
+      pts.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t })
+    }
+  }
+
+  // Clockwise perimeter around the border of the box
+  pushLine(rect.left + rad, rect.top, rect.right - rad, rect.top)
+  pushArc(rect.right - rad, rect.top + rad, -Math.PI / 2, 0)
+  pushLine(rect.right, rect.top + rad, rect.right, rect.bottom - rad)
+  pushArc(rect.right - rad, rect.bottom - rad, 0, Math.PI / 2)
+  pushLine(rect.right - rad, rect.bottom, rect.left + rad, rect.bottom)
+  pushArc(rect.left + rad, rect.bottom - rad, Math.PI / 2, Math.PI)
+  pushLine(rect.left, rect.bottom - rad, rect.left, rect.top + rad)
+  pushArc(rect.left + rad, rect.top + rad, Math.PI, Math.PI * 1.5)
+
+  return pts
+}
+
+function isSameBox(a: BoxRect, b: BoxRect): boolean {
+  return (
+    Math.abs(a.left - b.left) < 12 &&
+    Math.abs(a.top - b.top) < 12 &&
+    Math.abs(a.right - b.right) < 12 &&
+    Math.abs(a.bottom - b.bottom) < 12
+  )
+}
+
+function pickNextBox(
+  boxes: BoxRect[],
+  currPos: Point,
+  lastBox: BoxRect | null,
+): BoxRect {
+  const candidates = lastBox ? boxes.filter((b) => !isSameBox(b, lastBox)) : boxes
+  const pool = candidates.length > 0 ? candidates : boxes
+
+  // Sometimes roam across panes (left -> main -> right); mostly explore nearby boxes calmly
+  const crossPane = Math.random() < 0.35
+  const byDist = [...pool].sort((a, b) => {
+    const da = Math.hypot((a.left + a.right) / 2 - currPos.x, (a.top + a.bottom) / 2 - currPos.y)
+    const db = Math.hypot((b.left + b.right) / 2 - currPos.x, (b.top + b.bottom) / 2 - currPos.y)
+    return da - db
+  })
+
+  if (crossPane && lastBox) {
+    const otherPane = byDist.filter((b) => b.pane !== lastBox.pane)
+    if (otherPane.length > 0) {
+      return otherPane[Math.floor(Math.random() * Math.min(3, otherPane.length))]
+    }
+  }
+
+  const nearCount = Math.min(4, byDist.length)
+  return byDist[Math.floor(Math.random() * nearCount)]
+}
+
+function appendPoint(samples: PathSample[], pt: Point, bounds: BoxRect) {
+  const x = clamp(pt.x, bounds.left, bounds.right)
+  const y = clamp(pt.y, bounds.top, bounds.bottom)
+  const last = samples[samples.length - 1]
+  if (!last) {
+    samples.push({ x, y, cumDist: 0 })
+    return
+  }
+  const d = Math.hypot(x - last.x, y - last.y)
+  if (d < 0.4) return
+  samples.push({ x, y, cumDist: last.cumDist + d })
+}
+
+function appendBezierTransition(
+  samples: PathSample[],
+  p0: Point,
+  exitAngleRad: number,
+  p3: Point,
+  entryAngleRad: number,
+  bounds: BoxRect,
+) {
+  const dist = Math.hypot(p3.x - p0.x, p3.y - p0.y)
+  if (dist < 4) return
+
+  const handle = Math.min(96, Math.max(16, dist * 0.36))
+  const p1: Point = {
+    x: clamp(p0.x + Math.cos(exitAngleRad) * handle, bounds.left, bounds.right),
+    y: clamp(p0.y + Math.sin(exitAngleRad) * handle, bounds.top, bounds.bottom),
+  }
+  const p2: Point = {
+    x: clamp(p3.x - Math.cos(entryAngleRad) * handle, bounds.left, bounds.right),
+    y: clamp(p3.y - Math.sin(entryAngleRad) * handle, bounds.top, bounds.bottom),
+  }
+
+  const approxLen = Math.max(dist, Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p3.x - p2.x, p3.y - p2.y))
+  const steps = Math.max(4, Math.ceil(approxLen / SAMPLE_STEP_PX))
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const m = 1 - t
+    const mm = m * m
+    const tt = t * t
+    appendPoint(
+      samples,
+      {
+        x: mm * m * p0.x + 3 * mm * t * p1.x + 3 * m * tt * p2.x + tt * t * p3.x,
+        y: mm * m * p0.y + 3 * mm * t * p1.y + 3 * m * tt * p2.y + tt * t * p3.y,
+      },
+      bounds,
+    )
+  }
+}
+
+function samplePositionAtDist(samples: PathSample[], targetDist: number): Point {
+  if (samples.length === 0) return { x: 0, y: 0 }
+  if (targetDist <= samples[0].cumDist) return { x: samples[0].x, y: samples[0].y }
+  const last = samples[samples.length - 1]
+  if (targetDist >= last.cumDist) return { x: last.x, y: last.y }
+
+  let lo = 0
+  let hi = samples.length - 1
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1
+    if (samples[mid].cumDist <= targetDist) lo = mid
+    else hi = mid
+  }
+  const a = samples[lo]
+  const b = samples[hi]
+  const span = Math.max(0.0001, b.cumDist - a.cumDist)
+  const frac = (targetDist - a.cumDist) / span
+  return {
+    x: a.x + (b.x - a.x) * frac,
+    y: a.y + (b.y - a.y) * frac,
+  }
+}
+
+function samplePoseAtDist(
+  samples: PathSample[],
+  targetDist: number,
+): { x: number; y: number; angleDeg: number } {
+  const pos = samplePositionAtDist(samples, targetDist)
+  const behind = samplePositionAtDist(samples, targetDist - 4)
+  const ahead = samplePositionAtDist(samples, targetDist + 4)
+  const dx = ahead.x - behind.x
+  const dy = ahead.y - behind.y
+  const angleDeg = dx * dx + dy * dy > 0.01 ? (Math.atan2(dy, dx) * 180) / Math.PI : 0
+  return { x: pos.x, y: pos.y, angleDeg }
 }
 
 /**
- * Main Orange Fire Wisp sprite that organically roams across the viewport.
- * Sits at `z-[5]` so it glides visibly over text while disappearing underneath
- * pictures, videos, YouTube cards, and live players (`relative z-[6]`).
+ * Main Orange Fire Wisp sprite that moves at the same calm speed (~23 px/s) as
+ * the original brand-box orbit, carefully tracing around visible text boxes,
+ * notes, sidebar panels, and images strictly within the 3-pane layout shell.
+ * Sits at `z-[5]` so it glides over text while ducking under `z-[6]` media.
  */
 export function RoamingFireWisp() {
   const [reducedMotion, setReducedMotion] = useState(() =>
@@ -158,24 +315,89 @@ export function RoamingFireWisp() {
   useEffect(() => {
     if (reducedMotion || typeof window === 'undefined') return
 
-    let width = window.innerWidth
-    let height = window.innerHeight
-    let prevSeg: BezierSegment | null = null
-    let currSeg = createNextSegment(null, width, height)
-    let elapsedSec = 0
+    let bounds = getShellBounds()
+    const samples: PathSample[] = []
+    let headDist = 0
+    let lastBox: BoxRect | null = null
+    let lastAngleRad = 0
     let lastTs: number | null = null
     let rafId = 0
 
+    const enqueueBoxTrace = (box: BoxRect, isInitial = false) => {
+      const loop = buildRoundedRectLoop(box)
+      if (loop.length < 4) return
+
+      const lastSample = samples[samples.length - 1]
+      let startIdx = 0
+      if (!isInitial && lastSample) {
+        let bestDist = Infinity
+        for (let i = 0; i < loop.length; i++) {
+          const d = Math.hypot(loop[i].x - lastSample.x, loop[i].y - lastSample.y)
+          if (d < bestDist) {
+            bestDist = d
+            startIdx = i
+          }
+        }
+      }
+
+      const dir = isInitial || Math.random() > 0.45 ? 1 : -1
+      const totalPerimeter = loop.length * SAMPLE_STEP_PX
+      const traceLength = isInitial
+        ? Math.min(totalPerimeter * 0.55, 220)
+        : Math.min(totalPerimeter * 0.78, 160 + Math.random() * 240)
+      const stepCount = Math.max(12, Math.round(traceLength / SAMPLE_STEP_PX))
+
+      const entryPt = loop[startIdx]
+      const entryNext = loop[(startIdx + dir + loop.length) % loop.length]
+      const entryAngle = Math.atan2(entryNext.y - entryPt.y, entryNext.x - entryPt.x)
+
+      if (!isInitial && lastSample) {
+        appendBezierTransition(samples, lastSample, lastAngleRad, entryPt, entryAngle, bounds)
+      }
+
+      for (let k = 0; k < stepCount; k++) {
+        const idx = (startIdx + dir * k + loop.length * 4) % loop.length
+        appendPoint(samples, loop[idx], bounds)
+      }
+
+      const endIdx = (startIdx + dir * (stepCount - 1) + loop.length * 4) % loop.length
+      const prevEndIdx = (endIdx - dir + loop.length * 4) % loop.length
+      lastAngleRad = Math.atan2(
+        loop[endIdx].y - loop[prevEndIdx].y,
+        loop[endIdx].x - loop[prevEndIdx].x,
+      )
+      lastBox = box
+    }
+
+    const ensurePathAhead = () => {
+      bounds = getShellBounds()
+      const totalDist = samples[samples.length - 1]?.cumDist ?? 0
+      if (totalDist - headDist >= 110) return
+
+      const boxes = discoverVisibleBoxes(bounds)
+      if (!lastBox) {
+        const brandBox = boxes.find((b) => b.isBrand) || boxes[0]
+        enqueueBoxTrace(brandBox, true)
+        return
+      }
+
+      const currPos = samples[samples.length - 1] || {
+        x: bounds.left + bounds.width * 0.25,
+        y: bounds.top + 80,
+      }
+      const next = pickNextBox(boxes, currPos, lastBox)
+      enqueueBoxTrace(next, false)
+    }
+
     const onResize = () => {
-      width = window.innerWidth
-      height = window.innerHeight
+      bounds = getShellBounds()
     }
 
     const onVisibility = () => {
-      if (!document.hidden) {
-        lastTs = null
-      }
+      if (!document.hidden) lastTs = null
     }
+
+    ensurePathAhead()
 
     const renderFrame = (ts: number) => {
       if (document.hidden) {
@@ -184,40 +406,39 @@ export function RoamingFireWisp() {
         return
       }
 
-      if (lastTs === null) {
-        lastTs = ts
-      }
+      if (lastTs === null) lastTs = ts
       const dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000))
       lastTs = ts
-      elapsedSec += dt
 
-      while (elapsedSec >= currSeg.durationSec) {
-        elapsedSec -= currSeg.durationSec
-        prevSeg = currSeg
-        currSeg = createNextSegment(prevSeg, width, height)
-      }
+      headDist += WISP_SPEED_PX_PER_SEC * dt
+      ensurePathAhead()
 
-      const u = elapsedSec / currSeg.durationSec
-      const head = evalBezier(currSeg, u)
+      // Keep path bounded strictly inside current 3-pane horizontal edges on resize
+      const head = samplePoseAtDist(samples, headDist)
+      const hx = clamp(head.x, bounds.left, bounds.right)
+      const hy = clamp(head.y, bounds.top, bounds.bottom)
+
       if (headRef.current) {
-        headRef.current.style.transform = `translate3d(${head.x - 14}px, ${head.y - 10}px, 0) rotate(${head.angleDeg.toFixed(1)}deg)`
+        headRef.current.style.transform = `translate3d(${(hx - 14).toFixed(1)}px, ${(hy - 10).toFixed(1)}px, 0) rotate(${head.angleDeg.toFixed(1)}deg)`
       }
 
-      for (let i = 0; i < TAIL_TIME_OFFSETS.length; i++) {
+      for (let i = 0; i < TAIL_DIST_OFFSETS.length; i++) {
         const el = tailRefs.current[i]
         if (!el) continue
-        const offsetSec = TAIL_TIME_OFFSETS[i]
-        let sample: { x: number; y: number; angleDeg: number }
-        if (elapsedSec >= offsetSec) {
-          sample = evalBezier(currSeg, (elapsedSec - offsetSec) / currSeg.durationSec)
-        } else if (prevSeg) {
-          const prevRemain = offsetSec - elapsedSec
-          const prevT = Math.max(0, 1 - prevRemain / prevSeg.durationSec)
-          sample = evalBezier(prevSeg, prevT)
-        } else {
-          sample = head
+        const tailPose = samplePoseAtDist(samples, headDist - TAIL_DIST_OFFSETS[i])
+        const tx = clamp(tailPose.x, bounds.left, bounds.right)
+        const ty = clamp(tailPose.y, bounds.top, bounds.bottom)
+        el.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) translate(-50%, -50%) rotate(${tailPose.angleDeg.toFixed(1)}deg)`
+      }
+
+      // Prune old path history well behind the tail to keep memory tiny
+      const keepFrom = headDist - 90
+      if (samples.length > 60 && samples[16].cumDist < keepFrom) {
+        let drop = 0
+        while (drop < samples.length - 40 && samples[drop + 1].cumDist < keepFrom) {
+          drop++
         }
-        el.style.transform = `translate3d(${sample.x}px, ${sample.y}px, 0) translate(-50%, -50%) rotate(${sample.angleDeg.toFixed(1)}deg)`
+        if (drop > 0) samples.splice(0, drop)
       }
 
       rafId = requestAnimationFrame(renderFrame)
