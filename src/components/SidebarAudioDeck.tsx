@@ -31,6 +31,9 @@ export function SidebarAudioDeck() {
 
   const scratchRef = useRef<number[]>(Array(EQ_BAND_COUNT).fill(0))
   const peaksRef = useRef<number[]>(Array(EQ_BAND_COUNT).fill(0))
+  const volumeRef = useRef(mediaVolume)
+  volumeRef.current = mediaVolume
+  const wheelBoxRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const sync = () => {
@@ -41,9 +44,9 @@ export function SidebarAudioDeck() {
     return subscribeAudioActivity(sync)
   }, [])
 
-  // Run lightweight ~28fps equalizer loop ONLY while sound is actively playing
+  // Run lightweight ~28fps equalizer loop ONLY while sound is actively playing and tab is visible
   useEffect(() => {
-    if (!soundPlaying || mediaMuted || mediaVolume <= 0) {
+    if (!soundPlaying || mediaMuted) {
       setHasSpectrum(false)
       setBars(Array(EQ_BAND_COUNT).fill(0))
       peaksRef.current.fill(0)
@@ -54,6 +57,15 @@ export function SidebarAudioDeck() {
     let rafId = 0
     let lastTick = 0
     const tick = (now: number) => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        rafId = 0
+        return
+      }
+      const vol = volumeRef.current
+      if (vol <= 0) {
+        rafId = requestAnimationFrame(tick)
+        return
+      }
       if (now - lastTick >= 36) {
         lastTick = now
         const scratch = scratchRef.current
@@ -72,7 +84,7 @@ export function SidebarAudioDeck() {
         } else {
           // Graceful volume-scaled studio equalizer animation when source host restricts raw CORS FFT access
           const t = now * 0.0042
-          const volScale = Math.min(1.15, Math.max(0.28, Math.min(2, mediaVolume) * 0.85))
+          const volScale = Math.min(1.15, Math.max(0.28, Math.min(2, vol) * 0.85))
           for (let i = 0; i < EQ_BAND_COUNT; i++) {
             const bandPos = i / (EQ_BAND_COUNT - 1)
             const shape = 0.82 - Math.abs(bandPos - 0.34) * 0.55
@@ -91,9 +103,22 @@ export function SidebarAudioDeck() {
       }
       rafId = requestAnimationFrame(tick)
     }
-    rafId = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafId)
-  }, [soundPlaying, mediaMuted, mediaVolume])
+
+    const onVisChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden && !rafId) {
+        rafId = requestAnimationFrame(tick)
+      }
+    }
+
+    if (typeof document === 'undefined' || !document.hidden) {
+      rafId = requestAnimationFrame(tick)
+    }
+    document?.addEventListener('visibilitychange', onVisChange)
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      document?.removeEventListener('visibilitychange', onVisChange)
+    }
+  }, [soundPlaying, mediaMuted])
 
   const effectiveVol = mediaMuted ? 0 : Math.min(2, Math.max(0, mediaVolume))
   const pct = Math.round(effectiveVol * 100)
@@ -117,6 +142,23 @@ export function SidebarAudioDeck() {
     if (nextVol > 0 && mediaMuted) setMediaMuted(false)
     if (nextVol === 0 && !mediaMuted) setMediaMuted(true)
   }
+
+  const effectiveVolRef = useRef(effectiveVol)
+  effectiveVolRef.current = effectiveVol
+  const handleVolumeChangeRef = useRef(handleVolumeChange)
+  handleVolumeChangeRef.current = handleVolumeChange
+
+  useEffect(() => {
+    const el = wheelBoxRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const delta = e.deltaY < 0 ? 0.06 : -0.06
+      handleVolumeChangeRef.current(Math.min(2, Math.max(0, effectiveVolRef.current + delta)))
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   return (
     <div
@@ -232,11 +274,7 @@ export function SidebarAudioDeck() {
 
       {/* Permanent Global Volume Slider (0% -> 200% Boost) */}
       <div
-        onWheel={(e) => {
-          e.preventDefault()
-          const delta = e.deltaY < 0 ? 0.06 : -0.06
-          handleVolumeChange(Math.min(2, Math.max(0, effectiveVol + delta)))
-        }}
+        ref={wheelBoxRef}
         className="flex items-center gap-2"
         title="Global volume for all Fire Wisp videos & streams (0–100% normal, 101–200% boost · scroll wheel adjusts)"
       >

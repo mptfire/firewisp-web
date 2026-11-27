@@ -621,6 +621,8 @@
 .fw-tab-hidden .fw-wisp-head-inner,
 .fw-tab-hidden .fw-tail-pill,
 .fw-tab-hidden .fw-notif-wisp,
+.fw-tab-hidden .fw-wisp-flame-powerloss,
+.fw-tab-hidden .fw-wisp-black-outline,
 .fw-tab-hidden .fw-roam-wisp,
 .fw-tab-hidden .fw-audio-marquee-track {
   animation-play-state: paused !important;

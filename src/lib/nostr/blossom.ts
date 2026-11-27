@@ -64,7 +64,12 @@ export async function buildBlossomAuthHeader(
     ],
   })
   const json = JSON.stringify(signed)
-  const encoded = btoa(unescape(encodeURIComponent(json)))
+  const utf8Bytes = new TextEncoder().encode(json)
+  let binary = ''
+  for (let i = 0; i < utf8Bytes.length; i++) {
+    binary += String.fromCharCode(utf8Bytes[i])
+  }
+  const encoded = btoa(binary)
   return `Nostr ${encoded}`
 }
 
@@ -101,6 +106,35 @@ export async function stripImageExifClientSide(
   }
   if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
     return { blob: file, mimeType }
+  }
+  if (cleanMime === 'image/webp') {
+    try {
+      const header = new Uint8Array(await file.slice(0, 4096).arrayBuffer())
+      if (
+        header.length >= 16 &&
+        header[0] === 0x52 &&
+        header[1] === 0x49 &&
+        header[2] === 0x46 &&
+        header[3] === 0x46 &&
+        header[8] === 0x57 &&
+        header[9] === 0x45 &&
+        header[10] === 0x42 &&
+        header[11] === 0x50
+      ) {
+        for (let i = 12; i + 4 <= header.length; i++) {
+          if (
+            header[i] === 0x41 &&
+            header[i + 1] === 0x4e &&
+            header[i + 2] === 0x49 &&
+            header[i + 3] === 0x4d
+          ) {
+            return { blob: file, mimeType }
+          }
+        }
+      }
+    } catch {
+      // fall through to standard processing if slice read fails
+    }
   }
   try {
     const bitmap = await createImageBitmap(file)

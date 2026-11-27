@@ -355,6 +355,47 @@ const reactionSeen = new Set<string>()
 const repostSeen = new Set<string>()
 const zapSeen = new Set<string>()
 const seenDmWraps = new Set<string>()
+const MAX_KIND5_SEEN = 5000
+const kind5Seen = new Set<string>()
+
+let lastMutedPubkeysRef: string[] | null = null
+let lastPrivateMutedPubkeysRef: string[] | null = null
+let lastMutedHashtagsRef: string[] | null = null
+let lastPrivateMutedHashtagsRef: string[] | null = null
+let lastMutedWordsRef: string[] | null = null
+let lastPrivateMutedWordsRef: string[] | null = null
+let cachedMutedPubkeys = new Set<string>()
+let cachedMutedHashtags = new Set<string>()
+let cachedMutedWords: string[] = []
+
+function getCompiledMuteSets() {
+  const st = useSettingsStore.getState()
+  if (
+    st.mutedPubkeys !== lastMutedPubkeysRef ||
+    st.privateMutedPubkeys !== lastPrivateMutedPubkeysRef ||
+    st.mutedHashtags !== lastMutedHashtagsRef ||
+    st.privateMutedHashtags !== lastPrivateMutedHashtagsRef ||
+    st.mutedWords !== lastMutedWordsRef ||
+    st.privateMutedWords !== lastPrivateMutedWordsRef
+  ) {
+    lastMutedPubkeysRef = st.mutedPubkeys
+    lastPrivateMutedPubkeysRef = st.privateMutedPubkeys
+    lastMutedHashtagsRef = st.mutedHashtags
+    lastPrivateMutedHashtagsRef = st.privateMutedHashtags
+    lastMutedWordsRef = st.mutedWords
+    lastPrivateMutedWordsRef = st.privateMutedWords
+    cachedMutedPubkeys = new Set([...st.mutedPubkeys, ...st.privateMutedPubkeys])
+    cachedMutedHashtags = new Set([...st.mutedHashtags, ...st.privateMutedHashtags])
+    cachedMutedWords = [
+      ...new Set([...st.mutedWords, ...st.privateMutedWords].filter((w) => w.length >= 2)),
+    ]
+  }
+  return {
+    mutedPubkeys: cachedMutedPubkeys,
+    mutedHashtags: cachedMutedHashtags,
+    mutedWords: cachedMutedWords,
+  }
+}
 
 // RAM-only cache of the latest decrypted NIP-51 kind-10000 private tags (wiped on Sign Out).
 // Prevents repeated NIP-07 / Bunker decrypt prompts during consecutive blocks while ALWAYS querying
@@ -829,6 +870,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     reactionSeen.clear()
     repostSeen.clear()
     zapSeen.clear()
+    kind5Seen.clear()
+    lastMutedPubkeysRef = null
     if (profileSaveTimer) {
       clearTimeout(profileSaveTimer)
       profileSaveTimer = null
@@ -908,27 +951,19 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   },
 
   isEventMuted: (event) => {
-    const st = useSettingsStore.getState()
+    const { mutedPubkeys, mutedHashtags, mutedWords } = getCompiledMuteSets()
     const pk = event.pubkey.toLowerCase()
-    if (st.mutedPubkeys.includes(pk) || st.privateMutedPubkeys.includes(pk)) return true
-    const allTags =
-      st.privateMutedHashtags.length > 0
-        ? [...st.mutedHashtags, ...st.privateMutedHashtags]
-        : st.mutedHashtags
-    if (allTags.length > 0) {
+    if (mutedPubkeys.has(pk)) return true
+    if (mutedHashtags.size > 0) {
       const tags = extractEventHashtags(event)
-      if (tags.some((t) => allTags.includes(t))) return true
+      if (tags.some((t) => mutedHashtags.has(t))) return true
     }
-    const allWords =
-      st.privateMutedWords.length > 0
-        ? [...st.mutedWords, ...st.privateMutedWords]
-        : st.mutedWords
-    if (allWords.length > 0 && event.content) {
+    if (mutedWords.length > 0 && event.content) {
       const stripped = event.content
         .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g, '')
       const lower = stripped.toLowerCase()
       const folded = foldConfusables(stripped).toLowerCase()
-      if (allWords.some((w) => w.length >= 2 && (lower.includes(w) || folded.includes(w)))) {
+      if (mutedWords.some((w) => lower.includes(w) || folded.includes(w))) {
         return true
       }
     }
@@ -961,6 +996,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
 
     // Kind 5: NIP-09 strictly author-verified deletion (prevents forged pre-load censorship!)
     if (event.kind === 5) {
+      if (kind5Seen.has(event.id)) return
+      if (kind5Seen.size >= MAX_KIND5_SEEN) {
+        const oldest = kind5Seen.values().next().value
+        if (oldest !== undefined) kind5Seen.delete(oldest)
+      }
+      kind5Seen.add(event.id)
       const targetIds = event.tags.filter((t) => t[0] === 'e' && t[1]).map((t) => t[1])
       if (targetIds.length === 0) return
       const deleterPk = event.pubkey.toLowerCase()
@@ -1705,6 +1746,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           .then((meta) => {
             for (const m of meta) get().ingestEvent(m)
           })
+          .catch(() => {})
       }
 
       const nextIds = picked.map((e) => e.id)
@@ -1892,6 +1934,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           .then((metaEvents) => {
             for (const m of metaEvents) get().ingestEvent(m)
           })
+          .catch(() => {})
       }
 
       set((st) => {
@@ -2290,13 +2333,15 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           .then((metaEvents) => {
             for (const m of metaEvents) get().ingestEvent(m)
           })
+          .catch(() => {})
       }
     }
 
     // For Trending tab, also pull cryptographically verified global 4h most-zapped + 24h trending notes
     let trendingCancelled = false
     if (tab === 'trending') {
-      void fetchGlobalTrendingEvents(4500).then((bundle) => {
+      void fetchGlobalTrendingEvents(4500)
+        .then((bundle) => {
         if (trendingCancelled) return
         for (const p of bundle.profiles) get().ingestEvent(p)
         for (const z of bundle.zaps) get().ingestEvent(z)
@@ -2339,8 +2384,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             .then((metaEvents) => {
               for (const m of metaEvents) get().ingestEvent(m)
             })
+            .catch(() => {})
         }
       })
+      .catch(() => {})
     }
 
     // Safety timeout so a single stalled relay never leaves the feed skeleton stuck

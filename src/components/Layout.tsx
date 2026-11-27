@@ -227,7 +227,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const notifJustDeactivated = showWisps && prevNotifWispActiveRef.current && !notifWispActive
 
   const startFeedWispPowerDown = () => {
-    if (feedWispTimerRef.current) clearTimeout(feedWispTimerRef.current)
+    if (feedWispTimerRef.current) return
     setFeedWispDying(true)
     feedWispTimerRef.current = setTimeout(() => {
       feedWispTimerRef.current = null
@@ -236,7 +236,7 @@ export function Layout({ children }: { children: ReactNode }) {
   }
 
   const startNotifWispPowerDown = () => {
-    if (notifWispTimerRef.current) clearTimeout(notifWispTimerRef.current)
+    if (notifWispTimerRef.current) return
     setNotifWispDying(true)
     notifWispTimerRef.current = setTimeout(() => {
       notifWispTimerRef.current = null

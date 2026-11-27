@@ -2,6 +2,7 @@ import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
 import { sanitizeHttpUrl, sanitizePublicHttpsUrl } from '../sanitize'
 import { cleanTrackingUrl } from './urlClean'
+import { extractSongLink, type SongLinkRef } from './songLink'
 import { extractYouTubeVideo, type YouTubeRef } from './youtube'
 
 export interface MediaAttachment {
@@ -77,6 +78,7 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
   segments: ContentSegment[]
   media: MediaAttachment[]
   youtube: YouTubeRef[]
+  songLinks: SongLinkRef[]
   quotes: string[]
 } {
   const imeta = extractImetaMap(event.tags)
@@ -84,6 +86,8 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
   const mediaSeen = new Set<string>()
   const youtube: YouTubeRef[] = []
   const ytSeen = new Set<string>()
+  const songLinks: SongLinkRef[] = []
+  const songSeen = new Set<string>()
   const quotes: string[] = []
   const segments: ContentSegment[] = []
 
@@ -151,24 +155,55 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
               })
             }
           }
-        } else if (mediaKind && safePublicMedia) {
-          if (!mediaSeen.has(safePublicMedia)) {
-            mediaSeen.add(safePublicMedia)
-            media.push({
-              url: safePublicMedia,
-              kind: mediaKind,
-              alt: meta?.alt,
-              mime: meta?.mime,
-              poster: meta?.poster,
+        } else {
+          const songRef = extractSongLink(trimmed)
+          if (songRef?.youtubeRef) {
+            if (!ytSeen.has(songRef.youtubeRef.videoId)) {
+              if (youtube.length < 4) {
+                ytSeen.add(songRef.youtubeRef.videoId)
+                youtube.push(songRef.youtubeRef)
+              } else {
+                const cleanedUrl = cleanTrackingUrl(safe).url
+                segments.push({
+                  type: 'link',
+                  url: cleanedUrl,
+                  display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
+                })
+              }
+            }
+          } else if (songRef) {
+            if (!songSeen.has(songRef.url)) {
+              if (songLinks.length < 3) {
+                songSeen.add(songRef.url)
+                songLinks.push(songRef)
+              } else {
+                const cleanedUrl = cleanTrackingUrl(safe).url
+                segments.push({
+                  type: 'link',
+                  url: cleanedUrl,
+                  display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
+                })
+              }
+            }
+          } else if (mediaKind && safePublicMedia) {
+            if (!mediaSeen.has(safePublicMedia)) {
+              mediaSeen.add(safePublicMedia)
+              media.push({
+                url: safePublicMedia,
+                kind: mediaKind,
+                alt: meta?.alt,
+                mime: meta?.mime,
+                poster: meta?.poster,
+              })
+            }
+          } else {
+            const cleanedUrl = cleanTrackingUrl(safe).url
+            segments.push({
+              type: 'link',
+              url: cleanedUrl,
+              display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
             })
           }
-        } else {
-          const cleanedUrl = cleanTrackingUrl(safe).url
-          segments.push({
-            type: 'link',
-            url: cleanedUrl,
-            display: cleanedUrl.replace(/^https?:\/\//, '').slice(0, 60),
-          })
         }
       } else {
         segments.push({ type: 'text', text: trimmed })
@@ -232,7 +267,7 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
     }
   }
 
-  return { segments, media, youtube, quotes }
+  return { segments, media, youtube, songLinks, quotes }
 }
 
 /**

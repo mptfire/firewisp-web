@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftRight,
@@ -41,11 +41,17 @@ import { Avatar } from '../components/Avatar'
 import { HlsVideoPlayer } from '../components/HlsVideoPlayer'
 import { LiveNowRow } from '../components/LiveNowRow'
 import { MediaLightbox } from '../components/MediaLightbox'
-import { ShareStreamModal } from '../components/ShareStreamModal'
 import { StreamTopZappersCard } from '../components/StreamTopZappersCard'
 import { StreamZapBar } from '../components/StreamZapBar'
-import { WatchWithModal, type WatchWithSelection } from '../components/WatchWithModal'
+import type { WatchWithSelection } from '../components/WatchWithModal'
 import { YouTubeCard } from '../components/YouTubeCard'
+
+const ShareStreamModal = lazy(() =>
+  import('../components/ShareStreamModal').then((m) => ({ default: m.ShareStreamModal })),
+)
+const WatchWithModal = lazy(() =>
+  import('../components/WatchWithModal').then((m) => ({ default: m.WatchWithModal })),
+)
 
 // Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
 const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
@@ -155,7 +161,7 @@ function ChatMention({ pubkey, bech32 }: { pubkey: string; bech32: string }) {
   )
 }
 
-function ChatBubble({
+const ChatBubble = memo(function ChatBubble({
   msg,
   replyParent,
   myPubkey,
@@ -401,7 +407,7 @@ function ChatBubble({
       </div>
     </div>
   )
-}
+})
 
 export function LiveStreamPage() {
   const { naddr } = useParams<{ naddr: string }>()
@@ -466,6 +472,12 @@ export function LiveStreamPage() {
   const toggleFollow = useNostrStore((s) => s.toggleFollow)
   const blockPubkey = useNostrStore((s) => s.blockPubkey)
   const unblockPubkey = useNostrStore((s) => s.unblockPubkey)
+  const handleBlockChatter = useCallback(
+    (pk: string, name: string) => {
+      void blockPubkey(pk, name)
+    },
+    [blockPubkey],
+  )
 
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<BlossomUploadResult[]>([])
@@ -1274,9 +1286,7 @@ export function LiveStreamPage() {
                       replyParent={m.replyToId ? messageById.get(m.replyToId) : undefined}
                       myPubkey={myPubkey}
                       onReply={setReplyTarget}
-                      onBlock={(pk, name) => {
-                        void blockPubkey(pk, name)
-                      }}
+                      onBlock={handleBlockChatter}
                       onOpenLightbox={setLightboxMedia}
                     />
                   ))
@@ -1577,37 +1587,41 @@ export function LiveStreamPage() {
       </div>
 
       {watchWithOpen && (
-        <WatchWithModal
-          primaryATag={aTag}
-          currentCompanionATag={companionATag || null}
-          onSelect={(sel) => {
-            setCompanion(sel)
-          }}
-          onClearCompanion={() => {
-            setCompanion(null)
-            setAudioSlot('primary')
-            setChatSlot('primary')
-          }}
-          onClose={() => setWatchWithOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <WatchWithModal
+            primaryATag={aTag}
+            currentCompanionATag={companionATag || null}
+            onSelect={(sel) => {
+              setCompanion(sel)
+            }}
+            onClearCompanion={() => {
+              setCompanion(null)
+              setAudioSlot('primary')
+              setChatSlot('primary')
+            }}
+            onClose={() => setWatchWithOpen(false)}
+          />
+        </Suspense>
       )}
 
       {shareOpen && (
-        <ShareStreamModal
-          naddr={encodeLiveNaddr(focusedPublisherPubkey, focusedDTag, focusedRelays)}
-          hostPubkey={focusedPublisherPubkey}
-          displayPubkey={hostPubkey}
-          dTag={focusedDTag}
-          hostName={hostName}
-          hostPicture={hostProfile?.picture}
-          title={focusedTitle}
-          summary={focusedActivity?.summary}
-          image={focusedActivity?.image}
-          isLive={focusedIsLive}
-          viewers={focusedActivity?.currentParticipants}
-          relayHint={focusedRelays[0]}
-          onClose={() => setShareOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <ShareStreamModal
+            naddr={encodeLiveNaddr(focusedPublisherPubkey, focusedDTag, focusedRelays)}
+            hostPubkey={focusedPublisherPubkey}
+            displayPubkey={hostPubkey}
+            dTag={focusedDTag}
+            hostName={hostName}
+            hostPicture={hostProfile?.picture}
+            title={focusedTitle}
+            summary={focusedActivity?.summary}
+            image={focusedActivity?.image}
+            isLive={focusedIsLive}
+            viewers={focusedActivity?.currentParticipants}
+            relayHint={focusedRelays[0]}
+            onClose={() => setShareOpen(false)}
+          />
+        </Suspense>
       )}
 
       <MediaLightbox media={lightboxMedia} onClose={() => setLightboxMedia(null)} />

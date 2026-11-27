@@ -89,6 +89,8 @@ function LiveVuMeter({
 }) {
   const [bands, setBands] = useState<number[]>(() => Array(MINI_EQ_BANDS).fill(0))
   const scratchRef = useRef<number[]>(Array(MINI_EQ_BANDS).fill(0))
+  const volumeRef = useRef(volume)
+  volumeRef.current = volume
 
   useEffect(() => {
     if (!active) {
@@ -98,13 +100,17 @@ function LiveVuMeter({
     let rafId = 0
     let lastTick = 0
     const tick = (now: number) => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        rafId = 0
+        return
+      }
       if (now - lastTick >= 42) {
         lastTick = now
         const scratch = scratchRef.current
         const hasReal = videoEl ? readVideoFrequencyBands(videoEl, scratch) : false
         if (!hasReal) {
           const t = now * 0.0046
-          const volScale = Math.min(1.1, Math.max(0.28, Math.min(2, volume) * 0.85))
+          const volScale = Math.min(1.1, Math.max(0.28, Math.min(2, volumeRef.current) * 0.85))
           for (let i = 0; i < MINI_EQ_BANDS; i++) {
             const wave =
               0.44 +
@@ -117,9 +123,22 @@ function LiveVuMeter({
       }
       rafId = requestAnimationFrame(tick)
     }
-    rafId = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafId)
-  }, [active, videoEl, volume])
+
+    const onVisChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden && !rafId) {
+        rafId = requestAnimationFrame(tick)
+      }
+    }
+
+    if (typeof document === 'undefined' || !document.hidden) {
+      rafId = requestAnimationFrame(tick)
+    }
+    document?.addEventListener('visibilitychange', onVisChange)
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      document?.removeEventListener('visibilitychange', onVisChange)
+    }
+  }, [active, videoEl])
 
   return (
     <div
@@ -209,6 +228,24 @@ export function VideoControlBar({
   const sliderPct = Math.round(effectiveVol * 100)
   const isBoosted = !muted && effectiveVol > 1.005
   const fillPercent = Math.min(100, (sliderPct / sliderMax) * 100)
+
+  const wheelBoxRef = useRef<HTMLDivElement | null>(null)
+  const wheelHandlerRef = useRef<(e: WheelEvent) => void>(() => {})
+  wheelHandlerRef.current = (e: WheelEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const delta = e.deltaY < 0 ? 0.06 : -0.06
+    const next = Math.min(canBoost ? 2 : 1, Math.max(0, effectiveVol + delta))
+    onVolumeChange(next)
+  }
+
+  useEffect(() => {
+    const el = wheelBoxRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => wheelHandlerRef.current(e)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   const progressPct = !isLive && duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0
   const bufferedPct = !isLive && duration > 0 ? Math.min(100, (bufferedEnd / duration) * 100) : 0
@@ -320,13 +357,7 @@ export function VideoControlBar({
 
             {/* Dedicated Fire Wisp Audio Bar: Mute + Slider (0..200% boost) + % + Live VU */}
             <div
-              onWheel={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                const delta = e.deltaY < 0 ? 0.06 : -0.06
-                const next = Math.min(canBoost ? 2 : 1, Math.max(0, effectiveVol + delta))
-                onVolumeChange(next)
-              }}
+              ref={wheelBoxRef}
               className="flex items-center gap-1 px-1.5 py-1 rounded-lg bg-black/55 border border-white/10 min-w-0"
               title={
                 canBoost

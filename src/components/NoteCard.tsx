@@ -42,6 +42,7 @@ import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
 import { AddToListButton } from './AddToListButton'
 import { ReactionEmote } from './ReactionEmote'
+import { SongLinkCard } from './SongLinkCard'
 import { YouTubeCard } from './YouTubeCard'
 
 const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
@@ -437,6 +438,7 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
   const firstImage = parsedQuote?.media.find((m) => m.kind === 'image')
   const firstVideo = parsedQuote?.media.find((m) => m.kind === 'video')
   const firstYoutube = parsedQuote?.youtube[0]
+  const firstSongLink = parsedQuote?.songLinks[0]
 
   const hiddenQuoted = useMemo(() => {
     if (!quoted) return false
@@ -524,6 +526,11 @@ const QuotedNoteCard = memo(function QuotedNoteCard({
           {!firstImage && !firstVideo && firstYoutube && (
             <div className="relative z-[6] mt-2">
               <YouTubeCard video={firstYoutube} compact />
+            </div>
+          )}
+          {!firstImage && !firstVideo && !firstYoutube && firstSongLink && (
+            <div className="relative z-[6] mt-2">
+              <SongLinkCard song={firstSongLink} compact />
             </div>
           )}
         </>
@@ -626,7 +633,8 @@ const ReplyContextLine = memo(function ReplyContextLine({
   const parentImage = parsedParent?.media.find((m) => m.kind === 'image')
   const parentVideo = parsedParent?.media.find((m) => m.kind === 'video')
   const parentYoutube = parsedParent?.youtube[0]
-  const hasParentMedia = Boolean(parentImage || parentVideo || parentYoutube)
+  const parentSongLink = parsedParent?.songLinks[0]
+  const hasParentMedia = Boolean(parentImage || parentVideo || parentYoutube || parentSongLink)
 
   return (
     <div
@@ -697,6 +705,11 @@ const ReplyContextLine = memo(function ReplyContextLine({
       {!parentImage && !parentVideo && parentYoutube && (
         <div className="relative z-[6] mt-2">
           <YouTubeCard video={parentYoutube} compact />
+        </div>
+      )}
+      {!parentImage && !parentVideo && !parentYoutube && parentSongLink && (
+        <div className="relative z-[6] mt-2">
+          <SongLinkCard song={parentSongLink} compact />
         </div>
       )}
     </div>
@@ -1293,6 +1306,19 @@ export const NoteCard = memo(function NoteCard({
             >
               {parsed.youtube.map((yt) => (
                 <YouTubeCard key={yt.videoId} video={yt} />
+              ))}
+            </div>
+          )}
+
+          {/* song.link / album.link / odesli cards (privacy-first iTunes preview + external link) */}
+          {parsed.songLinks.length > 0 && (
+            <div
+              className={`mt-2.5 grid gap-2 ${
+                parsed.songLinks.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'
+              }`}
+            >
+              {parsed.songLinks.map((song) => (
+                <SongLinkCard key={song.url} song={song} authorName={displayName} />
               ))}
             </div>
           )}

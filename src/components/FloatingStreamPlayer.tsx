@@ -393,6 +393,8 @@ export function FloatingStreamPlayer() {
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
 
   const [size, setSize] = useState<MiniPlayerSize>(() => loadSavedMiniSize())
+  const latestSizeRef = useRef(size)
+  latestSizeRef.current = size
   const [chatOpen, setChatOpen] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth >= 640 : true,
   )
@@ -558,8 +560,8 @@ export function FloatingStreamPlayer() {
         : st.startChatHeight
 
       const next = clampSize(rawWidth, rawChatHeight)
+      latestSizeRef.current = next
       setSize(next)
-      saveMiniSize(next)
 
       if (st.corner === 'tl' && st.wasPositioned) {
         const nextTotalHeight =
@@ -581,6 +583,7 @@ export function FloatingStreamPlayer() {
       if (st && e.pointerId !== st.pointerId) return
       resizeStateRef.current = null
       setResizing(false)
+      if (st) saveMiniSize(latestSizeRef.current)
     }
 
     window.addEventListener('pointermove', onPointerMove)
