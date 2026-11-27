@@ -118,6 +118,12 @@ export function FeedPage() {
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
   const showZappedTab = useSettingsStore((s) => s.showZappedTab)
+  const forYouIncludeTopics = useSettingsStore((s) => s.forYouIncludeTopics)
+  const forYouIncludeWotZapped = useSettingsStore((s) => s.forYouIncludeWotZapped)
+  const forYouIncludeTrending = useSettingsStore((s) => s.forYouIncludeTrending)
+  const setForYouIncludeTopics = useSettingsStore((s) => s.setForYouIncludeTopics)
+  const setForYouIncludeWotZapped = useSettingsStore((s) => s.setForYouIncludeWotZapped)
+  const setForYouIncludeTrending = useSettingsStore((s) => s.setForYouIncludeTrending)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
@@ -511,8 +517,8 @@ export function FeedPage() {
       </div>
 
       {/* Status + Controls Strip */}
-      <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-1.5 text-[#9a9890] min-w-0 truncate">
+      <div className="px-4 py-2 border-b border-[#20222c] bg-[#121319]/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-1.5 text-[#9a9890] min-w-0">
           {tab === 'foryou' ? (
             <>
               <Sparkles className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
@@ -520,14 +526,68 @@ export function FeedPage() {
                 {pubkey
                   ? [
                       `For You · ${follows.length.toLocaleString()} follows`,
-                      extendedAuthors.length > 0 ? `+ ${extendedAuthors.length} 2-hop` : null,
-                      followedHashtags.length > 0 ? `+ ${followedHashtags.length} topics` : null,
-                      '+ Trending',
+                      extendedAuthors.length > 0
+                        ? `+ ${extendedAuthors.length} 2-hop`
+                        : loadingExtendedGraph
+                          ? '· loading 2-hop…'
+                          : null,
                     ]
                       .filter(Boolean)
                       .join(' ')
                   : 'For You · Curated Trending & Fire Wisp highlights (sign in to personalize)'}
               </span>
+              {pubkey && (
+                <div className="inline-flex flex-wrap items-center gap-1 ml-1">
+                  <button
+                    type="button"
+                    aria-pressed={forYouIncludeWotZapped}
+                    onClick={() => {
+                      setForYouIncludeWotZapped(!forYouIncludeWotZapped)
+                      clearFeedTab('foryou')
+                    }}
+                    title="Include posts zapped by or sent to your 1-hop & 2-hop Web of Trust"
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                      forYouIncludeWotZapped
+                        ? 'bg-[#f59f00]/15 border-[#f59f00]/50 text-[#ffd43b]'
+                        : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                    }`}
+                  >
+                    + WoT Zaps
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={forYouIncludeTrending}
+                    onClick={() => {
+                      setForYouIncludeTrending(!forYouIncludeTrending)
+                      clearFeedTab('foryou')
+                    }}
+                    title="Include spam-filtered global trending highlights"
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                      forYouIncludeTrending
+                        ? 'bg-[#e8590c]/15 border-[#e8590c]/50 text-[#ff922b]'
+                        : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                    }`}
+                  >
+                    + Trending
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={forYouIncludeTopics}
+                    onClick={() => {
+                      setForYouIncludeTopics(!forYouIncludeTopics)
+                      clearFeedTab('foryou')
+                    }}
+                    title="Include notes matching your NIP-51 kind-10015 & kind-30015 followed hashtags"
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                      forYouIncludeTopics
+                        ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
+                        : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                    }`}
+                  >
+                    + Topics{followedHashtags.length > 0 ? ` (${followedHashtags.length})` : ''}
+                  </button>
+                </div>
+              )}
             </>
           ) : tab === 'extended' ? (
             <>

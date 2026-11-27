@@ -7,6 +7,7 @@ import { useAuthStore } from './lib/store/useAuthStore'
 import { useListsStore } from './lib/store/useListsStore'
 import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
+import { useSettingsStore } from './lib/store/useSettingsStore'
 import { Layout } from './components/Layout'
 import { FeedPage } from './pages/FeedPage'
 
@@ -128,6 +129,13 @@ export function App() {
   const extendedAuthors = useNostrStore((s) => s.extendedAuthors)
   const feedRefreshTick = useNostrStore((s) => s.feedRefreshTick)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
+  const forYouIncludeTopics = useSettingsStore((s) => s.forYouIncludeTopics)
+  const forYouIncludeWotZapped = useSettingsStore((s) => s.forYouIncludeWotZapped)
+  const forYouIncludeTrending = useSettingsStore((s) => s.forYouIncludeTrending)
+  const forYouMixKey =
+    activeFeedTab === 'foryou'
+      ? `${forYouIncludeTopics}:${forYouIncludeWotZapped}:${forYouIncludeTrending}`
+      : ''
   const toastMessage = useNostrStore((s) => s.toastMessage)
   const setToast = useNostrStore((s) => s.setToast)
 
@@ -163,6 +171,7 @@ export function App() {
     followedHashtags,
     userReadRelays,
     extendedAuthors,
+    forYouMixKey,
     activeListSyncKey,
     feedRefreshTick,
     subscribeFeed,

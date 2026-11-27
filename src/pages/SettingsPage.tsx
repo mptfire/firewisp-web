@@ -177,6 +177,9 @@ export function SettingsPage() {
     settings.showExtendedTab,
     settings.showExploreTab,
     settings.showZappedTab,
+    settings.forYouIncludeTopics,
+    settings.forYouIncludeWotZapped,
+    settings.forYouIncludeTrending,
   ].filter(Boolean).length
 
   const totalMutedWords = settings.mutedWords.length + settings.privateMutedWords.length
@@ -425,6 +428,51 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.showZappedTab}
             onChange={(e) => settings.setShowZappedTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">For You: Include WoT Zapped posts</div>
+            <div className="text-[#8c8a82]">
+              Include posts zapped by or received within your 1-hop &amp; 2-hop Web of Trust.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.forYouIncludeWotZapped}
+            onChange={(e) => settings.setForYouIncludeWotZapped(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">For You: Include Trending posts</div>
+            <div className="text-[#8c8a82]">
+              Mix spam-filtered global trending highlights into For You.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.forYouIncludeTrending}
+            onChange={(e) => settings.setForYouIncludeTrending(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">For You: Include Followed Topics (hashtags)</div>
+            <div className="text-[#8c8a82]">
+              Include notes matching hashtags from your NIP-51 kind-10015 &amp; kind-30015 Interest lists.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.forYouIncludeTopics}
+            onChange={(e) => settings.setForYouIncludeTopics(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>

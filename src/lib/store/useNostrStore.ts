@@ -2352,6 +2352,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
+    if (
+      tab === 'foryou' &&
+      myPubkey &&
+      follows.length > 0 &&
+      extendedAuthors.length === 0 &&
+      !get().loadingExtendedGraph
+    ) {
+      void get().loadExtendedNetwork()
+    }
+
     if (tab === 'extended' && extendedAuthors.length === 0) {
       if (follows.length > 0) {
         void get().loadExtendedNetwork()
@@ -2700,25 +2710,33 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       }),
     )
 
-    // Wisp Android For You supplementary sources: strictly spam-filtered Trending (24h, max 10)
-    // + followed NIP-51 hashtags queried ONLY from curated anti-spam relays (max 10)
+    // Wisp Android For You supplementary sources: modular toggles for WoT Zapped notes,
+    // strictly spam-filtered Trending (24h, max 5), and followed NIP-51 hashtags (max 10)
     let cancelled = false
     if (tab === 'foryou') {
-      const since24h = Math.floor(Date.now() / 1000) - 86400
+      const { forYouIncludeTopics, forYouIncludeWotZapped, forYouIncludeTrending } =
+        useSettingsStore.getState()
+      const nowSec = Math.floor(Date.now() / 1000)
+      const since24h = nowSec - 86400
       const suppSeenContent = new Map<string, Set<string>>()
       const suppAuthorCounts = new Map<string, number>()
-      const filterCleanSupp = (evs: Event[], cap: number) => {
+      const filterCleanSupp = (evs: Event[], cap: number, minTextLen = 30) => {
         const out: Event[] = []
         for (const e of evs) {
           if (e.created_at < since24h) continue
           if (!isTopLevelNote(e)) continue
-          if (get().isEventMuted(e)) continue
+          if (get().isEventMuted(e) || get().isEventDeleted(e)) continue
           if (extractEventHashtags(e).length > 4) continue
           const textOnly = e.content
             .replace(/https?:\/\/[^\s]+/gi, '')
             .replace(/nostr:[0-9a-z]+/gi, '')
             .trim()
-          if (textOnly.length < 30) continue
+          if (
+            textOnly.length < minTextLen &&
+            !(minTextLen < 30 && /https?:\/\//i.test(e.content))
+          ) {
+            continue
+          }
           const verdict = evaluateNoteSpam(e, {
             myPubkey,
             follows: allowedForYouAuthors || undefined,
@@ -2734,15 +2752,107 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return out
       }
 
-      const trendingPromise = nostrPool
-        .query([TRENDING_RELAY], { kinds: [1], limit: 20 }, 4000)
-        .then((evs) => filterCleanSupp(evs, 5))
+      const suppQueries: Promise<Event[]>[] = []
 
-      const hashtagQueries: Promise<Event[]>[] = []
-      if (followedHashtags.length > 0) {
+      if (
+        myPubkey &&
+        forYouIncludeWotZapped &&
+        allowedForYouAuthors &&
+        allowedForYouAuthors.size > 0
+      ) {
+        const wotAuthorsList = [...allowedForYouAuthors].slice(0, 150)
+        const wotZappedPromise = Promise.all([
+          nostrPool
+            .query(
+              mergedFollowingRelays,
+              { kinds: [9735], '#p': wotAuthorsList, since: since24h, limit: 150 },
+              4000,
+            )
+            .catch(() => []),
+          nostrPool
+            .query(
+              mergedFollowingRelays,
+              { kinds: [9735], since: since24h, limit: 150 },
+              4000,
+            )
+            .catch(() => []),
+        ])
+          .then(async ([receivedZaps, recentZaps]) => {
+            if (cancelled) return []
+            const dedupZaps = new Map<string, Event>()
+            for (const z of [...receivedZaps, ...recentZaps]) {
+              if (!dedupZaps.has(z.id)) dedupZaps.set(z.id, z)
+            }
+            const byTarget = new Map<
+              string,
+              { satsTotal: number; latestAt: number; senderInWot: boolean }
+            >()
+            for (const z of dedupZaps.values()) {
+              const parsedZap = parseLiveZapReceipt(z, nowSec)
+              if (!parsedZap?.targetEventId) continue
+              const senderInWot = allowedForYouAuthors.has(parsedZap.senderPubkey)
+              const recipientInWot = allowedForYouAuthors.has(parsedZap.recipientPubkey)
+              if (!senderInWot && !recipientInWot) continue
+              get().ingestEvent(z)
+              const cur = byTarget.get(parsedZap.targetEventId) || {
+                satsTotal: 0,
+                latestAt: 0,
+                senderInWot: false,
+              }
+              cur.satsTotal += parsedZap.sats
+              if (parsedZap.createdAt > cur.latestAt) cur.latestAt = parsedZap.createdAt
+              if (senderInWot) cur.senderInWot = true
+              byTarget.set(parsedZap.targetEventId, cur)
+            }
+            const targetIds = [...byTarget.entries()]
+              .sort(
+                (a, b) =>
+                  Number(b[1].senderInWot) - Number(a[1].senderInWot) ||
+                  b[1].satsTotal - a[1].satsTotal ||
+                  b[1].latestAt - a[1].latestAt,
+              )
+              .slice(0, 25)
+              .map(([id]) => id)
+            if (targetIds.length === 0) return []
+
+            const cached = get().events
+            const notesById = new Map<string, Event>()
+            const missingIds: string[] = []
+            for (const id of targetIds) {
+              const ev = cached[id]
+              if (ev && isTopLevelNote(ev)) notesById.set(id, ev)
+              else missingIds.push(id)
+            }
+            if (missingIds.length > 0) {
+              const fetchedNotes = await nostrPool
+                .query(mergedFollowingRelays, { ids: missingIds }, 3500)
+                .catch(() => [])
+              if (cancelled) return []
+              for (const ev of fetchedNotes) {
+                if (isTopLevelNote(ev)) notesById.set(ev.id, ev)
+              }
+            }
+            const orderedNotes = targetIds
+              .map((id) => notesById.get(id))
+              .filter((ev): ev is Event => Boolean(ev))
+            return filterCleanSupp(orderedNotes, 12, 16)
+          })
+          .catch(() => [])
+        suppQueries.push(wotZappedPromise)
+      }
+
+      if (!myPubkey || forYouIncludeTrending) {
+        suppQueries.push(
+          nostrPool
+            .query([TRENDING_RELAY], { kinds: [1], limit: 20 }, 4000)
+            .then((evs) => filterCleanSupp(evs, 5)),
+        )
+      }
+
+      if (forYouIncludeTopics && followedHashtags.length > 0) {
         const curatedTagRelays = ['wss://nostr.wine', FIREWISP_RELAY]
         for (let i = 0; i < Math.min(followedHashtags.length, 20); i += 10) {
-          hashtagQueries.push(
+          suppQueries.push(
             nostrPool
               .query(
                 curatedTagRelays,
@@ -2754,11 +2864,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
       }
 
-      const signedOutFallback = !myPubkey
-        ? [nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 20 }, 3500)]
-        : []
+      if (!myPubkey) {
+        suppQueries.push(
+          nostrPool.query([FIREWISP_RELAY], { kinds: [1, 20, 21, 22], limit: 20 }, 3500),
+        )
+      }
 
-      void Promise.allSettled([trendingPromise, ...hashtagQueries, ...signedOutFallback]).then((results) => {
+      void Promise.allSettled(suppQueries).then((results) => {
         if (cancelled) return
         const suppEvents: Event[] = []
         for (const r of results) {

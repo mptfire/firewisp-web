@@ -2635,4 +2635,28 @@ describe('Full code-audit regression & security hardening', () => {
       useSettingsStore.getState().setShowZappedTab(prevShow)
     }
   })
+
+  it('defaults For You modular toggles cleanly and updates them in settings store', async () => {
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const prevTopics = useSettingsStore.getState().forYouIncludeTopics
+    const prevWotZapped = useSettingsStore.getState().forYouIncludeWotZapped
+    const prevTrending = useSettingsStore.getState().forYouIncludeTrending
+    try {
+      expect(useSettingsStore.getState().forYouIncludeTopics).toBe(false)
+      expect(useSettingsStore.getState().forYouIncludeWotZapped).toBe(true)
+      expect(useSettingsStore.getState().forYouIncludeTrending).toBe(true)
+
+      useSettingsStore.getState().setForYouIncludeTopics(true)
+      useSettingsStore.getState().setForYouIncludeWotZapped(false)
+      useSettingsStore.getState().setForYouIncludeTrending(false)
+
+      expect(useSettingsStore.getState().forYouIncludeTopics).toBe(true)
+      expect(useSettingsStore.getState().forYouIncludeWotZapped).toBe(false)
+      expect(useSettingsStore.getState().forYouIncludeTrending).toBe(false)
+    } finally {
+      useSettingsStore.getState().setForYouIncludeTopics(prevTopics)
+      useSettingsStore.getState().setForYouIncludeWotZapped(prevWotZapped)
+      useSettingsStore.getState().setForYouIncludeTrending(prevTrending)
+    }
+  })
 })

@@ -112,6 +112,9 @@ export interface SettingsState {
   showExtendedTab: boolean
   showExploreTab: boolean
   showZappedTab: boolean
+  forYouIncludeTopics: boolean
+  forYouIncludeWotZapped: boolean
+  forYouIncludeTrending: boolean
   showLiveNowBar: boolean
   liveBarExpanded: boolean
   showLiveZaps: boolean
@@ -166,6 +169,9 @@ export interface SettingsState {
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
   setShowZappedTab: (enabled: boolean) => void
+  setForYouIncludeTopics: (enabled: boolean) => void
+  setForYouIncludeWotZapped: (enabled: boolean) => void
+  setForYouIncludeTrending: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
   setLiveBarExpanded: (expanded: boolean) => void
   setShowLiveZaps: (enabled: boolean) => void
@@ -207,6 +213,9 @@ interface PersistedSettings {
   showExtendedTab: boolean
   showExploreTab: boolean
   showZappedTab: boolean
+  forYouIncludeTopics: boolean
+  forYouIncludeWotZapped: boolean
+  forYouIncludeTrending: boolean
   showLiveNowBar: boolean
   liveBarExpanded: boolean
   showLiveZaps: boolean
@@ -260,6 +269,9 @@ function loadInitial(): PersistedSettings & {
     showExtendedTab: false,
     showExploreTab: false,
     showZappedTab: false,
+    forYouIncludeTopics: false,
+    forYouIncludeWotZapped: true,
+    forYouIncludeTrending: true,
     showLiveNowBar: true,
     liveBarExpanded: true,
     showLiveZaps: false,
@@ -399,6 +411,9 @@ function persist(state: SettingsState) {
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
     showZappedTab: state.showZappedTab,
+    forYouIncludeTopics: state.forYouIncludeTopics,
+    forYouIncludeWotZapped: state.forYouIncludeWotZapped,
+    forYouIncludeTrending: state.forYouIncludeTrending,
     showLiveNowBar: state.showLiveNowBar,
     liveBarExpanded: state.liveBarExpanded,
     showLiveZaps: state.showLiveZaps,
@@ -735,6 +750,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowZappedTab: (showZappedTab) => {
     set({ showZappedTab })
+    persist(get())
+  },
+  setForYouIncludeTopics: (forYouIncludeTopics) => {
+    set({ forYouIncludeTopics })
+    persist(get())
+  },
+  setForYouIncludeWotZapped: (forYouIncludeWotZapped) => {
+    set({ forYouIncludeWotZapped })
+    persist(get())
+  },
+  setForYouIncludeTrending: (forYouIncludeTrending) => {
+    set({ forYouIncludeTrending })
     persist(get())
   },
   setShowLiveNowBar: (showLiveNowBar) => {
