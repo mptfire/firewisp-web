@@ -540,6 +540,8 @@ export function SettingsPage() {
     settings.showExtendedTab,
     settings.showExploreTab,
     settings.showZappedTab,
+    settings.forYouIncludeFollows,
+    settings.forYouIncludeExtended,
     settings.forYouIncludeTopics,
     settings.forYouIncludeWotZapped,
     settings.forYouIncludeTrending,
@@ -816,6 +818,36 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.showZappedTab}
             onChange={(e) => settings.setShowZappedTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">For You: Include Follows</div>
+            <div className="text-[#8c8a82]">
+              Include direct posts and reposts from your followed accounts in For You.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.forYouIncludeFollows}
+            onChange={(e) => settings.setForYouIncludeFollows(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">For You: Include 2-hop Web of Trust</div>
+            <div className="text-[#8c8a82]">
+              Mix posts from accounts endorsed by your follows (2-hop WoT) into For You.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.forYouIncludeExtended}
+            onChange={(e) => settings.setForYouIncludeExtended(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>

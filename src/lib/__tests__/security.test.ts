@@ -2648,22 +2648,32 @@ describe('Full code-audit regression & security hardening', () => {
 
   it('defaults For You modular toggles cleanly and updates them in settings store', async () => {
     const { useSettingsStore } = await import('../store/useSettingsStore')
+    const prevFollows = useSettingsStore.getState().forYouIncludeFollows
+    const prevExtended = useSettingsStore.getState().forYouIncludeExtended
     const prevTopics = useSettingsStore.getState().forYouIncludeTopics
     const prevWotZapped = useSettingsStore.getState().forYouIncludeWotZapped
     const prevTrending = useSettingsStore.getState().forYouIncludeTrending
     try {
+      expect(useSettingsStore.getState().forYouIncludeFollows).toBe(true)
+      expect(useSettingsStore.getState().forYouIncludeExtended).toBe(true)
       expect(useSettingsStore.getState().forYouIncludeTopics).toBe(false)
       expect(useSettingsStore.getState().forYouIncludeWotZapped).toBe(true)
       expect(useSettingsStore.getState().forYouIncludeTrending).toBe(true)
 
+      useSettingsStore.getState().setForYouIncludeFollows(false)
+      useSettingsStore.getState().setForYouIncludeExtended(false)
       useSettingsStore.getState().setForYouIncludeTopics(true)
       useSettingsStore.getState().setForYouIncludeWotZapped(false)
       useSettingsStore.getState().setForYouIncludeTrending(false)
 
+      expect(useSettingsStore.getState().forYouIncludeFollows).toBe(false)
+      expect(useSettingsStore.getState().forYouIncludeExtended).toBe(false)
       expect(useSettingsStore.getState().forYouIncludeTopics).toBe(true)
       expect(useSettingsStore.getState().forYouIncludeWotZapped).toBe(false)
       expect(useSettingsStore.getState().forYouIncludeTrending).toBe(false)
     } finally {
+      useSettingsStore.getState().setForYouIncludeFollows(prevFollows)
+      useSettingsStore.getState().setForYouIncludeExtended(prevExtended)
       useSettingsStore.getState().setForYouIncludeTopics(prevTopics)
       useSettingsStore.getState().setForYouIncludeWotZapped(prevWotZapped)
       useSettingsStore.getState().setForYouIncludeTrending(prevTrending)

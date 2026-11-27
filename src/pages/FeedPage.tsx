@@ -120,9 +120,13 @@ export function FeedPage() {
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
   const showZappedTab = useSettingsStore((s) => s.showZappedTab)
+  const forYouIncludeFollows = useSettingsStore((s) => s.forYouIncludeFollows)
+  const forYouIncludeExtended = useSettingsStore((s) => s.forYouIncludeExtended)
   const forYouIncludeTopics = useSettingsStore((s) => s.forYouIncludeTopics)
   const forYouIncludeWotZapped = useSettingsStore((s) => s.forYouIncludeWotZapped)
   const forYouIncludeTrending = useSettingsStore((s) => s.forYouIncludeTrending)
+  const setForYouIncludeFollows = useSettingsStore((s) => s.setForYouIncludeFollows)
+  const setForYouIncludeExtended = useSettingsStore((s) => s.setForYouIncludeExtended)
   const setForYouIncludeTopics = useSettingsStore((s) => s.setForYouIncludeTopics)
   const setForYouIncludeWotZapped = useSettingsStore((s) => s.setForYouIncludeWotZapped)
   const setForYouIncludeTrending = useSettingsStore((s) => s.setForYouIncludeTrending)
@@ -345,15 +349,12 @@ export function FeedPage() {
         }
       }
 
-      // STRICT FOR YOU GATE (when signed in): only Follows, loaded Extended WoT, or vetted Trending/Topic picks
+      // STRICT FOR YOU GATE (when signed in): only enabled Follows, enabled Extended WoT, or vetted Trending/Topic picks
       if (tab === 'foryou' && myPk) {
         const evAuthor = ev.pubkey.toLowerCase()
-        if (
-          evAuthor !== myPk &&
-          !followSet.has(evAuthor) &&
-          !extendedSet.has(evAuthor) &&
-          !forYouSuppIds[ev.id]
-        ) {
+        const allowedFollow = forYouIncludeFollows && (evAuthor === myPk || followSet.has(evAuthor))
+        const allowedExtended = forYouIncludeExtended && extendedSet.has(evAuthor)
+        if (!allowedFollow && !allowedExtended && !forYouSuppIds[ev.id]) {
           return null
         }
       }
@@ -469,6 +470,8 @@ export function FeedPage() {
     pubkey,
     follows,
     extendedAuthors,
+    forYouIncludeFollows,
+    forYouIncludeExtended,
     forYouSuppIds,
     wotFilterZapped,
     wotFilterExplore,
@@ -554,22 +557,62 @@ export function FeedPage() {
           {tab === 'foryou' ? (
             <>
               <Sparkles className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
-              <span className="truncate">
+              <span className="font-medium text-[#d4d2cb] shrink-0">
                 {pubkey
-                  ? [
-                      `For You · ${follows.length.toLocaleString()} follows`,
-                      extendedAuthors.length > 0
-                        ? `+ ${extendedAuthors.length} 2-hop`
-                        : loadingExtendedGraph
-                          ? '· loading 2-hop…'
-                          : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' ')
+                  ? 'For You'
                   : 'For You · Curated Trending & Fire Wisp highlights (sign in to personalize)'}
               </span>
               {pubkey && (
                 <div className="inline-flex flex-wrap items-center gap-1 ml-1">
+                  <button
+                    type="button"
+                    aria-pressed={forYouIncludeFollows}
+                    onClick={() => {
+                      setForYouIncludeFollows(!forYouIncludeFollows)
+                      clearFeedTab('foryou')
+                    }}
+                    title="Include direct posts and reposts from your followed accounts"
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                      forYouIncludeFollows
+                        ? 'bg-sky-500/15 border-sky-400/50 text-sky-300'
+                        : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        forYouIncludeFollows ? 'bg-sky-400' : 'bg-[#4f4d47]'
+                      }`}
+                    />
+                    <span>{follows.length.toLocaleString()} Follows</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={forYouIncludeExtended}
+                    onClick={() => {
+                      setForYouIncludeExtended(!forYouIncludeExtended)
+                      clearFeedTab('foryou')
+                    }}
+                    title="Include posts from accounts endorsed by your follows (2-hop Web of Trust)"
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                      forYouIncludeExtended
+                        ? 'bg-violet-500/15 border-violet-400/50 text-violet-300'
+                        : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        forYouIncludeExtended ? 'bg-violet-400' : 'bg-[#4f4d47]'
+                      }`}
+                    />
+                    <span>
+                      +{' '}
+                      {extendedAuthors.length > 0
+                        ? `${extendedAuthors.length} 2-hop`
+                        : loadingExtendedGraph
+                          ? '2-hop…'
+                          : '2-hop'}
+                    </span>
+                  </button>
                   <button
                     type="button"
                     aria-pressed={forYouIncludeWotZapped}
@@ -578,13 +621,18 @@ export function FeedPage() {
                       clearFeedTab('foryou')
                     }}
                     title="Include posts zapped by or sent to your 1-hop & 2-hop Web of Trust"
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
                       forYouIncludeWotZapped
                         ? 'bg-[#f59f00]/15 border-[#f59f00]/50 text-[#ffd43b]'
                         : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
                     }`}
                   >
-                    + WoT Zaps
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        forYouIncludeWotZapped ? 'bg-[#ffd43b]' : 'bg-[#4f4d47]'
+                      }`}
+                    />
+                    <span>+ WoT Zaps</span>
                   </button>
                   <button
                     type="button"
@@ -594,13 +642,18 @@ export function FeedPage() {
                       clearFeedTab('foryou')
                     }}
                     title="Include spam-filtered global trending highlights"
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
                       forYouIncludeTrending
                         ? 'bg-[#e8590c]/15 border-[#e8590c]/50 text-[#ff922b]'
                         : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
                     }`}
                   >
-                    + Trending
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        forYouIncludeTrending ? 'bg-[#ff922b]' : 'bg-[#4f4d47]'
+                      }`}
+                    />
+                    <span>+ Trending</span>
                   </button>
                   <button
                     type="button"
@@ -610,13 +663,20 @@ export function FeedPage() {
                       clearFeedTab('foryou')
                     }}
                     title="Include notes matching your NIP-51 kind-10015 & kind-30015 followed hashtags"
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition cursor-pointer ${
                       forYouIncludeTopics
                         ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
                         : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
                     }`}
                   >
-                    + Topics{followedHashtags.length > 0 ? ` (${followedHashtags.length})` : ''}
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        forYouIncludeTopics ? 'bg-emerald-400' : 'bg-[#4f4d47]'
+                      }`}
+                    />
+                    <span>
+                      + Topics{followedHashtags.length > 0 ? ` (${followedHashtags.length})` : ''}
+                    </span>
                   </button>
                 </div>
               )}
@@ -904,7 +964,15 @@ export function FeedPage() {
                       ? pubkey
                         ? 'No recent notes from your follows loaded yet.'
                         : 'Sign in and follow people on Nostr to fill your Follows feed.'
-                      : 'No notes received from your configured relays yet.'}
+                      : tab === 'foryou' &&
+                          pubkey &&
+                          !forYouIncludeFollows &&
+                          !forYouIncludeExtended &&
+                          !forYouIncludeWotZapped &&
+                          !forYouIncludeTrending &&
+                          (!forYouIncludeTopics || followedHashtags.length === 0)
+                        ? 'All For You sources are turned off. Click any source pill above to enable it.'
+                        : 'No notes received from your configured relays yet.'}
           </p>
           {customStorageKey && (
             <Link

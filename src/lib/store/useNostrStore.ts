@@ -1904,26 +1904,34 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     try {
       let fetched: Event[] = []
       if (tab === 'foryou') {
-        if (myPubkey && s.follows.length > 0) {
+        if (myPubkey) {
+          const { forYouIncludeFollows, forYouIncludeExtended } = useSettingsStore.getState()
           const allAuthors = [
             ...new Set([
-              myPubkey.toLowerCase(),
-              ...s.follows.map((p) => p.toLowerCase()),
-              ...s.extendedAuthors.slice(0, 150).map((p) => p.toLowerCase()),
+              ...(forYouIncludeFollows
+                ? [myPubkey.toLowerCase(), ...s.follows.map((p) => p.toLowerCase())]
+                : []),
+              ...(forYouIncludeExtended
+                ? s.extendedAuthors.slice(0, 150).map((p) => p.toLowerCase())
+                : []),
             ]),
           ]
-          const queries: Promise<Event[]>[] = []
-          for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
-            queries.push(
-              nostrPool.query(
-                mergedFollowingRelays,
-                { kinds: [1, 6, 20, 21, 22], authors: allAuthors.slice(i, i + 250), until, limit: 35 },
-                4500,
-              ),
-            )
+          if (allAuthors.length === 0) {
+            fetched = []
+          } else {
+            const queries: Promise<Event[]>[] = []
+            for (let i = 0; i < Math.min(allAuthors.length, 2000); i += 250) {
+              queries.push(
+                nostrPool.query(
+                  mergedFollowingRelays,
+                  { kinds: [1, 6, 20, 21, 22], authors: allAuthors.slice(i, i + 250), until, limit: 35 },
+                  4500,
+                ),
+              )
+            }
+            const results = await Promise.all(queries)
+            fetched = results.flat()
           }
-          const results = await Promise.all(queries)
-          fetched = results.flat()
         } else {
           fetched = await nostrPool.query(
             CURATED_EXPLORE_RELAYS,
@@ -2350,12 +2358,21 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
+    const {
+      forYouIncludeFollows,
+      forYouIncludeExtended,
+      forYouIncludeTopics,
+      forYouIncludeWotZapped,
+      forYouIncludeTrending,
+    } = useSettingsStore.getState()
+
     if (
       tab === 'foryou' &&
       myPubkey &&
       follows.length > 0 &&
       extendedAuthors.length === 0 &&
-      !get().loadingExtendedGraph
+      !get().loadingExtendedGraph &&
+      (forYouIncludeExtended || forYouIncludeWotZapped)
     ) {
       void get().loadExtendedNetwork()
     }
@@ -2369,7 +2386,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return () => {}
     }
 
-    const allowedForYouAuthors =
+    const wotForYouAuthors =
       tab === 'foryou' && myPubkey && follows.length > 0
         ? new Set([
             myPubkey.toLowerCase(),
@@ -2377,6 +2394,23 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             ...extendedAuthors.slice(0, 150).map((p) => p.toLowerCase()),
           ])
         : null
+
+    const forYouPrimaryAuthors =
+      tab === 'foryou' && myPubkey
+        ? [
+            ...new Set([
+              ...(forYouIncludeFollows
+                ? [myPubkey.toLowerCase(), ...follows.map((p) => p.toLowerCase())]
+                : []),
+              ...(forYouIncludeExtended
+                ? extendedAuthors.slice(0, 150).map((p) => p.toLowerCase())
+                : []),
+            ]),
+          ]
+        : []
+
+    const allowedForYouAuthors =
+      tab === 'foryou' && myPubkey ? new Set(forYouPrimaryAuthors) : null
     const allowedFollowingAuthors =
       tab === 'following'
         ? new Set(
@@ -2527,20 +2561,13 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const filters = (() => {
       if (tab === 'foryou') {
         const since = Math.floor(Date.now() / 1000) - getFollowWindowSeconds(follows.length)
-        if (myPubkey && follows.length > 0) {
-          // Match Wisp Android: use Extended authors ONLY if already computed, otherwise direct Follows
-          const blendedAuthors = [
-            ...new Set([
-              myPubkey.toLowerCase(),
-              ...follows.map((p) => p.toLowerCase()),
-              ...extendedAuthors.slice(0, 150).map((p) => p.toLowerCase()),
-            ]),
-          ]
+        if (myPubkey) {
+          if (forYouPrimaryAuthors.length === 0) return []
           const chunks: Array<{ kinds: number[]; authors: string[]; since: number; limit: number }> = []
-          for (let i = 0; i < Math.min(blendedAuthors.length, 2000); i += 250) {
+          for (let i = 0; i < Math.min(forYouPrimaryAuthors.length, 2000); i += 250) {
             chunks.push({
               kinds: [1, 6, 20, 21, 22],
-              authors: blendedAuthors.slice(i, i + 250),
+              authors: forYouPrimaryAuthors.slice(i, i + 250),
               since,
               limit: 40,
             })
@@ -2599,7 +2626,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       return [{ kinds: [1, 6, 20, 21, 22], limit: 60 }]
     })()
 
-    if (filters.length === 0) {
+    const hasForYouSupp =
+      tab === 'foryou' &&
+      (!myPubkey ||
+        (Boolean(wotForYouAuthors && wotForYouAuthors.size > 0) && forYouIncludeWotZapped) ||
+        forYouIncludeTrending ||
+        (forYouIncludeTopics && followedHashtags.length > 0))
+
+    if (filters.length === 0 && !hasForYouSupp) {
       set({ loadingFeed: false })
       return () => {}
     }
@@ -2691,7 +2725,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
 
     // Safety timeout so a single stalled relay never leaves the feed skeleton stuck
-    const eoseFallbackTimer = setTimeout(finishInitialLoad, 6000)
+    const eoseFallbackTimer = filters.length > 0 ? setTimeout(finishInitialLoad, 6000) : null
 
     const primaryRelays =
       tab === 'foryou' && (!myPubkey || follows.length === 0) ? CURATED_EXPLORE_RELAYS : targetRelays
@@ -2702,7 +2736,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         oneose: () => {
           eoseRemaining--
           if (eoseRemaining > 0) return
-          clearTimeout(eoseFallbackTimer)
+          if (eoseFallbackTimer) clearTimeout(eoseFallbackTimer)
           finishInitialLoad()
         },
       }),
@@ -2712,8 +2746,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     // strictly spam-filtered Trending (24h, max 5), and followed NIP-51 hashtags (max 10)
     let cancelled = false
     if (tab === 'foryou') {
-      const { forYouIncludeTopics, forYouIncludeWotZapped, forYouIncludeTrending } =
-        useSettingsStore.getState()
       const nowSec = Math.floor(Date.now() / 1000)
       const since24h = nowSec - 86400
       const suppSeenContent = new Map<string, Set<string>>()
@@ -2737,7 +2769,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           }
           const verdict = evaluateNoteSpam(e, {
             myPubkey,
-            follows: allowedForYouAuthors || undefined,
+            follows: wotForYouAuthors || undefined,
             seenContentAuthors: suppSeenContent,
             authorCounts: suppAuthorCounts,
             maxPerAuthor: 1,
@@ -2755,10 +2787,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (
         myPubkey &&
         forYouIncludeWotZapped &&
-        allowedForYouAuthors &&
-        allowedForYouAuthors.size > 0
+        wotForYouAuthors &&
+        wotForYouAuthors.size > 0
       ) {
-        const wotAuthorsList = [...allowedForYouAuthors].slice(0, 150)
+        const wotAuthorsList = [...wotForYouAuthors].slice(0, 150)
         const wotZappedPromise = Promise.all([
           nostrPool
             .query(
@@ -2788,8 +2820,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             for (const z of dedupZaps.values()) {
               const parsedZap = parseLiveZapReceipt(z, nowSec)
               if (!parsedZap?.targetEventId) continue
-              const senderInWot = allowedForYouAuthors.has(parsedZap.senderPubkey)
-              const recipientInWot = allowedForYouAuthors.has(parsedZap.recipientPubkey)
+              const senderInWot = wotForYouAuthors.has(parsedZap.senderPubkey)
+              const recipientInWot = wotForYouAuthors.has(parsedZap.recipientPubkey)
               if (!senderInWot && !recipientInWot) continue
               get().ingestEvent(z)
               const cur = byTarget.get(parsedZap.targetEventId) || {
@@ -2874,6 +2906,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         for (const r of results) {
           if (r.status === 'fulfilled') suppEvents.push(...r.value)
         }
+        if (filters.length === 0) {
+          set({ loadingFeed: false })
+        }
         if (suppEvents.length === 0) return
         const suppAuthors = new Set<string>()
         for (const ev of suppEvents) {
@@ -2898,7 +2933,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     return () => {
       cancelled = true
       trendingCancelled = true
-      clearTimeout(eoseFallbackTimer)
+      if (eoseFallbackTimer) clearTimeout(eoseFallbackTimer)
       if (batchTimer) clearTimeout(batchTimer)
       for (const s of subs) s.close()
     }

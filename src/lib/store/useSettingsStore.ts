@@ -141,6 +141,8 @@ export interface SettingsState {
   showExtendedTab: boolean
   showExploreTab: boolean
   showZappedTab: boolean
+  forYouIncludeFollows: boolean
+  forYouIncludeExtended: boolean
   forYouIncludeTopics: boolean
   forYouIncludeWotZapped: boolean
   forYouIncludeTrending: boolean
@@ -211,6 +213,8 @@ export interface SettingsState {
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
   setShowZappedTab: (enabled: boolean) => void
+  setForYouIncludeFollows: (enabled: boolean) => void
+  setForYouIncludeExtended: (enabled: boolean) => void
   setForYouIncludeTopics: (enabled: boolean) => void
   setForYouIncludeWotZapped: (enabled: boolean) => void
   setForYouIncludeTrending: (enabled: boolean) => void
@@ -269,6 +273,8 @@ interface PersistedSettings {
   showExtendedTab: boolean
   showExploreTab: boolean
   showZappedTab: boolean
+  forYouIncludeFollows: boolean
+  forYouIncludeExtended: boolean
   forYouIncludeTopics: boolean
   forYouIncludeWotZapped: boolean
   forYouIncludeTrending: boolean
@@ -355,6 +361,8 @@ function loadInitial(): PersistedSettings & {
     showExtendedTab: false,
     showExploreTab: false,
     showZappedTab: false,
+    forYouIncludeFollows: true,
+    forYouIncludeExtended: true,
     forYouIncludeTopics: false,
     forYouIncludeWotZapped: true,
     forYouIncludeTrending: true,
@@ -499,6 +507,15 @@ function loadInitial(): PersistedSettings & {
         ? Math.min(100, Math.max(1, Math.round(parsed.nip85MinRank)))
         : defaults.nip85MinRank
 
+    const forYouIncludeFollows =
+      typeof parsed.forYouIncludeFollows === 'boolean'
+        ? parsed.forYouIncludeFollows
+        : defaults.forYouIncludeFollows
+    const forYouIncludeExtended =
+      typeof parsed.forYouIncludeExtended === 'boolean'
+        ? parsed.forYouIncludeExtended
+        : defaults.forYouIncludeExtended
+
     const merged = {
       ...defaults,
       ...parsed,
@@ -508,6 +525,8 @@ function loadInitial(): PersistedSettings & {
       pinnedListTabs,
       feedDropdownListOverrides,
       hoverProfilePreview,
+      forYouIncludeFollows,
+      forYouIncludeExtended,
       mediaVolume,
       mediaMuted,
       wotMinVouches,
@@ -560,6 +579,8 @@ function persist(state: SettingsState) {
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
     showZappedTab: state.showZappedTab,
+    forYouIncludeFollows: state.forYouIncludeFollows,
+    forYouIncludeExtended: state.forYouIncludeExtended,
     forYouIncludeTopics: state.forYouIncludeTopics,
     forYouIncludeWotZapped: state.forYouIncludeWotZapped,
     forYouIncludeTrending: state.forYouIncludeTrending,
@@ -912,6 +933,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowZappedTab: (showZappedTab) => {
     set({ showZappedTab })
+    persist(get())
+  },
+  setForYouIncludeFollows: (forYouIncludeFollows) => {
+    set({ forYouIncludeFollows })
+    persist(get())
+  },
+  setForYouIncludeExtended: (forYouIncludeExtended) => {
+    set({ forYouIncludeExtended })
     persist(get())
   },
   setForYouIncludeTopics: (forYouIncludeTopics) => {
