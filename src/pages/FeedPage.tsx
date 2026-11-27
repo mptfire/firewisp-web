@@ -832,44 +832,23 @@ export function FeedPage() {
             tab === 'extended' ||
             tab === 'firewisp' ||
             Boolean(customStorageKey)) && (
-            <div
-              className="inline-flex items-center gap-1.5"
-              title="Show (On) or hide (Off) replies in this feed"
+            <button
+              type="button"
+              aria-pressed={showRepliesInFollows}
+              onClick={() => setShowRepliesInFollows(!showRepliesInFollows)}
+              title={
+                showRepliesInFollows
+                  ? 'Replies shown in feed — click to hide'
+                  : 'Replies hidden in feed — click to show'
+              }
+              className={`md:hidden px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                showRepliesInFollows
+                  ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
+                  : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+              }`}
             >
-              <span className="text-[11px] font-medium text-[#9a9890]">Replies</span>
-              <div
-                role="group"
-                aria-label="Replies display mode"
-                className="inline-flex items-center rounded-lg bg-[#0e0e11] border border-[#262938] p-0.5 gap-0.5"
-              >
-                <button
-                  type="button"
-                  aria-pressed={showRepliesInFollows}
-                  onClick={() => setShowRepliesInFollows(true)}
-                  title="Show replies in this feed"
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
-                    showRepliesInFollows
-                      ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
-                      : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
-                  }`}
-                >
-                  On
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!showRepliesInFollows}
-                  onClick={() => setShowRepliesInFollows(false)}
-                  title="Hide replies in this feed"
-                  className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
-                    !showRepliesInFollows
-                      ? 'bg-red-600/25 border-red-500/50 text-red-300'
-                      : 'border-transparent text-[#7c7a72] hover:text-[#d4d2cb]'
-                  }`}
-                >
-                  Off
-                </button>
-              </div>
-            </div>
+              Replies
+            </button>
           )}
           {tab === 'global' && (
             <button

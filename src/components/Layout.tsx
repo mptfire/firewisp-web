@@ -72,6 +72,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const activeFeedTab = useNostrStore((s) => s.activeFeedTab)
   const showRepliesInFollows = useNostrStore((s) => s.showRepliesInFollows)
+  const setShowRepliesInFollows = useNostrStore((s) => s.setShowRepliesInFollows)
   const pendingFeedIds = useNostrStore((s) => s.pendingFeedIds[s.activeFeedTab])
   const flushPendingFeed = useNostrStore((s) => s.flushPendingFeed)
   const notificationIds = useNostrStore((s) => s.notificationIds)
@@ -485,6 +486,95 @@ export function Layout({ children }: { children: ReactNode }) {
                 const feedDying = showFeedWisp && !feedWispActive
                 const hasUnreadNotif = to === '/notifications' && badge !== undefined
                 const hasPendingFeed = to === '/' && badge !== undefined
+                if (to === '/') {
+                  const isActive = location.pathname === '/'
+                  return (
+                    <div
+                      key={to}
+                      className={`${showFeedWisp ? 'fw-notif-flame ' : ''}flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium border transition-[background-color,border-color,color] duration-500 ease-out ${
+                        hasFeedNew
+                          ? 'bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
+                          : isActive
+                            ? 'bg-[#e8590c]/15 text-[#ff922b] border-[#e8590c]/25'
+                            : hasPendingFeed
+                              ? 'bg-transparent border-transparent text-[#ff922b] font-semibold hover:bg-white/5'
+                              : 'bg-transparent border-transparent text-[#c2bfb7] hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      {showFeedWisp && (
+                        <>
+                          <span className="fw-notif-seg fw-orbit-tail-3" aria-hidden="true">
+                            <span className={`fw-tail-pill fw-white-tail-3 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                          </span>
+                          <span className="fw-notif-seg fw-orbit-tail-2" aria-hidden="true">
+                            <span className={`fw-tail-pill fw-white-tail-2 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                          </span>
+                          <span className="fw-notif-seg fw-orbit-tail-1" aria-hidden="true">
+                            <span className={`fw-tail-pill fw-white-tail-1 ${feedDying ? 'fw-tail-dying' : ''}`} />
+                          </span>
+                          <span className="fw-notif-seg fw-orbit-head" aria-hidden="true">
+                            <span className={`fw-wisp-head-inner fw-white-glow ${feedDying ? 'fw-wisp-dying' : ''}`}>
+                              <FireWispFlameSprite idPrefix="fw-feed" variant="white" powerDown={feedDying} />
+                            </span>
+                          </span>
+                        </>
+                      )}
+                      <NavLink
+                        to={to}
+                        end={end}
+                        onClick={(e) => scrollTopIfCurrent(e, to)}
+                        className="flex items-center gap-3 min-w-0 flex-1"
+                      >
+                        <Icon
+                          className={`w-4 h-4 shrink-0 ${
+                            badge && badgeTone === 'red'
+                              ? 'text-red-500'
+                              : badge && badgeTone === 'green'
+                                ? 'text-emerald-400'
+                                : hasFeedNew
+                                  ? 'text-[#ff922b]'
+                                  : ''
+                          }`}
+                        />
+                        <span className={`truncate ${hasFeedNew ? 'text-[#ff922b]' : ''}`}>
+                          {label}
+                        </span>
+                      </NavLink>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {badge !== undefined && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md border text-[10px] font-bold tabular-nums leading-none ${
+                              badgeTone === 'green'
+                                ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                                : badgeTone === 'orange'
+                                  ? 'bg-[#e8590c]/20 border-[#e8590c]/50 text-[#ff922b]'
+                                  : 'bg-red-600/20 border-red-500/40 text-red-400'
+                            }`}
+                          >
+                            {badge}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          aria-pressed={showRepliesInFollows}
+                          onClick={() => setShowRepliesInFollows(!showRepliesInFollows)}
+                          title={
+                            showRepliesInFollows
+                              ? 'Replies shown in feed — click to hide'
+                              : 'Replies hidden in feed — click to show'
+                          }
+                          className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer shrink-0 ${
+                            showRepliesInFollows
+                              ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-300'
+                              : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                          }`}
+                        >
+                          Replies
+                        </button>
+                      </div>
+                    </div>
+                  )
+                }
                 return (
                   <NavLink
                     key={to}
