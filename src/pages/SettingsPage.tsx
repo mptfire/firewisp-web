@@ -721,6 +721,7 @@ export function SettingsPage() {
                   type="button"
                   onClick={() => settings.removeBlossomServer(url)}
                   title="Remove Blossom server"
+                  aria-label={`Remove Blossom server ${url}`}
                   className="p-1 text-[#7c7a72] hover:text-red-400 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />

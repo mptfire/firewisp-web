@@ -1,11 +1,13 @@
 import type { Event } from 'nostr-tools/pure'
 import type { RelayEntry } from '../constants'
 import { sanitizeBlossomUrl, sanitizePublicRelayUrl } from '../sanitize'
+import { KIND_BLOSSOM_SERVER_LIST } from './blossom'
 import type { FireWispSigner } from './signer'
+import { INVISIBLE_CHAR_RE } from './spamFilter'
 
 export const KIND_MUTE_LIST = 10000
 export const KIND_RELAY_LIST = 10002
-export const KIND_BLOSSOM_SERVER_LIST = 10063
+export { KIND_BLOSSOM_SERVER_LIST }
 export const MAX_NIP44_PLAINTEXT_BYTES = 65535
 
 export type MuteItemType = 'p' | 't' | 'word'
@@ -285,9 +287,6 @@ export function buildBud03BlossomListTags(servers: readonly string[]): {
   return { tags, servers: cleanServers }
 }
 
-const INVISIBLE_MUTE_CHARS_RE =
-  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g
-
 const CANDIDATE_HOST_RE =
   /(?:^|[\s(<"'\u201c\u2018=])(?:https?:\/\/)?(?:www\.)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[/?#\s.,!?;:)\]"'\u201d\u2019]|$)/gi
 
@@ -314,7 +313,7 @@ const SCAM_PHRASE_CANDIDATES = [
  * from note content for 1-tap NIP-51 word muting.
  */
 export function extractMuteCandidates(content: string): string[] {
-  const cleaned = (content || '').replace(INVISIBLE_MUTE_CHARS_RE, '')
+  const cleaned = (content || '').replace(INVISIBLE_CHAR_RE, '')
   const out: string[] = []
   const seen = new Set<string>()
   const push = (raw: string) => {

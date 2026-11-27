@@ -1,16 +1,11 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Trophy, Zap } from 'lucide-react'
+import { formatCompactCount } from '../lib/format'
 import { rankTopZappers } from '../lib/nostr/nip53'
 import { useLiveStore } from '../lib/store/useLiveStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { Avatar } from './Avatar'
-
-function formatSatsCompact(sats: number): string {
-  if (sats >= 1_000_000) return `${(sats / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-  if (sats >= 10_000) return `${(sats / 1_000).toFixed(1).replace(/\.0$/, '')}K`
-  return sats.toLocaleString()
-}
 
 export function StreamTopZappersCard({ compact = false }: { compact?: boolean }) {
   const streamZappers = useLiveStore((s) => s.streamZappers)
@@ -33,7 +28,7 @@ export function StreamTopZappersCard({ compact = false }: { compact?: boolean })
         {streamZapTotal > 0 && (
           <span className="px-1.5 py-0.5 rounded-md bg-[#f59f00]/15 text-[#f59f00] text-[10px] font-bold flex items-center gap-0.5 shrink-0">
             <Zap className="w-2.5 h-2.5 fill-[#f59f00]" />
-            {formatSatsCompact(streamZapTotal)}
+            {formatCompactCount(streamZapTotal, { kThreshold: 10_000, formatPlain: true })}
           </span>
         )}
       </div>
@@ -89,7 +84,7 @@ export function StreamTopZappersCard({ compact = false }: { compact?: boolean })
                 </div>
                 <span className="text-[11px] font-bold text-[#f59f00] flex items-center gap-0.5 shrink-0">
                   <Zap className="w-2.5 h-2.5 fill-[#f59f00]" />
-                  {formatSatsCompact(z.totalSats)}
+                  {formatCompactCount(z.totalSats, { kThreshold: 10_000, formatPlain: true })}
                 </span>
               </Link>
             )

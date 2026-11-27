@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { formatCompactCount } from '../lib/format'
 import {
   ArrowRight,
   PictureInPicture2,
@@ -25,12 +26,6 @@ import { Avatar } from '../components/Avatar'
 import { LiveHoverPreview, type HoverPreviewStatus } from '../components/LiveHoverPreview'
 
 const HOVER_PREVIEW_DELAY_MS = 350
-
-function formatCompactCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`
-  return String(n)
-}
 
 function extractNaddr(raw: string): string | null {
   const m = /(naddr1[0-9a-z]+)/i.exec(raw.trim())

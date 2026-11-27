@@ -586,6 +586,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <div className="mt-4 p-3 rounded-2xl bg-[#15161c] border border-[#232530]">
               <button
                 type="button"
+                aria-expanded={relaysExpanded}
                 onClick={() => setRelaysExpanded((v) => !v)}
                 className="w-full flex items-center justify-between mb-1.5 cursor-pointer group"
                 title="Click to inspect all connected relays"
@@ -733,8 +734,10 @@ export function Layout({ children }: { children: ReactNode }) {
                     </div>
                   </Link>
                   <button
+                    type="button"
                     onClick={logout}
                     title="Sign out (wipes local key from memory)"
+                    aria-label="Sign out"
                     className="p-1.5 rounded-lg text-[#9a9890] hover:text-red-400 hover:bg-white/5 cursor-pointer"
                   >
                     <LogOut className="w-4 h-4" />

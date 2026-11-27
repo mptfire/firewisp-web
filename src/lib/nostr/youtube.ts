@@ -12,7 +12,7 @@ export interface YouTubeMeta {
 }
 
 const YOUTUBE_VIDEO_ID_RE = /^[a-zA-Z0-9_-]{11}$/
-const ALLOWED_YT_HOSTS = new Set([
+export const ALLOWED_YT_HOSTS = new Set([
   'youtube.com',
   'www.youtube.com',
   'm.youtube.com',

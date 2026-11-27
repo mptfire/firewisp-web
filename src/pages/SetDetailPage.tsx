@@ -82,7 +82,7 @@ export function SetDetailPage() {
 
   const events = useNostrStore((s) => s.events)
   const isEventDeleted = useNostrStore((s) => s.isEventDeleted)
-  const deletedByAuthor = useNostrStore((s) => s.deletedByAuthor)
+  useNostrStore((s) => s.deletedByAuthor)
   const ingestEvent = useNostrStore((s) => s.ingestEvent)
   const fetchProfiles = useNostrStore((s) => s.fetchProfiles)
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
@@ -152,13 +152,6 @@ export function SetDetailPage() {
       active = false
     }
   }, [setType, setObj, readRelays, ingestEvent, fetchProfiles])
-
-  const visibleBookmarkEvents = useMemo(() => {
-    if (setType !== 'bookmarks' || !setObj) return []
-    return setObj.items
-      .map((id) => events[id])
-      .filter((ev): ev is NonNullable<typeof ev> => Boolean(ev && !isEventDeleted(ev)))
-  }, [setType, setObj, events, deletedByAuthor, isEventDeleted])
 
   if (!setType) {
     return (

@@ -21,14 +21,14 @@ import {
   normalizeMuteValue,
   type MuteListMutation,
 } from '../nostr/lists'
-import { evaluateNoteSpam, foldConfusables, isTopLevelNote } from '../nostr/spamFilter'
+import { evaluateNoteSpam, foldConfusables, INVISIBLE_CHAR_RE, isTopLevelNote } from '../nostr/spamFilter'
 import { parseBolt11AmountSats } from '../nostr/nip57'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
 import { useListsStore } from './useListsStore'
 import { useSettingsStore, type SidebarFeedMode } from './useSettingsStore'
-import { getListFeedDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
+import { getListFeedDTag, isListFeedKey } from '../nostr/followSets'
 import {
   capActiveRelaySetUrls,
   getCustomFeedStorageKey,
@@ -158,8 +158,6 @@ export interface NostrState {
   extendedAuthors: string[]
   loadingExtendedGraph: boolean
   loadingMore: boolean
-  trendingSidebarIds: string[]
-  loadingTrends: boolean
   sidebarFeedIds: Record<string, string[]>
   sidebarFeedLoading: Record<string, boolean>
   notificationIds: string[]
@@ -182,7 +180,6 @@ export interface NostrState {
   bumpFeedRefresh: () => void
   flushPendingFeed: (tab: FeedTab) => void
   loadOlderFeed: (tab: FeedTab) => Promise<number>
-  loadTrendingSidebar: (force?: boolean) => Promise<void>
   loadSidebarFeed: (mode: SidebarFeedMode, force?: boolean) => Promise<void>
   initPoolListener: () => () => void
   ingestEvent: (event: Event) => void
@@ -769,8 +766,6 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   extendedAuthors: [],
   loadingExtendedGraph: false,
   loadingMore: false,
-  trendingSidebarIds: [],
-  loadingTrends: false,
   sidebarFeedIds: {
     trending: [],
     extended: [],
@@ -959,8 +954,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (tags.some((t) => mutedHashtags.has(t))) return true
     }
     if (mutedWords.length > 0 && event.content) {
-      const stripped = event.content
-        .replace(/[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g, '')
+      const stripped = event.content.replace(INVISIBLE_CHAR_RE, '')
       const lower = stripped.toLowerCase()
       const folded = foldConfusables(stripped).toLowerCase()
       if (mutedWords.some((w) => lower.includes(w) || folded.includes(w))) {
@@ -1339,11 +1333,8 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         }
         const tagSet = new Set<string>()
         for (const ev of latestInterest.values()) {
-          for (const t of ev.tags) {
-            if (t[0] === 't' && t[1]) {
-              const clean = t[1].trim().toLowerCase().replace(/^#/, '')
-              if (clean) tagSet.add(clean)
-            }
+          for (const clean of extractEventHashtags(ev)) {
+            tagSet.add(clean)
           }
         }
         set({ followedHashtags: [...tagSet].slice(0, 40) })
@@ -1502,17 +1493,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
   },
 
-  loadTrendingSidebar: async (force = false) => {
-    await get().loadSidebarFeed('trending', force)
-  },
-
   loadSidebarFeed: async (mode, force = false) => {
     if (get().sidebarFeedLoading[mode]) return
     if (!force && (get().sidebarFeedIds[mode]?.length ?? 0) > 0) return
 
     set((s) => ({
       sidebarFeedLoading: { ...s.sidebarFeedLoading, [mode]: true },
-      ...(mode === 'trending' ? { loadingTrends: true } : {}),
     }))
 
     try {
@@ -1763,13 +1749,11 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         return {
           events: eventsMap,
           sidebarFeedIds: { ...s.sidebarFeedIds, [mode]: resolvedIds },
-          ...(mode === 'trending' ? { trendingSidebarIds: resolvedIds } : {}),
         }
       })
     } finally {
       set((s) => ({
         sidebarFeedLoading: { ...s.sidebarFeedLoading, [mode]: false },
-        ...(mode === 'trending' ? { loadingTrends: false } : {}),
       }))
     }
   },

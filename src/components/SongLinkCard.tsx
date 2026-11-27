@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { ExternalLink, Music2, Pause, Play } from 'lucide-react'
+import { formatClock } from '../lib/format'
 import {
   applyVideoAudioLevel,
   claimFeedVideoFocus,
@@ -14,14 +15,6 @@ import {
   type SongLinkRef,
 } from '../lib/nostr/songLink'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
-
-function formatClock(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return '0:00'
-  const whole = Math.floor(sec)
-  const mins = Math.floor(whole / 60)
-  const secs = whole % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
 
 /**
  * Privacy-first inline song.link / album.link / odesli card:

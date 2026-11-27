@@ -12,7 +12,6 @@ interface VideoAudioGraph {
   source: MediaElementAudioSourceNode
   gain: GainNode
   analyser: AnalyserNode
-  data: Uint8Array<ArrayBuffer>
   freqData: Uint8Array<ArrayBuffer>
 }
 
@@ -90,16 +89,32 @@ export function formatAudioSourceLabel(
   secondary?: string | null,
   fallbackUrl?: string | null,
 ): string {
-  const p = cleanLabelText(primary)
-  const s = cleanLabelText(secondary)
-  let out = ''
-  if (p && s) {
-    const pl = p.toLowerCase()
-    const sl = s.toLowerCase()
-    out = pl === sl || pl.includes(sl) ? p : sl.includes(pl) ? s : `${p} — ${s}`
-  } else {
-    out = p || s
+  const rawParts = [cleanLabelText(primary), cleanLabelText(secondary)]
+    .filter(Boolean)
+    .flatMap((part) =>
+      part
+        .split(/\s+—\s+/)
+        .map((seg) => seg.trim())
+        .filter(Boolean),
+    )
+  const parts: string[] = []
+  for (const seg of rawParts) {
+    const sl = seg.toLowerCase()
+    if (
+      parts.some((prev) => {
+        const pl = prev.toLowerCase()
+        return pl === sl || pl.includes(sl)
+      })
+    ) {
+      continue
+    }
+    if (parts.length === 1 && sl.includes(parts[0].toLowerCase())) {
+      parts[0] = seg
+      continue
+    }
+    parts.push(seg)
   }
+  let out = parts.join(' — ')
   if (!out && fallbackUrl) {
     try {
       const parsed = new URL(fallbackUrl)
@@ -194,7 +209,6 @@ export function ensureVideoAudioGraph(video: HTMLMediaElement): VideoAudioGraph 
       source,
       gain,
       analyser,
-      data: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
       freqData: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
     }
     graphByVideo.set(video, graph)
@@ -294,32 +308,6 @@ export function readVideoFrequencyBands(
     outBands[i] = Math.min(1, Math.pow((peak / 255) * tilt, 0.92))
   }
   return true
-}
-
-/**
- * Returns a normalized 0..1 live audio level for the VU meter, or 0 if unavailable/silent.
- * Uses logarithmic dB-scaled FFT bins (-85..-15 dB) so normal speech/stream audio registers cleanly
- * instead of quantizing to zero in 8-bit linear time-domain sampling.
- */
-export function readVideoVuLevel(video: HTMLMediaElement): number {
-  const graph = graphByVideo.get(video)
-  if (!graph || video.paused || video.muted) return 0
-  if (graph.ctx.state === 'suspended') {
-    void graph.ctx.resume().catch(() => {})
-  }
-  if (graph.ctx.state !== 'running') return 0
-  const freq = graph.freqData
-  graph.analyser.getByteFrequencyData(freq)
-  const maxBin = Math.min(freq.length - 1, 56)
-  let sum = 0
-  let peak = 0
-  for (let b = 1; b <= maxBin; b++) {
-    const v = freq[b] / 255
-    sum += v
-    if (v > peak) peak = v
-  }
-  const avg = sum / maxBin
-  return Math.min(1, Math.pow(peak * 0.65 + avg * 0.65, 0.9))
 }
 
 /**

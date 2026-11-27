@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus } from 'lucide-react'
+import { formatRelativeTime } from '../lib/format'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { getBuiltinEmoteByKey, resolveReactionEmoteSrc } from '../lib/nostr/customEmotes'
 import { normalizeReactionEmoji, parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
@@ -9,15 +10,6 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { ReactionEmote } from '../components/ReactionEmote'
-
-function formatRelative(unixSec: number): string {
-  const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
-  if (diff < 60) return `${diff}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`
-  return new Date(unixSec * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
 
 export function NotificationsPage() {
   const pubkey = useAuthStore((s) => s.pubkey)
@@ -258,7 +250,9 @@ export function NotificationsPage() {
                       </span>
                     </p>
                     <span className="text-[11px] text-[#6f6d66] shrink-0">
-                      {formatRelative(ev.created_at)}
+                      {formatRelativeTime(ev.created_at, {
+                        dateFormatOptions: { month: 'short', day: 'numeric' },
+                      })}
                     </span>
                   </div>
                   {previewText && (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Radio, Zap } from 'lucide-react'
+import { formatCompactCount, formatRelativeTime } from '../lib/format'
 import { parseNoteContent } from '../lib/nostr/content'
 import { LIVE_DISCOVERY_RELAYS } from '../lib/nostr/nip53'
 import { nostrPool } from '../lib/nostr/pool'
@@ -20,20 +21,6 @@ const MAX_VISIBLE_ROWS = 60
 const PERIOD_OPTIONS = [1, 8, 24] as const
 type PeriodHours = (typeof PERIOD_OPTIONS)[number]
 const PERIOD_QUERY_LIMIT: Record<PeriodHours, number> = { 1: 150, 8: 400, 24: 600 }
-
-function formatCompactSats(sats: number): string {
-  if (sats >= 1_000_000) return `${(sats / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
-  if (sats >= 10_000) return `${(sats / 1_000).toFixed(1).replace(/\.0$/, '')}k`
-  return sats.toLocaleString()
-}
-
-function formatAgo(createdAt: number, nowSec: number): string {
-  const diff = Math.max(0, nowSec - createdAt)
-  if (diff < 60) return 'now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return `${Math.floor(diff / 86400)}d`
-}
 
 const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
 
@@ -315,7 +302,11 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#0f1016] border border-[#222532] p-1.5 text-center">
           <div className="min-w-0">
             <div className="text-[11px] font-bold text-[#ffd43b] truncate">
-              {formatCompactSats(stats.totalSats)}
+              {formatCompactCount(stats.totalSats, {
+                kThreshold: 10_000,
+                lowercaseK: true,
+                formatPlain: true,
+              })}
             </div>
             <div className="text-[9px] text-[#7c7a72] leading-tight">sats</div>
           </div>
@@ -400,7 +391,11 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
                       }`}
                     >
                       <Zap className="w-2.5 h-2.5 fill-current" />
-                      {formatCompactSats(z.sats)}
+                      {formatCompactCount(z.sats, {
+                        kThreshold: 10_000,
+                        lowercaseK: true,
+                        formatPlain: true,
+                      })}
                     </span>
                     <AddToListButton
                       pubkey={z.senderPubkey}
@@ -409,7 +404,11 @@ export function LiveZapsCard({ compact = false }: { compact?: boolean }) {
                       className="opacity-0 group-hover/zap:opacity-100 focus-within:opacity-100"
                     />
                     <span className="text-[9px] text-[#6f6d66]">
-                      {formatAgo(z.createdAt, nowSec)}
+                      {formatRelativeTime(z.createdAt, {
+                        nowSec,
+                        underMinuteLabel: 'now',
+                        includeWeeks: false,
+                      })}
                     </span>
                   </div>
                 </div>

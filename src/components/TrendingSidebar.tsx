@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { formatCompactCount, formatRelativeTime } from '../lib/format'
 import {
   Flame,
   Globe,
@@ -41,20 +42,6 @@ const SIDEBAR_FEED_OPTIONS: Array<{ value: BuiltinSidebarFeedMode; label: string
 ]
 
 const EMPTY_IDS: string[] = []
-
-function formatShortAge(unixSec: number): string {
-  const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
-  if (diff < 60) return `${diff}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return `${Math.floor(diff / 86400)}d`
-}
-
-function formatCompact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
-  return String(n)
-}
 
 function stripPreviewText(raw: string): string {
   return raw
@@ -127,7 +114,7 @@ const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: 
           </div>
         </div>
         <span className="text-[10px] text-[#7c7a72] shrink-0 self-start pt-0.5">
-          {formatShortAge(ev.created_at)}
+          {formatRelativeTime(ev.created_at, { includeWeeks: false })}
         </span>
       </div>
 
@@ -205,25 +192,25 @@ const TrendingPostCard = memo(function TrendingPostCard({ eventId }: { eventId: 
           {replies > 0 && (
             <span className="flex items-center gap-1">
               <MessageCircle className="w-3 h-3" />
-              {formatCompact(replies)}
+              {formatCompactCount(replies, { lowercaseK: true, stripTrailingZero: false })}
             </span>
           )}
           {reposts > 0 && (
             <span className="flex items-center gap-1 text-emerald-400/90">
               <Repeat2 className="w-3 h-3" />
-              {formatCompact(reposts)}
+              {formatCompactCount(reposts, { lowercaseK: true, stripTrailingZero: false })}
             </span>
           )}
           {likes > 0 && (
             <span className="flex items-center gap-1 text-rose-400/90">
               <Heart className="w-3 h-3" />
-              {formatCompact(likes)}
+              {formatCompactCount(likes, { lowercaseK: true, stripTrailingZero: false })}
             </span>
           )}
           {zapSats > 0 && (
             <span className="flex items-center gap-1 text-[#f59f00] ml-auto font-medium">
               <Zap className="w-3 h-3 fill-[#f59f00]/30" />
-              {formatCompact(zapSats)}
+              {formatCompactCount(zapSats, { lowercaseK: true, stripTrailingZero: false })}
             </span>
           )}
         </div>

@@ -2517,5 +2517,101 @@ describe('Full code-audit regression & security hardening', () => {
     reportVideoSoundActive(mockVideo, false)
     expect(hasActiveSoundPlaying()).toBe(false)
     expect(getActiveSoundSourceLabel()).toBeNull()
+
+    expect(
+      formatAudioSourceLabel(
+        'NoGood ✌️',
+        'NoGood Radio — NoGood Radio',
+        'https://cdn.example/s.m3u8',
+      ),
+    ).toBe('NoGood ✌️ — NoGood Radio')
+    expect(formatAudioSourceLabel('Alice', 'Alice — Chill Set', 'https://cdn.example/s.m3u8')).toBe(
+      'Alice — Chill Set',
+    )
+  })
+
+  it('parses song.link / album.link URLs into YouTube or iTunes cards and rejects invalid/spoofed URLs', async () => {
+    const { extractSongLink } = await import('../nostr/songLink')
+    const { parseNoteContent } = await import('../nostr/content')
+
+    const ytSong = extractSongLink('https://song.link/y/20t-IZZztOk')
+    expect(ytSong?.youtubeRef?.videoId).toBe('20t-IZZztOk')
+
+    const itunesSong = extractSongLink('https://song.link/us/i/1053825088')
+    expect(itunesSong).toEqual({
+      url: 'https://song.link/us/i/1053825088',
+      host: 'song.link',
+      itunesTrackId: '1053825088',
+    })
+
+    expect(extractSongLink('https://song.link/about')).toBeNull()
+    expect(extractSongLink('https://odesli.co/embed/?url=https://song.link/i/1053825088')).toBeNull()
+    expect(extractSongLink('https://user:pass@song.link/i/1053825088')).toBeNull()
+    expect(extractSongLink('https://song.link.evil.example/i/1053825088')).toBeNull()
+
+    const parsed = parseNoteContent({
+      content: 'Spin this https://song.link/us/i/1053825088 and watch https://song.link/y/20t-IZZztOk',
+      tags: [],
+    })
+    expect(parsed.songLinks).toHaveLength(1)
+    expect(parsed.songLinks[0].itunesTrackId).toBe('1053825088')
+    expect(parsed.youtube).toHaveLength(1)
+    expect(parsed.youtube[0].videoId).toBe('20t-IZZztOk')
+  })
+
+  it('preserves existing private follow-set members when editing public members', async () => {
+    const { buildUpdatedFollowSetPayload } = await import('../nostr/followSets')
+    const pubA = 'a'.repeat(64)
+    const privB = 'b'.repeat(64)
+    const payload = buildUpdatedFollowSetPayload({
+      dTag: 'mix',
+      title: 'Mix List',
+      members: [pubA, privB],
+      isPrivate: false,
+      existingPrivateMembers: [privB],
+    })
+    expect(payload.publicTags).toContainEqual(['p', pubA])
+    expect(payload.publicTags).not.toContainEqual(['p', privB])
+    expect(payload.privateTags).toContainEqual(['p', privB])
+  })
+
+  it('enforces mainnet bolt11 parsing and fail-closed live zap validation', async () => {
+    const { parseBolt11AmountSats } = await import('../nostr/nip57')
+    const { parseLiveZapReceipt } = await import('../nostr/zapsFeed')
+
+    expect(parseBolt11AmountSats('lnbc10u1p000000')).toBe(1000)
+    expect(parseBolt11AmountSats('lntb10u1p000000')).toBeNull()
+    expect(parseBolt11AmountSats('lnbcrt10u1p000000')).toBeNull()
+
+    const invalidReceipt = {
+      id: '1'.repeat(64),
+      kind: 9735,
+      pubkey: '2'.repeat(64),
+      created_at: 1_700_000_000,
+      content: '',
+      sig: '0'.repeat(128),
+      tags: [
+        ['p', '3'.repeat(64)],
+        ['bolt11', 'lntb10u1p000000'],
+      ],
+    }
+    expect(parseLiveZapReceipt(invalidReceipt)).toBeNull()
+  })
+
+  it('enforces hashtag token boundaries in profileSearch', async () => {
+    const { filterEventsForSearch } = await import('../nostr/profileSearch')
+    const makeEv = (id: string, content: string) => ({
+      id,
+      kind: 1,
+      pubkey: 'a'.repeat(64),
+      created_at: 1_700_000_000,
+      content,
+      tags: [] as string[][],
+      sig: '0'.repeat(128),
+    })
+    const evMatch = makeEv('1'.repeat(64), 'Stacking #btc today')
+    const evPrefixOnly = makeEv('2'.repeat(64), 'Using #btcpay server')
+    const filtered = filterEventsForSearch([evPrefixOnly, evMatch], '#btc')
+    expect(filtered.map((e) => e.id)).toEqual([evMatch.id])
   })
 })

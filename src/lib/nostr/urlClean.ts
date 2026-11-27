@@ -4,6 +4,8 @@
  * presigned media signatures, search queries, or product/episode selection.
  */
 
+import { ALLOWED_YT_HOSTS as YOUTUBE_HOSTS } from './youtube'
+
 const URL_TOKEN_RE = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g
 
 // Signed cloud/media URLs & OAuth/magic-link callbacks must NEVER be rewritten.
@@ -97,15 +99,6 @@ const GLOBAL_TRACKING_KEYS = new Set([
   'at_custom3',
   'at_custom4',
   'xtor',
-])
-
-const YOUTUBE_HOSTS = new Set([
-  'youtube.com',
-  'www.youtube.com',
-  'm.youtube.com',
-  'music.youtube.com',
-  'youtu.be',
-  'www.youtu.be',
 ])
 
 const YOUTUBE_TRACKING_KEYS = new Set([

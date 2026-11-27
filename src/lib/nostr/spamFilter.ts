@@ -3,7 +3,7 @@ import { verifyEventPow } from '../crypto/nip13'
 import { extractEventHashtags, extractReplyRefs } from './content'
 
 // Same invisible/zero-width obfuscation characters targeted by Fire Wisp Android's NSpamPreprocessor
-const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g
+export const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFEFF\uFFA0]/g
 
 // Math alphanumeric / fancy Unicode font blocks heavily abused by Nostr spam bots
 const FANCY_UNICODE_RE = /[\u{1D400}-\u{1D7FF}]/gu

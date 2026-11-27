@@ -13,6 +13,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react'
+import { formatClock } from '../lib/format'
 import { formatBitrate, readVideoFrequencyBands } from '../lib/mediaAudio'
 
 export interface HlsQualityOption {
@@ -58,20 +59,6 @@ interface VideoControlBarProps {
   onPopOut?: () => void
   onToggleFullscreen: () => void
   onInteract?: () => void
-}
-
-function formatTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return '0:00'
-  const whole = Math.floor(sec)
-  const h = Math.floor(whole / 3600)
-  const m = Math.floor((whole % 3600) / 60)
-  const s = whole % 60
-  const ss = s < 10 ? `0${s}` : String(s)
-  if (h > 0) {
-    const mm = m < 10 ? `0${m}` : String(m)
-    return `${h}:${mm}:${ss}`
-  }
-  return `${m}:${ss}`
 }
 
 const MINI_EQ_BANDS = 5
@@ -350,8 +337,8 @@ export function VideoControlBar({
               )
             ) : duration > 0 ? (
               <span className="text-[10px] font-mono text-[#d4d2cb] tabular-nums shrink-0 select-none">
-                {formatTime(currentTime)}
-                <span className="text-[#7c7a72]"> / {formatTime(duration)}</span>
+                {formatClock(currentTime)}
+                <span className="text-[#7c7a72]"> / {formatClock(duration)}</span>
               </span>
             ) : null}
 

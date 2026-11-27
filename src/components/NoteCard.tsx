@@ -21,6 +21,7 @@ import {
   UserMinus,
   UserPlus,
 } from 'lucide-react'
+import { formatRelativeTime } from '../lib/format'
 import { extractReplyRefs, parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
 import {
   CUSTOM_REACTION_EMOTES,
@@ -105,15 +106,6 @@ interface NoteCardProps {
   event: Event
   repostedByPubkey?: string
   hideParentPreview?: boolean
-}
-
-function formatRelativeTime(unixSec: number): string {
-  const diff = Math.max(0, Math.floor(Date.now() / 1000) - unixSec)
-  if (diff < 60) return `${diff}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d`
-  return new Date(unixSec * 1000).toLocaleDateString()
 }
 
 /** Isolated mention chip so profile updates only re-render this chip, never the whole feed. */
@@ -1187,8 +1179,10 @@ export const NoteCard = memo(function NoteCard({
                           #{seg.tag}
                         </Link>
                         <button
+                          type="button"
                           onClick={() => void muteHashtagGlobal(seg.tag)}
                           title={`Mute #${seg.tag}`}
+                          aria-label={`Mute hashtag ${seg.tag}`}
                           className="ml-0.5 opacity-0 group-hover:opacity-100 text-[#8a8880] hover:text-red-400 transition cursor-pointer"
                         >
                           <VolumeX className="w-3 h-3" />
@@ -1288,6 +1282,7 @@ export const NoteCard = memo(function NoteCard({
                       }}
                       className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-bold tracking-wide text-[#f59f00] border border-white/15 hover:bg-black cursor-pointer"
                       title="Show image alt text"
+                      aria-label="Show image alt text"
                     >
                       ALT
                     </button>
@@ -1388,6 +1383,7 @@ export const NoteCard = memo(function NoteCard({
             </Link>
 
             <button
+              type="button"
               onClick={() => void toggleRepost(event)}
               className={`flex items-center gap-1.5 text-xs transition p-1 rounded-lg cursor-pointer ${
                 userReposted
@@ -1395,6 +1391,7 @@ export const NoteCard = memo(function NoteCard({
                   : 'hover:text-emerald-400'
               }`}
               title={userReposted ? 'Undo repost (NIP-09)' : 'Repost'}
+              aria-label={userReposted ? 'Undo repost' : 'Repost'}
             >
               <Repeat2 className="w-4 h-4" />
               {repostCount > 0 && <span>{repostCount}</span>}
@@ -1413,6 +1410,7 @@ export const NoteCard = memo(function NoteCard({
                       heartActive ? 'text-rose-500' : 'hover:text-rose-400'
                     }`}
                     title="Like (mines NIP-13 PoW if enabled)"
+                    aria-label={heartActive ? 'Liked' : 'Like note'}
                   >
                     <Heart className={`w-4 h-4 ${heartActive ? 'fill-current' : ''}`} />
                     {heartCount > 0 && <span>{heartCount}</span>}
@@ -1524,6 +1522,7 @@ export const NoteCard = memo(function NoteCard({
             </div>
 
             <button
+              type="button"
               disabled={!profile?.lud16}
               onClick={() => setZapOpen(true)}
               className={`flex items-center gap-1.5 text-xs transition p-1 rounded-lg ${
@@ -1532,17 +1531,20 @@ export const NoteCard = memo(function NoteCard({
                   : 'opacity-30 cursor-not-allowed'
               }`}
               title={profile?.lud16 ? `Zap ${profile.lud16}` : 'Author has no Lightning Address'}
+              aria-label={profile?.lud16 ? `Zap ${displayName}` : 'Zap unavailable'}
             >
               <Zap className={`w-4 h-4 ${zapSats > 0 ? 'text-[#f59f00]' : ''}`} />
               {zapSats > 0 && <span className="text-[#f59f00]">{zapSats.toLocaleString()}</span>}
             </button>
 
             <button
+              type="button"
               onClick={() => void toggleBookmark(event.id)}
               className={`flex items-center gap-1 text-xs transition p-1 rounded-lg cursor-pointer ${
                 bookmarked ? 'text-[#ff8a3d]' : 'hover:text-[#ff8a3d]'
               }`}
               title={bookmarked ? 'Remove bookmark' : 'Bookmark'}
+              aria-label={bookmarked ? 'Remove bookmark' : 'Bookmark note'}
             >
               <Bookmark className={`w-4 h-4 ${bookmarked ? 'fill-current' : ''}`} />
             </button>

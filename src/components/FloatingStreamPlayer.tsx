@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { formatChatTime } from '../lib/format'
 import {
   ExternalLink,
   GripVertical,
@@ -105,13 +106,6 @@ function clampPosition(x: number, y: number, width: number, height: number): Dra
     x: Math.min(Math.max(EDGE_MARGIN, x), maxX),
     y: Math.min(Math.max(EDGE_MARGIN, y), maxY),
   }
-}
-
-function formatMiniTime(unixSec: number): string {
-  return new Date(unixSec * 1000).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function renderTextWithCustomEmojis(text: string, tags: string[][]) {
@@ -346,7 +340,7 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
             <Zap className="w-3 h-3 fill-[#f59f00] shrink-0" />
             {senderName} · {(msg.zapAmountSats || 0).toLocaleString()} sats
           </span>
-          <span className="text-[9px] text-[#8c8a82] shrink-0">{formatMiniTime(msg.createdAt)}</span>
+          <span className="text-[9px] text-[#8c8a82] shrink-0">{formatChatTime(msg.createdAt)}</span>
         </div>
         {hasRichContent && <div className="mt-0.5">{richBody}</div>}
       </div>
@@ -355,7 +349,7 @@ const MiniChatRow = memo(function MiniChatRow({ msg }: { msg: LiveChatMessage })
 
   return (
     <div className="text-[11px] leading-snug break-words">
-      <span className="text-[9px] text-[#6f6d66] mr-1.5">{formatMiniTime(msg.createdAt)}</span>
+      <span className="text-[9px] text-[#6f6d66] mr-1.5">{formatChatTime(msg.createdAt)}</span>
       <Link
         to={`/p/${msg.senderPubkey}`}
         className="font-semibold text-[#ff922b] hover:underline mr-1.5"

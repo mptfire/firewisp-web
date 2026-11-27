@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import type { Event } from 'nostr-tools/pure'
 import { extractEventHashtags } from '../lib/nostr/content'
-import { getListFeedDTag, isListFeedKey, makeListFeedKey } from '../lib/nostr/followSets'
+import { getListFeedDTag, makeListFeedKey } from '../lib/nostr/followSets'
 import {
   capActiveRelaySetUrls,
   getCustomFeedStorageKey,

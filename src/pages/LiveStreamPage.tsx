@@ -29,6 +29,7 @@ import {
   type BlossomUploadResult,
 } from '../lib/nostr/blossom'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
+import { formatChatTime } from '../lib/format'
 import { formatAudioSourceLabel } from '../lib/mediaAudio'
 import { buildLiveATag, decodeLiveNaddr, encodeLiveNaddr, isPlayableStreamUrl } from '../lib/nostr/nip53'
 import { sanitizePublicHttpsUrl } from '../lib/sanitize'
@@ -55,13 +56,6 @@ const WatchWithModal = lazy(() =>
 
 // Matches extensionless Blossom SHA-256 blob URLs (e.g. https://blossom.primal.net/<64-hex> or https://host/prefix/<64-hex>)
 const BLOSSOM_HEX_URL_RE = /^https:\/\/[^/]+(?:\/[^/?#]+)*\/[0-9a-f]{64}(?:[?#].*)?$/i
-
-function formatChatTime(unixSec: number): string {
-  return new Date(unixSec * 1000).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 function extractCustomEmojis(tags: string[][]): Map<string, string> {
   const map = new Map<string, string>()
@@ -381,6 +375,7 @@ const ChatBubble = memo(function ChatBubble({
                 type="button"
                 onClick={() => onReply(msg)}
                 title="Reply"
+                aria-label={`Reply to ${name}`}
                 className="p-1 rounded text-[#8c8a82] hover:text-white hover:bg-white/10 cursor-pointer"
               >
                 <MessageCircle className="w-3 h-3" />
@@ -392,6 +387,7 @@ const ChatBubble = memo(function ChatBubble({
                     type="button"
                     onClick={() => onBlock(msg.senderPubkey, name)}
                     title={`Block ${name}`}
+                    aria-label={`Block ${name}`}
                     className="p-1 rounded text-red-400 hover:bg-red-500/15 cursor-pointer"
                   >
                     <Ban className="w-3 h-3" />
