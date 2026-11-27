@@ -2961,3 +2961,92 @@ describe('Feed dropdown list overrides, hover preview positioning & settings', (
     expect(useProfileHoverStore.getState().pubkey).toBeNull()
   })
 })
+
+describe('Profile editor (kind 0) validation & custom-field preservation', () => {
+  it('preserves third-party custom fields, validates unsafe URLs/handles, and bumps created_at monotonically', async () => {
+    const {
+      validateProfileEditDraft,
+      countPreservedCustomFields,
+      mergeProfileMetadataJson,
+      buildProfileUpdateEvent,
+    } = await import('../nostr/profileEdit')
+
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    const existingEv = finalizeEvent(
+      {
+        kind: 0,
+        created_at: 1794215666,
+        tags: [['p', pk]],
+        content: JSON.stringify({
+          display_name: 'Old Name',
+          displayName: 'Old Name',
+          name: 'oldname',
+          nip05: 'ptf@poster.place',
+          lud16: 'mypathtofire@rizful.com',
+          pronouns: 'Node Runner',
+          xmr: '8A4SQjUpyvMLTVpyCe9Xty4SEhBkpKFwcNzMfFkzqnHcRmP9oKTjX8iGdXTfT2z9nuGKoWffYU6eZB6xGZybaQgRS3kEwHU',
+          cryptocurrency_addresses: { monero: '8A4S...' },
+        }),
+      },
+      sk,
+    )
+
+    expect(countPreservedCustomFields(existingEv.content)).toBe(3)
+
+    // Validation blocks non-https URLs and malformed NIP-05 / lud16
+    expect(
+      validateProfileEditDraft({
+        display_name: 'Steve',
+        name: 'steve',
+        about: 'Building Fire Wisp',
+        picture: 'http://insecure.example/a.png',
+        banner: '',
+        nip05: 'steve@firewisp.de',
+        lud16: 'mypathtofire@rizful.com',
+        website: 'https://firewisp.de',
+      }),
+    ).toContain('https://')
+
+    expect(
+      validateProfileEditDraft({
+        display_name: 'Steve',
+        name: 'steve',
+        about: '',
+        picture: '',
+        banner: '',
+        nip05: 'not-valid-nip05',
+        lud16: '',
+        website: '',
+      }),
+    ).toContain('NIP-05')
+
+    const cleanDraft = {
+      display_name: 'Steve',
+      name: 'steve',
+      about: 'Builder of Fire Wisp',
+      picture: 'https://blossom.mypathtofire.de/avatar.webp',
+      banner: '',
+      nip05: 'steve@firewisp.de',
+      lud16: 'mypathtofire@rizful.com',
+      website: 'https://firewisp.de',
+    }
+    expect(validateProfileEditDraft(cleanDraft)).toBeNull()
+
+    const merged = mergeProfileMetadataJson(existingEv.content, cleanDraft)
+    expect(merged.display_name).toBe('Steve')
+    expect(merged.displayName).toBe('Steve')
+    expect(merged.nip05).toBe('steve@firewisp.de')
+    expect(merged.pronouns).toBe('Node Runner')
+    expect(merged.xmr).toBe(
+      '8A4SQjUpyvMLTVpyCe9Xty4SEhBkpKFwcNzMfFkzqnHcRmP9oKTjX8iGdXTfT2z9nuGKoWffYU6eZB6xGZybaQgRS3kEwHU',
+    )
+    expect(merged.cryptocurrency_addresses).toEqual({ monero: '8A4S...' })
+
+    // Bumps timestamp strictly above existing created_at even if clock skew is older
+    const unsigned = buildProfileUpdateEvent(existingEv, cleanDraft, pk, 1700000000)
+    expect(unsigned.kind).toBe(0)
+    expect(unsigned.created_at).toBe(1794215667)
+    expect(unsigned.tags).toEqual([['p', pk]])
+  })
+})

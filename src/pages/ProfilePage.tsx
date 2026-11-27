@@ -12,6 +12,8 @@ import {
   Check,
   Loader2,
   RefreshCw,
+  Pencil,
+  ExternalLink,
 } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { parseNoteContent, type MediaAttachment } from '../lib/nostr/content'
@@ -28,6 +30,9 @@ import { NoteCard } from '../components/NoteCard'
 
 const ZapModal = lazy(() =>
   import('../components/ZapModal').then((m) => ({ default: m.ZapModal })),
+)
+const EditProfileModal = lazy(() =>
+  import('../components/EditProfileModal').then((m) => ({ default: m.EditProfileModal })),
 )
 
 type ProfileTab = 'notes' | 'replies' | 'media'
@@ -81,6 +86,7 @@ export function ProfilePage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [noMoreOlder, setNoMoreOlder] = useState(false)
   const [zapOpen, setZapOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [copiedNpub, setCopiedNpub] = useState(false)
   const [bannerFailed, setBannerFailed] = useState(false)
   const [lightboxMedia, setLightboxMedia] = useState<MediaAttachment | null>(null)
@@ -377,7 +383,16 @@ export function ProfilePage() {
                 <Zap className="w-3.5 h-3.5" />
               </button>
             )}
-            {!isMe && (
+            {isMe ? (
+              <button
+                type="button"
+                onClick={() => setEditOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-[#181a22] hover:bg-[#222533] border border-[#2d3042] hover:border-[#e8590c] text-xs font-semibold text-[#f4f1ea] flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Pencil className="w-3.5 h-3.5 text-[#f59f00]" />
+                <span>Edit Profile</span>
+              </button>
+            ) : (
               <>
                 <button
                   type="button"
@@ -464,6 +479,21 @@ export function ProfilePage() {
             {profile.about}
           </p>
         )}
+        {(() => {
+          const safeWebsite = sanitizePublicHttpsUrl(profile?.website)
+          if (!safeWebsite) return null
+          return (
+            <a
+              href={safeWebsite}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#38bdf8] hover:underline break-all"
+            >
+              <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+              <span>{safeWebsite.replace(/^https?:\/\//i, '')}</span>
+            </a>
+          )
+        })()}
       </div>
 
       {/* Profile Tabs: Notes / Replies / Media */}
@@ -536,6 +566,14 @@ export function ProfilePage() {
             recipientName={displayName}
             lud16={profile.lud16}
             onClose={() => setZapOpen(false)}
+          />
+        </Suspense>
+      )}
+      {editOpen && isMe && hexPubkey && (
+        <Suspense fallback={null}>
+          <EditProfileModal
+            pubkey={hexPubkey}
+            onClose={() => setEditOpen(false)}
           />
         </Suspense>
       )}
