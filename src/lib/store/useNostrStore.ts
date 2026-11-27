@@ -58,6 +58,7 @@ export interface NostrProfile {
 
 const BOOKMARKS_KEY = 'firewisp_bookmarks_v1'
 const PROFILES_CACHE_KEY = 'firewisp_profiles_cache_v1'
+const SHOW_REPLIES_KEY = 'firewisp_show_replies_v1'
 const MAX_CACHED_PROFILES = 400
 
 export type FeedTab =
@@ -69,6 +70,24 @@ export type FeedTab =
   | 'following'
   | 'extended'
   | CustomFeedKey
+
+function loadShowRepliesInFollows(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  try {
+    return localStorage.getItem(SHOW_REPLIES_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function saveShowRepliesInFollows(enabled: boolean): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(SHOW_REPLIES_KEY, enabled ? '1' : '0')
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function loadBookmarks(): string[] {
   if (typeof localStorage === 'undefined') return []
@@ -748,7 +767,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   rawMuteListEvent: null,
 
   activeFeedTab: 'foryou',
-  showRepliesInFollows: false,
+  showRepliesInFollows: loadShowRepliesInFollows(),
   feedRefreshTick: 0,
 
   forYouFeedIds: [],
@@ -802,7 +821,10 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   setToast: (toastMessage) => set({ toastMessage }),
   setPendingShareText: (pendingShareText) => set({ pendingShareText }),
   setActiveFeedTab: (activeFeedTab) => set({ activeFeedTab }),
-  setShowRepliesInFollows: (showRepliesInFollows) => set({ showRepliesInFollows }),
+  setShowRepliesInFollows: (showRepliesInFollows) => {
+    saveShowRepliesInFollows(showRepliesInFollows)
+    set({ showRepliesInFollows })
+  },
   bumpFeedRefresh: () => set((s) => ({ feedRefreshTick: s.feedRefreshTick + 1 })),
 
   flushPendingFeed: (tab) => {
