@@ -100,6 +100,7 @@ const PICKER_EMOJIS: Array<{ emoji: string; label: string }> = [
   { emoji: '👀', label: 'Eyes' },
   { emoji: '🤔', label: 'Thinking' },
   { emoji: '😱', label: 'Shocked' },
+  { emoji: '🖖', label: 'Vulcan Salute' },
 ]
 
 interface NoteCardProps {

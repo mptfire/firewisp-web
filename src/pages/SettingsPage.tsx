@@ -176,6 +176,7 @@ export function SettingsPage() {
     settings.showFireWispTab,
     settings.showExtendedTab,
     settings.showExploreTab,
+    settings.showZappedTab,
   ].filter(Boolean).length
 
   const totalMutedWords = settings.mutedWords.length + settings.privateMutedWords.length
@@ -409,6 +410,21 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.showExploreTab}
             onChange={(e) => settings.setShowExploreTab(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Show Zapped tab</div>
+            <div className="text-[#8c8a82]">
+              Posts receiving verified Lightning zaps across Nostr.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.showZappedTab}
+            onChange={(e) => settings.setShowZappedTab(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>

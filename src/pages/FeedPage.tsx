@@ -96,6 +96,7 @@ export function FeedPage() {
   const followingFeedIds = useNostrStore((s) => s.followingFeedIds)
   const extendedFeedIds = useNostrStore((s) => s.extendedFeedIds)
   const trendingFeedIds = useNostrStore((s) => s.trendingFeedIds)
+  const zappedFeedIds = useNostrStore((s) => s.zappedFeedIds)
   const globalFeedIds = useNostrStore((s) => s.globalFeedIds)
   const activeListFeedIds = useNostrStore((s) =>
     customStorageKey ? (s.listFeedIds[customStorageKey] ?? EMPTY_IDS) : EMPTY_IDS,
@@ -116,6 +117,7 @@ export function FeedPage() {
   const showFireWispTab = useSettingsStore((s) => s.showFireWispTab)
   const showExtendedTab = useSettingsStore((s) => s.showExtendedTab)
   const showExploreTab = useSettingsStore((s) => s.showExploreTab)
+  const showZappedTab = useSettingsStore((s) => s.showZappedTab)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
@@ -136,19 +138,21 @@ export function FeedPage() {
     const sbInt = sbIntDTag ? interestSets[sbIntDTag] : undefined
     const sbRelay = sbRelayDTag ? relaySets[sbRelayDTag] : undefined
     const thirdTab: [FeedTab, string, typeof Flame] =
-      sidebarFeedMode === 'extended'
-        ? ['extended', 'Extended', Network]
-        : sidebarFeedMode === 'global'
-          ? ['global', 'Explore', Globe]
-          : sidebarFeedMode === 'firewisp'
-            ? ['firewisp', 'Wisp Relay', Flame]
-            : sbDTag && (sbList || listsLoading)
-              ? [sidebarFeedMode, sbList?.name || 'List', List]
-              : sbIntDTag && (sbInt || listsLoading)
-                ? [sidebarFeedMode, sbInt?.name || 'Interests', Hash]
-                : sbRelayDTag && (sbRelay || listsLoading)
-                  ? [sidebarFeedMode, sbRelay?.name || 'Relays', Server]
-                  : ['trending', 'Trending', TrendingUp]
+      sidebarFeedMode === 'zapped'
+        ? ['zapped', 'Zapped', Zap]
+        : sidebarFeedMode === 'extended'
+          ? ['extended', 'Extended', Network]
+          : sidebarFeedMode === 'global'
+            ? ['global', 'Explore', Globe]
+            : sidebarFeedMode === 'firewisp'
+              ? ['firewisp', 'Wisp Relay', Flame]
+              : sbDTag && (sbList || listsLoading)
+                ? [sidebarFeedMode, sbList?.name || 'List', List]
+                : sbIntDTag && (sbInt || listsLoading)
+                  ? [sidebarFeedMode, sbInt?.name || 'Interests', Hash]
+                  : sbRelayDTag && (sbRelay || listsLoading)
+                    ? [sidebarFeedMode, sbRelay?.name || 'Relays', Server]
+                    : ['trending', 'Trending', TrendingUp]
 
     const list: [FeedTab, string, typeof Flame][] = [
       ['foryou', 'For You', Sparkles],
@@ -164,6 +168,7 @@ export function FeedPage() {
     if (showFireWispTab) addTab('firewisp', 'Wisp Relay', Flame)
     if (showExtendedTab) addTab('extended', 'Extended', Network)
     if (showExploreTab) addTab('global', 'Explore', Globe)
+    if (showZappedTab) addTab('zapped', 'Zapped', Zap)
 
     for (const pinKey of pinnedListTabs) {
       if (isInterestFeedKey(pinKey)) {
@@ -196,6 +201,7 @@ export function FeedPage() {
     showFireWispTab,
     showExtendedTab,
     showExploreTab,
+    showZappedTab,
     pinnedListTabs,
     listsMap,
     interestSets,
@@ -214,7 +220,11 @@ export function FeedPage() {
   useEffect(() => {
     if (!visibleTabs.some(([id]) => id === tab)) {
       const isThirdSlotMode =
-        tab === 'trending' || tab === 'extended' || tab === 'global' || tab === 'firewisp'
+        tab === 'trending' ||
+        tab === 'zapped' ||
+        tab === 'extended' ||
+        tab === 'global' ||
+        tab === 'firewisp'
       if (isThirdSlotMode && visibleTabs.some(([id]) => id === sidebarFeedMode)) {
         setTab(sidebarFeedMode)
       } else {
@@ -267,7 +277,9 @@ export function FeedPage() {
             ? extendedFeedIds
             : tab === 'trending'
               ? trendingFeedIds
-              : globalFeedIds
+              : tab === 'zapped'
+                ? zappedFeedIds
+                : globalFeedIds
 
   const { items, spamBlockedCount, pendingCount } = useMemo(() => {
     const out: Array<{ event: Event; repostedBy?: string }> = []
@@ -285,7 +297,9 @@ export function FeedPage() {
     const myPk = pubkey?.toLowerCase()
     let blocked = 0
 
-    const shouldSpamFilter = (tab === 'foryou' || tab === 'global' || tab === 'trending') && spamFilterEnabled
+    const shouldSpamFilter =
+      (tab === 'foryou' || tab === 'global' || tab === 'trending' || tab === 'zapped') &&
+      spamFilterEnabled
 
     const resolveVisibleItem = (
       id: string,
@@ -577,6 +591,11 @@ export function FeedPage() {
                     : 'Relay set not found'}
               </span>
             </>
+          ) : tab === 'zapped' ? (
+            <>
+              <Zap className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
+              <span className="truncate">Zapped · Posts receiving verified Lightning zaps</span>
+            </>
           ) : tab === 'firewisp' ? (
             <>
               <Flame className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
@@ -753,7 +772,9 @@ export function FeedPage() {
                     : capActiveRelaySetUrls(activeRelaySet.items).length === 0
                       ? `No valid wss:// relays in "${activeRelaySet.name}" yet.`
                       : `No notes received from "${activeRelaySet.name}" relays yet.`
-                  : tab === 'firewisp'
+                  : tab === 'zapped'
+                    ? 'No verified zapped posts loaded from relays yet.'
+                    : tab === 'firewisp'
                     ? 'No posts on relay.firewisp.de yet — be the first to ignite it!'
                     : tab === 'following'
                       ? pubkey

@@ -2614,4 +2614,25 @@ describe('Full code-audit regression & security hardening', () => {
     const filtered = filterEventsForSearch([evPrefixOnly, evMatch], '#btc')
     expect(filtered.map((e) => e.id)).toEqual([evMatch.id])
   })
+
+  it('supports optional zapped feed mode in settings and store state', async () => {
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+    const { useNostrStore } = await import('../store/useNostrStore')
+
+    const prevMode = useSettingsStore.getState().sidebarFeedMode
+    const prevShow = useSettingsStore.getState().showZappedTab
+    try {
+      useSettingsStore.getState().setSidebarFeedMode('zapped')
+      useSettingsStore.getState().setShowZappedTab(true)
+      expect(useSettingsStore.getState().sidebarFeedMode).toBe('zapped')
+      expect(useSettingsStore.getState().showZappedTab).toBe(true)
+
+      useNostrStore.setState({ zappedFeedIds: ['note-z1'] })
+      useNostrStore.getState().clearFeedTab('zapped')
+      expect(useNostrStore.getState().zappedFeedIds).toEqual([])
+    } finally {
+      useSettingsStore.getState().setSidebarFeedMode(prevMode)
+      useSettingsStore.getState().setShowZappedTab(prevShow)
+    }
+  })
 })

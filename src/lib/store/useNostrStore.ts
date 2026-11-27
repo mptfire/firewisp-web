@@ -23,6 +23,7 @@ import {
 } from '../nostr/lists'
 import { evaluateNoteSpam, foldConfusables, INVISIBLE_CHAR_RE, isTopLevelNote } from '../nostr/spamFilter'
 import { parseBolt11AmountSats } from '../nostr/nip57'
+import { parseLiveZapReceipt } from '../nostr/zapsFeed'
 import { fetchGlobalTrendingEvents, mergeTrendingNotes } from '../nostr/trending'
 import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm } from '../nostr/nip17'
 import { useAuthStore } from './useAuthStore'
@@ -62,6 +63,7 @@ export type FeedTab =
   | 'foryou'
   | 'global'
   | 'trending'
+  | 'zapped'
   | 'firewisp'
   | 'following'
   | 'extended'
@@ -152,6 +154,7 @@ export interface NostrState {
   followingFeedIds: string[]
   extendedFeedIds: string[]
   trendingFeedIds: string[]
+  zappedFeedIds: string[]
   globalFeedIds: string[]
   listFeedIds: Record<string, string[]>
   pendingFeedIds: Record<string, string[]>
@@ -753,12 +756,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   followingFeedIds: [],
   extendedFeedIds: [],
   trendingFeedIds: [],
+  zappedFeedIds: [],
   globalFeedIds: [],
   listFeedIds: {},
   pendingFeedIds: {
     foryou: [],
     global: [],
     trending: [],
+    zapped: [],
     firewisp: [],
     following: [],
     extended: [],
@@ -768,12 +773,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
   loadingMore: false,
   sidebarFeedIds: {
     trending: [],
+    zapped: [],
     extended: [],
     global: [],
     firewisp: [],
   },
   sidebarFeedLoading: {
     trending: false,
+    zapped: false,
     extended: false,
     global: false,
     firewisp: false,
@@ -835,6 +842,12 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           pendingFeedIds: nextPending,
         }
       }
+      if (tab === 'zapped') {
+        return {
+          zappedFeedIds: [...new Set([...pending, ...s.zappedFeedIds])].slice(0, 200),
+          pendingFeedIds: nextPending,
+        }
+      }
       return { globalFeedIds: mergeInto(s.globalFeedIds), pendingFeedIds: nextPending }
     })
   },
@@ -854,6 +867,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (tab === 'following') return { followingFeedIds: [], pendingFeedIds: nextPending }
       if (tab === 'extended') return { extendedFeedIds: [], pendingFeedIds: nextPending }
       if (tab === 'trending') return { trendingFeedIds: [], pendingFeedIds: nextPending }
+      if (tab === 'zapped') return { zappedFeedIds: [], pendingFeedIds: nextPending }
       return { globalFeedIds: [], pendingFeedIds: nextPending }
     })
   },
@@ -913,12 +927,14 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       extendedAuthors: [],
       sidebarFeedIds: {
         trending: s.sidebarFeedIds.trending ?? [],
+        zapped: s.sidebarFeedIds.zapped ?? [],
         extended: [],
         global: s.sidebarFeedIds.global ?? [],
         firewisp: s.sidebarFeedIds.firewisp ?? [],
       },
       sidebarFeedLoading: {
         trending: Boolean(s.sidebarFeedLoading.trending),
+        zapped: Boolean(s.sidebarFeedLoading.zapped),
         extended: false,
         global: Boolean(s.sidebarFeedLoading.global),
         firewisp: Boolean(s.sidebarFeedLoading.firewisp),
@@ -927,6 +943,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         foryou: [],
         global: s.pendingFeedIds.global ?? [],
         trending: s.pendingFeedIds.trending ?? [],
+        zapped: s.pendingFeedIds.zapped ?? [],
         firewisp: s.pendingFeedIds.firewisp ?? [],
         following: [],
         extended: [],
@@ -1697,6 +1714,84 @@ export const useNostrStore = create<NostrState>((set, get) => ({
             if (picked.length >= 6) break
           }
         }
+      } else if (mode === 'zapped') {
+        const nowSec = Math.floor(Date.now() / 1000)
+        const since12h = nowSec - 12 * 3600
+        const zappedRelays = [...new Set([...readRelays, ...CURATED_EXPLORE_RELAYS])].slice(0, 8)
+        const [globalBundle, recentZaps] = await Promise.all([
+          fetchGlobalTrendingEvents(4000).catch(() => ({
+            hotNotes: [],
+            trending24hNotes: [],
+            profiles: [],
+            zaps: [],
+          })),
+          nostrPool
+            .query(zappedRelays, { kinds: [9735], since: since12h, limit: 120 }, 4000)
+            .catch(() => []),
+        ])
+        for (const p of globalBundle.profiles) get().ingestEvent(p)
+        for (const z of globalBundle.zaps) get().ingestEvent(z)
+        for (const z of recentZaps) get().ingestEvent(z)
+
+        const zapTimeById = new Map<string, number>()
+        for (const z of [...recentZaps, ...globalBundle.zaps]) {
+          const item = parseLiveZapReceipt(z, nowSec)
+          if (!item?.targetEventId) continue
+          const prev = zapTimeById.get(item.targetEventId) ?? 0
+          if (item.createdAt > prev) zapTimeById.set(item.targetEventId, item.createdAt)
+        }
+
+        const candidateMap = new Map<string, Event>()
+        for (const ev of globalBundle.hotNotes) {
+          if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22) {
+            candidateMap.set(ev.id, ev)
+          }
+        }
+        const needNotes = [...zapTimeById.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([id]) => id)
+          .filter((id) => !candidateMap.has(id))
+          .slice(0, 40)
+        if (needNotes.length > 0) {
+          const cachedEvents = get().events
+          const missingIds: string[] = []
+          for (const id of needNotes) {
+            const c = cachedEvents[id]
+            if (c && (c.kind === 1 || c.kind === 20 || c.kind === 21 || c.kind === 22)) {
+              candidateMap.set(c.id, c)
+            } else {
+              missingIds.push(id)
+            }
+          }
+          if (missingIds.length > 0) {
+            const fetchedNotes = await nostrPool
+              .query(zappedRelays, { ids: missingIds }, 3500)
+              .catch(() => [])
+            for (const ev of fetchedNotes) {
+              if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22) {
+                candidateMap.set(ev.id, ev)
+              }
+            }
+          }
+        }
+
+        const sorted = [...candidateMap.values()].sort(
+          (a, b) => (zapTimeById.get(b.id) ?? b.created_at) - (zapTimeById.get(a.id) ?? a.created_at),
+        )
+        for (const ev of sorted) {
+          if (seenIds.has(ev.id) || !isTopLevelNote(ev) || get().isEventMuted(ev) || get().isEventDeleted(ev)) {
+            continue
+          }
+          const pk = ev.pubkey.toLowerCase()
+          if ((authorCounts.get(pk) || 0) >= 1) continue
+          const verdict = evaluateNoteSpam(ev, { seenContentAuthors: seenContent, maxPerAuthor: 1 })
+          if (verdict.isSpam) continue
+          if (!hasReadableContent(ev, 16)) continue
+          seenIds.add(ev.id)
+          authorCounts.set(pk, 1)
+          picked.push(ev)
+          if (picked.length >= 6) break
+        }
       } else {
         // Fire Wisp Relay (wss://relay.firewisp.de)
         const raw = await nostrPool.query([FIREWISP_RELAY], { kinds: [1], limit: 50 }, 4000)
@@ -1777,7 +1872,9 @@ export const useNostrStore = create<NostrState>((set, get) => ({
               ? s.extendedFeedIds
               : tab === 'trending'
                 ? s.trendingFeedIds
-                : s.globalFeedIds
+                : tab === 'zapped'
+                  ? s.zappedFeedIds
+                  : s.globalFeedIds
     if (currentIds.length === 0) return 0
 
     let oldest = Math.floor(Date.now() / 1000)
@@ -1893,6 +1990,41 @@ export const useNostrStore = create<NostrState>((set, get) => ({
           4500,
         )
         fetched = res.filter((ev) => allowed.has(ev.pubkey.toLowerCase()))
+      } else if (tab === 'zapped') {
+        const zappedRelays = [...new Set([...mergedFollowingRelays, ...CURATED_EXPLORE_RELAYS])].slice(0, 8)
+        const zaps = await nostrPool.query(zappedRelays, { kinds: [9735], until, limit: 150 }, 4500)
+        const existingSet = new Set(currentIds)
+        const candidateIds: string[] = []
+        for (const z of zaps) {
+          get().ingestEvent(z)
+          const parsed = parseLiveZapReceipt(z)
+          if (parsed?.targetEventId && !existingSet.has(parsed.targetEventId)) {
+            existingSet.add(parsed.targetEventId)
+            candidateIds.push(parsed.targetEventId)
+          }
+        }
+        if (candidateIds.length > 0) {
+          const cached = get().events
+          const missingIds: string[] = []
+          const notes: Event[] = []
+          for (const id of candidateIds.slice(0, 80)) {
+            const c = cached[id]
+            if (c && (c.kind === 1 || c.kind === 20 || c.kind === 21 || c.kind === 22)) {
+              notes.push(c)
+            } else {
+              missingIds.push(id)
+            }
+          }
+          if (missingIds.length > 0) {
+            const res = await nostrPool.query(zappedRelays, { ids: missingIds }, 4000)
+            for (const ev of res) {
+              if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22) {
+                notes.push(ev)
+              }
+            }
+          }
+          fetched = notes
+        }
       } else {
         fetched = await nostrPool.query(
           targetRelays,
@@ -1946,6 +2078,7 @@ export const useNostrStore = create<NostrState>((set, get) => ({
         if (tab === 'following') return { events: eventsMap, followingFeedIds: mergeOlder(st.followingFeedIds) }
         if (tab === 'extended') return { events: eventsMap, extendedFeedIds: mergeOlder(st.extendedFeedIds) }
         if (tab === 'trending') return { events: eventsMap, trendingFeedIds: mergeOlder(st.trendingFeedIds) }
+        if (tab === 'zapped') return { events: eventsMap, zappedFeedIds: mergeOlder(st.zappedFeedIds) }
         return { events: eventsMap, globalFeedIds: mergeOlder(st.globalFeedIds) }
       })
 
@@ -2030,6 +2163,181 @@ export const useNostrStore = create<NostrState>((set, get) => ({
       if (!setObj || relaySetUrls.length === 0) {
         set({ loadingFeed: false })
         return () => {}
+      }
+    }
+
+    if (tab === 'zapped') {
+      let cancelled = false
+      const zappedRelays = [...new Set([...mergedFollowingRelays, ...CURATED_EXPLORE_RELAYS])].slice(0, 8)
+      const nowSec = Math.floor(Date.now() / 1000)
+      const since12h = nowSec - 12 * 3600
+
+      void (async () => {
+        try {
+          const [globalBundle, zapReceipts] = await Promise.all([
+            fetchGlobalTrendingEvents(4500).catch(() => ({
+              hotNotes: [],
+              trending24hNotes: [],
+              profiles: [],
+              zaps: [],
+            })),
+            nostrPool
+              .query(zappedRelays, { kinds: [9735], since: since12h, limit: 180 }, 4500)
+              .catch(() => []),
+          ])
+          if (cancelled) return
+
+          for (const p of globalBundle.profiles) get().ingestEvent(p)
+          for (const z of globalBundle.zaps) get().ingestEvent(z)
+          for (const z of zapReceipts) get().ingestEvent(z)
+
+          const zapTimeByNote = new Map<string, number>()
+          for (const z of [...globalBundle.zaps, ...zapReceipts]) {
+            const parsedZap = parseLiveZapReceipt(z, nowSec)
+            if (!parsedZap?.targetEventId) continue
+            const prev = zapTimeByNote.get(parsedZap.targetEventId) ?? 0
+            if (parsedZap.createdAt > prev) zapTimeByNote.set(parsedZap.targetEventId, parsedZap.createdAt)
+          }
+
+          const candidateMap = new Map<string, Event>()
+          for (const ev of globalBundle.hotNotes) {
+            if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22) {
+              candidateMap.set(ev.id, ev)
+            }
+          }
+
+          const needNotes = [...zapTimeByNote.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([id]) => id)
+            .filter((id) => !candidateMap.has(id))
+            .slice(0, 80)
+
+          if (needNotes.length > 0) {
+            const cachedEvents = get().events
+            const missingIds: string[] = []
+            for (const id of needNotes) {
+              const cached = cachedEvents[id]
+              if (cached && (cached.kind === 1 || cached.kind === 20 || cached.kind === 21 || cached.kind === 22)) {
+                candidateMap.set(cached.id, cached)
+              } else {
+                missingIds.push(id)
+              }
+            }
+            if (missingIds.length > 0) {
+              const fetchedNotes = await nostrPool
+                .query(zappedRelays, { ids: missingIds }, 4000)
+                .catch(() => [])
+              if (cancelled) return
+              for (const ev of fetchedNotes) {
+                if (ev.kind === 1 || ev.kind === 20 || ev.kind === 21 || ev.kind === 22) {
+                  candidateMap.set(ev.id, ev)
+                }
+              }
+            }
+          }
+
+          const resolvedNotes = [...candidateMap.values()]
+            .filter((ev) => !get().isEventMuted(ev) && !get().isEventDeleted(ev))
+            .sort(
+              (a, b) =>
+                (zapTimeByNote.get(b.id) ?? b.created_at) -
+                (zapTimeByNote.get(a.id) ?? a.created_at),
+            )
+            .slice(0, 200)
+
+          const authors = new Set<string>()
+          for (const ev of resolvedNotes) {
+            get().ingestEvent(ev)
+            authors.add(ev.pubkey)
+          }
+          if (authors.size > 0) void get().fetchProfiles([...authors])
+
+          set((s) => {
+            const eventsMap = { ...s.events }
+            for (const ev of resolvedNotes) eventsMap[ev.id] = ev
+            return {
+              events: eventsMap,
+              zappedFeedIds: resolvedNotes.map((e) => e.id),
+              loadingFeed: false,
+            }
+          })
+
+          const topIds = resolvedNotes.slice(0, 45).map((e) => e.id)
+          if (topIds.length > 0) {
+            void nostrPool
+              .query(
+                zappedRelays,
+                { kinds: [1, 5, 6, 7, 1111, 9735], '#e': topIds, limit: 250 },
+                3500,
+              )
+              .then((metaEvents) => {
+                for (const m of metaEvents) get().ingestEvent(m)
+              })
+              .catch(() => {})
+          }
+        } finally {
+          if (!cancelled) set({ loadingFeed: false })
+        }
+      })()
+
+      const queuedNotes = new Set<string>()
+      const sub = nostrPool.subscribe(
+        zappedRelays,
+        { kinds: [9735], since: nowSec },
+        {
+          onevent: (zapEv) => {
+            if (cancelled) return
+            const parsedZap = parseLiveZapReceipt(zapEv)
+            if (!parsedZap?.targetEventId) return
+            get().ingestEvent(zapEv)
+            const targetId = parsedZap.targetEventId
+            if (queuedNotes.has(targetId)) return
+            queuedNotes.add(targetId)
+
+            const enqueueNote = (noteEv: Event) => {
+              if (
+                cancelled ||
+                (noteEv.kind !== 1 && noteEv.kind !== 20 && noteEv.kind !== 21 && noteEv.kind !== 22) ||
+                get().isEventMuted(noteEv) ||
+                get().isEventDeleted(noteEv)
+              ) {
+                return
+              }
+              get().ingestEvent(noteEv)
+              void get().fetchProfiles([noteEv.pubkey])
+              set((s) => {
+                const pending = s.pendingFeedIds.zapped ?? []
+                if (s.zappedFeedIds.includes(noteEv.id) || pending.includes(noteEv.id)) {
+                  return s
+                }
+                return {
+                  events: { ...s.events, [noteEv.id]: noteEv },
+                  pendingFeedIds: {
+                    ...s.pendingFeedIds,
+                    zapped: [noteEv.id, ...pending].slice(0, 100),
+                  },
+                }
+              })
+            }
+
+            const existing = get().events[targetId]
+            if (existing) {
+              enqueueNote(existing)
+            } else {
+              void nostrPool
+                .query(zappedRelays, { ids: [targetId] }, 3000)
+                .then((evs) => {
+                  if (!cancelled && evs[0]) enqueueNote(evs[0])
+                })
+                .catch(() => {})
+            }
+          },
+        },
+      )
+
+      return () => {
+        cancelled = true
+        sub.close()
       }
     }
 

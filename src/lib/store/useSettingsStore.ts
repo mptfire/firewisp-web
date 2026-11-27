@@ -20,7 +20,7 @@ import {
 const STORAGE_KEY = 'firewisp_settings_v1'
 const NWC_STORAGE_KEY = 'firewisp_nwc_v1'
 
-export type BuiltinSidebarFeedMode = 'trending' | 'extended' | 'global' | 'firewisp'
+export type BuiltinSidebarFeedMode = 'trending' | 'zapped' | 'extended' | 'global' | 'firewisp'
 export type SidebarFeedMode =
   | BuiltinSidebarFeedMode
   | ListFeedKey
@@ -28,6 +28,7 @@ export type SidebarFeedMode =
   | RelaySetFeedKey
 const VALID_SIDEBAR_FEED_MODES: readonly BuiltinSidebarFeedMode[] = [
   'trending',
+  'zapped',
   'extended',
   'global',
   'firewisp',
@@ -110,6 +111,7 @@ export interface SettingsState {
   showFireWispTab: boolean
   showExtendedTab: boolean
   showExploreTab: boolean
+  showZappedTab: boolean
   showLiveNowBar: boolean
   liveBarExpanded: boolean
   showLiveZaps: boolean
@@ -163,6 +165,7 @@ export interface SettingsState {
   setShowFireWispTab: (enabled: boolean) => void
   setShowExtendedTab: (enabled: boolean) => void
   setShowExploreTab: (enabled: boolean) => void
+  setShowZappedTab: (enabled: boolean) => void
   setShowLiveNowBar: (enabled: boolean) => void
   setLiveBarExpanded: (expanded: boolean) => void
   setShowLiveZaps: (enabled: boolean) => void
@@ -203,6 +206,7 @@ interface PersistedSettings {
   showFireWispTab: boolean
   showExtendedTab: boolean
   showExploreTab: boolean
+  showZappedTab: boolean
   showLiveNowBar: boolean
   liveBarExpanded: boolean
   showLiveZaps: boolean
@@ -255,6 +259,7 @@ function loadInitial(): PersistedSettings & {
     showFireWispTab: false,
     showExtendedTab: false,
     showExploreTab: false,
+    showZappedTab: false,
     showLiveNowBar: true,
     liveBarExpanded: true,
     showLiveZaps: false,
@@ -393,6 +398,7 @@ function persist(state: SettingsState) {
     showFireWispTab: state.showFireWispTab,
     showExtendedTab: state.showExtendedTab,
     showExploreTab: state.showExploreTab,
+    showZappedTab: state.showZappedTab,
     showLiveNowBar: state.showLiveNowBar,
     liveBarExpanded: state.liveBarExpanded,
     showLiveZaps: state.showLiveZaps,
@@ -725,6 +731,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowExploreTab: (showExploreTab) => {
     set({ showExploreTab })
+    persist(get())
+  },
+  setShowZappedTab: (showZappedTab) => {
+    set({ showZappedTab })
     persist(get())
   },
   setShowLiveNowBar: (showLiveNowBar) => {

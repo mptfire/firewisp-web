@@ -36,6 +36,7 @@ import { Avatar } from './Avatar'
 
 const SIDEBAR_FEED_OPTIONS: Array<{ value: BuiltinSidebarFeedMode; label: string }> = [
   { value: 'trending', label: 'Trending Posts' },
+  { value: 'zapped', label: 'Zapped Posts' },
   { value: 'extended', label: 'Extended' },
   { value: 'global', label: 'Explore' },
   { value: 'firewisp', label: 'Wisp Relay' },
@@ -329,13 +330,15 @@ export function TrendingSidebar() {
       ? Hash
       : selectedRelaySetDTag
         ? Server
-        : sidebarFeedMode === 'extended'
-          ? Network
-          : sidebarFeedMode === 'global'
-            ? Globe
-            : sidebarFeedMode === 'firewisp'
-              ? Radio
-              : Flame
+        : sidebarFeedMode === 'zapped'
+          ? Zap
+          : sidebarFeedMode === 'extended'
+            ? Network
+            : sidebarFeedMode === 'global'
+              ? Globe
+              : sidebarFeedMode === 'firewisp'
+                ? Radio
+                : Flame
 
   const handleSeeAll = () => {
     setActiveFeedTab(sidebarFeedMode)
@@ -365,11 +368,13 @@ export function TrendingSidebar() {
         : follows.length === 0
           ? 'Follow a few accounts to populate your Extended network.'
           : 'No Extended network posts loaded yet.'
-      : sidebarFeedMode === 'global'
-        ? 'No Explore posts loaded yet.'
-        : sidebarFeedMode === 'firewisp'
-          ? 'No recent posts on Wisp Relay yet.'
-          : 'No trending posts loaded yet.'
+      : sidebarFeedMode === 'zapped'
+        ? 'No recently zapped posts loaded yet.'
+        : sidebarFeedMode === 'global'
+          ? 'No Explore posts loaded yet.'
+          : sidebarFeedMode === 'firewisp'
+            ? 'No recent posts on Wisp Relay yet.'
+            : 'No trending posts loaded yet.'
 
   const emptyManageLink = selectedListDTag
     ? `/lists/${encodeURIComponent(selectedListDTag)}`
