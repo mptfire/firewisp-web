@@ -136,7 +136,7 @@ export function ProfilePage() {
         setNoMoreOlder(false)
         setTab('notes')
         setRawEvents([])
-        void fetchProfiles([hexPubkey])
+        void fetchProfiles([hexPubkey], { force: true })
       }
 
       try {

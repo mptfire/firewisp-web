@@ -538,7 +538,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         if (parsed) {
           void useNostrStore
             .getState()
-            .fetchProfiles([parsed.streamerPubkey || cleanHost, cleanHost])
+            .fetchProfiles([parsed.streamerPubkey || cleanHost, cleanHost], { force: true })
           return parsed
         }
       }
@@ -605,7 +605,7 @@ export const useLiveStore = create<LiveState>((set, get) => ({
         const hostPk = latestActivity?.streamerPubkey || cleanHost
         void useNostrStore
           .getState()
-          .fetchProfiles(cleanHost !== hostPk ? [hostPk, cleanHost] : [hostPk])
+          .fetchProfiles(cleanHost !== hostPk ? [hostPk, cleanHost] : [hostPk], { force: true })
 
         const statusRelays = [
           ...new Set([

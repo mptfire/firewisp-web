@@ -187,7 +187,7 @@ export interface NostrState {
   loadSidebarFeed: (mode: SidebarFeedMode, force?: boolean) => Promise<void>
   initPoolListener: () => () => void
   ingestEvent: (event: Event) => void
-  fetchProfiles: (pubkeys: string[]) => Promise<void>
+  fetchProfiles: (pubkeys: string[], options?: { force?: boolean }) => Promise<void>
   loadUserGraph: (pubkey: string) => Promise<void>
   syncMuteList: (pubkey: string) => Promise<{
     publicCount: number
@@ -1202,14 +1202,16 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     }
   },
 
-  fetchProfiles: async (pubkeys) => {
+  fetchProfiles: async (pubkeys, options) => {
     const existing = get().profiles
     const now = Date.now()
+    const force = Boolean(options?.force)
+    const cooldownMs = force ? 30_000 : 60_000
     const needed = [...new Set(pubkeys.map((p) => p.toLowerCase()))].filter((p) => {
-      if (existing[p]) return false
+      if (!force && existing[p]) return false
       const lastTry = requestedProfilesAt.get(p)
-      // Allow retrying profile misses after 60s
-      return !lastTry || now - lastTry > 60_000
+      // Allow retrying profile misses (or forced live/profile refreshes) after cooldown
+      return !lastTry || now - lastTry > cooldownMs
     })
     if (needed.length === 0) return
     const batch = needed.slice(0, 100)
