@@ -41,6 +41,7 @@ import { FireWispVideoPlayer } from './FireWispVideoPlayer'
 import { HlsVideoPlayer } from './HlsVideoPlayer'
 import { LiveHoverPreview, type HoverPreviewStatus } from './LiveHoverPreview'
 import { MediaLightbox } from './MediaLightbox'
+import { NostrMusicCard } from './NostrMusicCard'
 import { AddToListButton } from './AddToListButton'
 import { ReactionEmote } from './ReactionEmote'
 import { SongLinkCard } from './SongLinkCard'
@@ -1207,6 +1208,18 @@ export const NoteCard = memo(function NoteCard({
                         hostPubkey={seg.hostPubkey}
                         dTag={seg.dTag}
                         bech32={seg.bech32}
+                      />
+                    )
+                  }
+                  if (seg.type === 'music') {
+                    return (
+                      <NostrMusicCard
+                        key={i}
+                        kind={seg.kind}
+                        pubkey={seg.pubkey}
+                        dTag={seg.dTag}
+                        bech32={seg.bech32}
+                        relays={seg.relays}
                       />
                     )
                   }

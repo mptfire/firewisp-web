@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { bytesToHex, hexToBytes } from 'nostr-tools/utils'
 import { generateSecretKey, finalizeEvent, getPublicKey } from 'nostr-tools/pure'
+import * as nip19 from 'nostr-tools/nip19'
 import * as nip44 from 'nostr-tools/nip44'
 import { decryptNcryptsec, encryptNcryptsec, inspectNcryptsecLogN } from '../crypto/nip49'
 import {
@@ -26,6 +27,7 @@ import {
   sanitizeRelayUrl,
 } from '../sanitize'
 import { extractEventHashtags, extractImetaMap, parseNoteContent } from '../nostr/content'
+import { parseMusicPlaylistEvent, parseMusicTrackEvent } from '../nostr/nostrMusic'
 import {
   CUSTOM_REACTION_EMOTES,
   extractNip30EmojiUrl,
@@ -3048,5 +3050,109 @@ describe('Profile editor (kind 0) validation & custom-field preservation', () =>
     expect(unsigned.kind).toBe(0)
     expect(unsigned.created_at).toBe(1794215667)
     expect(unsigned.tags).toEqual([['p', pk]])
+  })
+
+  it('extracts r-tag audio links safely and parses kind-34139/36787 Nostr music naddr embeds', () => {
+    const sk = generateSecretKey()
+    const pk = getPublicKey(sk)
+    const naddrAlbum = nip19.naddrEncode({
+      kind: 34139,
+      pubkey: pk,
+      identifier: '9a92b49e',
+      relays: ['wss://relay.primal.net'],
+    })
+
+    const note = finalizeEvent(
+      {
+        kind: 1,
+        created_at: 1795788500,
+        content: `Listening on Ostrify\n\nnostr:${naddrAlbum}`,
+        tags: [
+          ['r', 'https://op3.dev/e/media.bowlafterbowl.com/episodes/audio/Episode-468.mp3'],
+          ['r', 'https://example.com/article.html'],
+          ['r', 'http://insecure.example/track.mp3'],
+          ['r', 'https://192.168.1.50/private.mp3'],
+        ],
+      },
+      sk,
+    )
+
+    const parsed = parseNoteContent(note)
+    expect(parsed.media).toEqual([
+      {
+        url: 'https://op3.dev/e/media.bowlafterbowl.com/episodes/audio/Episode-468.mp3',
+        kind: 'audio',
+      },
+    ])
+    const musicSeg = parsed.segments.find((s) => s.type === 'music')
+    expect(musicSeg).toEqual({
+      type: 'music',
+      bech32: naddrAlbum,
+      kind: 34139,
+      pubkey: pk,
+      dTag: '9a92b49e',
+      relays: ['wss://relay.primal.net'],
+    })
+
+    const trackEv = finalizeEvent(
+      {
+        kind: 36787,
+        created_at: 1795775840,
+        content: '[Verse 1]\nKeep it out their hands',
+        tags: [
+          ['d', '0c5e5da0'],
+          ['title', 'Paranoid Crypto Anarchists'],
+          ['artist', 'Not Your Money'],
+          ['album', 'BIP-110'],
+          ['track_number', '2'],
+          ['duration', '199'],
+          ['image', 'https://blossom.primal.net/cover.jpg'],
+          ['url', 'https://blossom.primal.net/track.mp3'],
+          ['fallback', 'https://nostr.media/track.mp3'],
+          ['fallback', 'http://10.0.0.1/evil.mp3'],
+        ],
+      },
+      sk,
+    )
+    const parsedTrack = parseMusicTrackEvent(trackEv)
+    expect(parsedTrack).toMatchObject({
+      dTag: '0c5e5da0',
+      title: 'Paranoid Crypto Anarchists',
+      artist: 'Not Your Money',
+      album: 'BIP-110',
+      trackNumber: 2,
+      durationSec: 199,
+      imageUrl: 'https://blossom.primal.net/cover.jpg',
+      audioUrls: ['https://blossom.primal.net/track.mp3', 'https://nostr.media/track.mp3'],
+    })
+
+    const albumEv = finalizeEvent(
+      {
+        kind: 34139,
+        created_at: 1795775847,
+        content: '',
+        tags: [
+          ['d', '9a92b49e'],
+          ['title', 'BIP-110'],
+          ['type', 'album'],
+          ['released', '2026-08-08'],
+          ['image', 'https://blossom.primal.net/album.png'],
+          ['a', `36787:${pk}:0c5e5da0`],
+          ['a', '36787:not-a-hex-pubkey:bad'],
+        ],
+      },
+      sk,
+    )
+    const parsedAlbum = parseMusicPlaylistEvent(albumEv)
+    expect(parsedAlbum).toMatchObject({
+      dTag: '9a92b49e',
+      title: 'BIP-110',
+      type: 'album',
+      released: '2026-08-08',
+      imageUrl: 'https://blossom.primal.net/album.png',
+    })
+    expect(parsedAlbum?.trackRefs).toEqual([
+      { pubkey: pk, dTag: '0c5e5da0', aTag: `36787:${pk}:0c5e5da0` },
+    ])
   })
 })

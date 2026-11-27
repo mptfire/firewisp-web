@@ -20,10 +20,18 @@ export type ContentSegment =
   | { type: 'mention'; bech32: string; pubkey: string }
   | { type: 'quote'; bech32: string; eventId?: string }
   | { type: 'live'; bech32: string; hostPubkey: string; dTag: string }
+  | {
+      type: 'music'
+      bech32: string
+      kind: 34139 | 36787
+      pubkey: string
+      dTag: string
+      relays?: string[]
+    }
 
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i
 const VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v)(\?.*)?$/i
-const AUDIO_EXT_RE = /\.(mp3|ogg|wav|m4a|flac)(\?.*)?$/i
+const AUDIO_EXT_RE = /\.(mp3|ogg|wav|m4a|flac|aac|opus|mpga)(\?.*)?$/i
 
 const TOKEN_RE =
   /(https?:\/\/[^\s<>"{}|\\^`[\]]+|nostr:(?:npub1|nprofile1|note1|nevent1|naddr1)[0-9a-z]+|#[a-zA-Z0-9_]{1,64})/g
@@ -230,6 +238,18 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
             hostPubkey: decoded.data.pubkey.toLowerCase(),
             dTag: decoded.data.identifier,
           })
+        } else if (
+          decoded.type === 'naddr' &&
+          (decoded.data.kind === 34139 || decoded.data.kind === 36787)
+        ) {
+          segments.push({
+            type: 'music',
+            bech32,
+            kind: decoded.data.kind,
+            pubkey: decoded.data.pubkey.toLowerCase(),
+            dTag: decoded.data.identifier,
+            relays: decoded.data.relays,
+          })
         } else {
           segments.push({ type: 'text', text: token })
         }
@@ -264,6 +284,17 @@ export function parseNoteContent(event: Pick<Event, 'content' | 'tags'>): {
     if (kind) {
       mediaSeen.add(safe)
       media.push({ url: safe, kind })
+    }
+  }
+
+  // Support `r`-tag audio attachments (e.g. Ostrify / podcast MP3 links attached out-of-band)
+  for (const tag of event.tags) {
+    if (tag[0] !== 'r' || !tag[1]) continue
+    const safe = sanitizePublicHttpsUrl(tag[1])
+    if (!safe || mediaSeen.has(safe)) continue
+    if (classifyMediaUrl(safe) === 'audio') {
+      mediaSeen.add(safe)
+      media.push({ url: safe, kind: 'audio' })
     }
   }
 
