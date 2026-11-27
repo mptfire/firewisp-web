@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus, ShieldCheck } from 'lucide-react'
 import { formatRelativeTime } from '../lib/format'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -14,6 +14,7 @@ import { Avatar } from '../components/Avatar'
 import { ReactionEmote } from '../components/ReactionEmote'
 
 export function NotificationsPage() {
+  const navigate = useNavigate()
   const pubkey = useAuthStore((s) => s.pubkey)
   const openAuthModal = useAuthStore((s) => s.openAuthModal)
   const notificationIds = useNostrStore((s) => s.notificationIds)
@@ -261,6 +262,11 @@ export function NotificationsPage() {
             !readNotificationIds[ev.id]
           const isMe = actorPubkey.toLowerCase() === pubkey.toLowerCase()
 
+          const profileTarget = `/p/${actorPubkey}`
+          const openNotification = () => {
+            if (isUnread) markNotificationRead(pubkey, ev.id)
+          }
+
           return (
             <div
               key={ev.id}
@@ -268,23 +274,40 @@ export function NotificationsPage() {
                 isUnread ? 'bg-emerald-500/[0.06] border-l-2 border-l-emerald-400' : ''
               }`}
             >
-              <Link
-                to={linkTarget}
-                onClick={() => {
-                  if (isUnread) markNotificationRead(pubkey, ev.id)
+              <div
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest('a,button')) return
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                  openNotification()
+                  navigate(linkTarget)
                 }}
-                onAuxClick={() => {
-                  if (isUnread) markNotificationRead(pubkey, ev.id)
-                }}
-                className="flex items-start gap-3 min-w-0 flex-1"
+                className="flex items-start gap-3 min-w-0 flex-1 cursor-pointer"
               >
                 <Icon className={`w-4 h-4 mt-1.5 shrink-0 ${iconColor}`} />
-                <Avatar src={p?.picture} pubkey={actorPubkey} name={name} size="sm" />
+                <Link
+                  to={profileTarget}
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 rounded-full hover:opacity-90 transition-opacity"
+                  aria-label={`View ${name} profile`}
+                >
+                  <Avatar src={p?.picture} pubkey={actorPubkey} name={name} size="sm" />
+                </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <p className="text-sm truncate">
-                      <span className="font-semibold text-white">{name}</span>{' '}
-                      <span className="text-[#9a9890]">
+                      <Link
+                        to={profileTarget}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-semibold text-white hover:underline"
+                      >
+                        {name}
+                      </Link>{' '}
+                      <Link
+                        to={linkTarget}
+                        onClick={openNotification}
+                        onAuxClick={openNotification}
+                        className="text-[#9a9890]"
+                      >
                         {ev.kind === 7 && reactionEmoteImg ? (
                           <>
                             reacted{' '}
@@ -298,19 +321,31 @@ export function NotificationsPage() {
                         ) : (
                           actionText
                         )}
-                      </span>
+                      </Link>
                     </p>
-                    <span className="text-[11px] text-[#6f6d66] shrink-0">
+                    <Link
+                      to={linkTarget}
+                      onClick={openNotification}
+                      onAuxClick={openNotification}
+                      className="text-[11px] text-[#6f6d66] shrink-0"
+                    >
                       {formatRelativeTime(ev.created_at, {
                         dateFormatOptions: { month: 'short', day: 'numeric' },
                       })}
-                    </span>
+                    </Link>
                   </div>
                   {previewText && (
-                    <p className="text-xs text-[#b5b3ab] truncate mt-0.5">{previewText}</p>
+                    <Link
+                      to={linkTarget}
+                      onClick={openNotification}
+                      onAuxClick={openNotification}
+                      className="block text-xs text-[#b5b3ab] truncate mt-0.5"
+                    >
+                      {previewText}
+                    </Link>
                   )}
                 </div>
-              </Link>
+              </div>
               {!isMe && (
                 <div className="mt-0.5 shrink-0 flex items-center gap-1">
                   {(() => {
