@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus } from 'lucide-react'
+import { Ban, Bell, CheckCheck, Heart, Repeat2, MessageCircle, Zap, Loader2, UserPlus, UserMinus, ShieldCheck } from 'lucide-react'
 import { formatRelativeTime } from '../lib/format'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { getBuiltinEmoteByKey, resolveReactionEmoteSrc } from '../lib/nostr/customEmotes'
 import { normalizeReactionEmoji, parseZapReceiptInfo, useNostrStore } from '../lib/store/useNostrStore'
 import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
+import { evaluateWotStatus } from '../lib/nostr/wot'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useWotStore } from '../lib/store/useWotStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { ReactionEmote } from '../components/ReactionEmote'
@@ -33,6 +35,13 @@ export function NotificationsPage() {
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
+  const wotFilterNotifications = useSettingsStore((s) => s.wotFilterNotifications)
+  const setWotFilterNotifications = useSettingsStore((s) => s.setWotFilterNotifications)
+  const wotMinVouches = useSettingsStore((s) => s.wotMinVouches)
+  const nip85Enabled = useSettingsStore((s) => s.nip85Enabled)
+  const nip85MinRank = useSettingsStore((s) => s.nip85MinRank)
+  const wotEntries = useWotStore((s) => s.entries)
+  const nip85Scores = useWotStore((s) => s.nip85Scores)
   const follows = useNostrStore((s) => s.follows)
   const [loading, setLoading] = useState(() => notificationIds.length === 0)
   const [followBusy, setFollowBusy] = useState<Record<string, boolean>>({})
@@ -45,24 +54,41 @@ export function NotificationsPage() {
 
   const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
 
-  const visibleNotificationIds = useMemo(() => {
+  const { visibleNotificationIds, wotFilteredCount } = useMemo(() => {
     const allMutedPks =
       privateMutedPubkeys.length > 0 ? [...mutedPubkeys, ...privateMutedPubkeys] : mutedPubkeys
-    return notificationIds.filter((id) => {
+    let wotHidden = 0
+    const visible = notificationIds.filter((id) => {
       const ev = events[id]
       if (!ev || isEventDeleted(ev) || isEventMuted(ev)) return false
-      if (ev.kind === 9735) {
-        const actorPk = parseZapReceiptInfo(ev).senderPubkey.toLowerCase()
-        if (allMutedPks.includes(actorPk)) return false
-      } else if (
+      const actorPk =
+        ev.kind === 9735 ? parseZapReceiptInfo(ev).senderPubkey.toLowerCase() : ev.pubkey.toLowerCase()
+      if (allMutedPks.includes(actorPk)) return false
+      if (
         spamFilterEnabled &&
         (ev.kind === 1 || ev.kind === 1111) &&
         evaluateNoteSpam(ev, { myPubkey: pubkey, follows: followSet }).isSpam
       ) {
         return false
       }
+      if (wotFilterNotifications && pubkey) {
+        const wot = evaluateWotStatus({
+          targetPubkey: actorPk,
+          myPubkey: pubkey,
+          followsSet: followSet,
+          entries: wotEntries,
+          minVouches: wotMinVouches,
+          nip85Scores: nip85Enabled ? nip85Scores : undefined,
+          nip85MinRank,
+        })
+        if (!wot.trusted) {
+          wotHidden++
+          return false
+        }
+      }
       return true
     })
+    return { visibleNotificationIds: visible, wotFilteredCount: wotHidden }
   }, [
     notificationIds,
     events,
@@ -76,6 +102,12 @@ export function NotificationsPage() {
     privateMutedHashtags,
     privateMutedWords,
     spamFilterEnabled,
+    wotFilterNotifications,
+    wotEntries,
+    wotMinVouches,
+    nip85Enabled,
+    nip85Scores,
+    nip85MinRank,
     pubkey,
     followSet,
   ])
@@ -128,16 +160,35 @@ export function NotificationsPage() {
             </span>
           )}
         </div>
-        {unreadCount > 0 && (
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => markNotificationsRead(pubkey, latestNotifCreatedAt)}
-            className="px-2.5 py-1 rounded-lg bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-[11px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+            aria-pressed={wotFilterNotifications}
+            onClick={() => setWotFilterNotifications(!wotFilterNotifications)}
+            title="Show only notifications from accounts inside your Web of Trust"
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+              wotFilterNotifications
+                ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                : 'bg-[#161820] hover:bg-[#1e212c] border-[#2a2d3a] text-[#9a9890] hover:text-white'
+            }`}
           >
-            <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-            Mark all read
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>WoT only</span>
+            {wotFilteredCount > 0 && (
+              <span className="text-[10px] opacity-80 tabular-nums">({wotFilteredCount} hid)</span>
+            )}
           </button>
-        )}
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => markNotificationsRead(pubkey, latestNotifCreatedAt)}
+              className="px-2.5 py-1 rounded-lg bg-[#161820] hover:bg-[#1e212c] border border-[#2a2d3a] text-[11px] font-medium text-[#d4d2cb] hover:text-white flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
+              Mark all read
+            </button>
+          )}
+        </div>
       </div>
 
       {loading && visibleNotificationIds.length === 0 ? (

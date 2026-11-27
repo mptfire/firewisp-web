@@ -29,6 +29,7 @@ import { createGiftWrappedDm, KIND_DM_RELAYS, unwrapGiftWrap, type DecryptedDm }
 import { useAuthStore } from './useAuthStore'
 import { useListsStore } from './useListsStore'
 import { useSettingsStore, type SidebarFeedMode } from './useSettingsStore'
+import { useWotStore } from './useWotStore'
 import { getListFeedDTag, isListFeedKey } from '../nostr/followSets'
 import {
   capActiveRelaySetUrls,
@@ -1460,49 +1461,22 @@ export const useNostrStore = create<NostrState>((set, get) => ({
     const existing = get().extendedAuthors
     if (existing.length > 0 || get().loadingExtendedGraph) return existing
     const follows = get().follows
-    if (follows.length === 0) return []
     const startPk = useAuthStore.getState().pubkey?.toLowerCase() || ''
+    if (!startPk || follows.length === 0) return []
     set({ loadingExtendedGraph: true })
     try {
       const relays = [
         ...new Set([...useSettingsStore.getState().getReadRelays(), ...get().userReadRelays]),
       ].slice(0, 10)
-      // Sample up to 60 direct follows' kind-3 contact lists and keep 2-hop pubkeys endorsed by >= 3 follows
-      const sample = follows.slice(0, 60)
-      const contactLists = await nostrPool.query(
+      const qualified = await useWotStore.getState().refreshWotGraph({
+        ownerPubkey: startPk,
+        follows,
         relays,
-        { kinds: [3], authors: sample, limit: sample.length * 2 },
-        4500,
-      )
+        force: false,
+      })
       if ((useAuthStore.getState().pubkey?.toLowerCase() || '') !== startPk) {
         return []
       }
-      const latestByAuthor = new Map<string, Event>()
-      for (const ev of contactLists) {
-        const prev = latestByAuthor.get(ev.pubkey)
-        if (!prev || ev.created_at > prev.created_at) {
-          latestByAuthor.set(ev.pubkey, ev)
-        }
-      }
-      const followSet = new Set(follows)
-      const myPubkey = useAuthStore.getState().pubkey?.toLowerCase()
-      const votes = new Map<string, number>()
-      for (const ev of latestByAuthor.values()) {
-        const seenInList = new Set<string>()
-        for (const t of ev.tags) {
-          if (t[0] !== 'p' || !t[1] || !/^[0-9a-f]{64}$/i.test(t[1])) continue
-          const pk = t[1].toLowerCase()
-          if (seenInList.has(pk) || followSet.has(pk) || pk === myPubkey) continue
-          seenInList.add(pk)
-          votes.set(pk, (votes.get(pk) || 0) + 1)
-        }
-      }
-      const minVotes = sample.length >= 15 ? 3 : 2
-      const qualified = [...votes.entries()]
-        .filter(([, count]) => count >= minVotes)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 200)
-        .map(([pk]) => pk)
       set({ extendedAuthors: qualified })
       return qualified
     } finally {

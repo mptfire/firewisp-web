@@ -3,11 +3,13 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { parseSharedQueryParams } from './lib/shareTarget'
 import { getListFeedDTag } from './lib/nostr/followSets'
 import { getInterestFeedDTag, getRelaySetFeedDTag } from './lib/nostr/nip51Sets'
+import { getWotAuthorsForThreshold } from './lib/nostr/wot'
 import { useAuthStore } from './lib/store/useAuthStore'
 import { useListsStore } from './lib/store/useListsStore'
 import { useLiveStore } from './lib/store/useLiveStore'
 import { useNostrStore } from './lib/store/useNostrStore'
 import { useSettingsStore } from './lib/store/useSettingsStore'
+import { useWotStore } from './lib/store/useWotStore'
 import { Layout } from './components/Layout'
 import { FeedPage } from './pages/FeedPage'
 
@@ -132,6 +134,8 @@ export function App() {
   const forYouIncludeTopics = useSettingsStore((s) => s.forYouIncludeTopics)
   const forYouIncludeWotZapped = useSettingsStore((s) => s.forYouIncludeWotZapped)
   const forYouIncludeTrending = useSettingsStore((s) => s.forYouIncludeTrending)
+  const wotMinVouches = useSettingsStore((s) => s.wotMinVouches)
+  const wotEntries = useWotStore((s) => s.entries)
   const forYouMixKey =
     activeFeedTab === 'foryou'
       ? `${forYouIncludeTopics}:${forYouIncludeWotZapped}:${forYouIncludeTrending}`
@@ -151,12 +155,35 @@ export function App() {
 
   useEffect(() => {
     if (pubkey) {
+      void useWotStore.getState().hydrateForUser(pubkey)
       void loadUserGraph(pubkey)
       void useListsStore.getState().fetchOwnLists(pubkey)
     } else {
+      useWotStore.getState().resetSession()
       useListsStore.getState().resetLists()
     }
   }, [pubkey, loadUserGraph])
+
+  useEffect(() => {
+    useNostrStore.setState({
+      extendedAuthors: getWotAuthorsForThreshold(wotEntries, wotMinVouches, 250),
+    })
+  }, [wotEntries, wotMinVouches])
+
+  // Background stale-while-revalidate 2-hop WoT crawl after initial load settles
+  useEffect(() => {
+    if (!sessionRestored || !pubkey || !followsLoaded || follows.length === 0) return
+    const timer = setTimeout(() => {
+      const relays = [...new Set([...useSettingsStore.getState().getReadRelays(), ...userReadRelays])]
+      void useWotStore.getState().refreshWotGraph({
+        ownerPubkey: pubkey,
+        follows,
+        relays,
+        force: false,
+      })
+    }, 2500)
+    return () => clearTimeout(timer)
+  }, [sessionRestored, pubkey, followsLoaded, follows, userReadRelays])
 
   // Keep active feed subscribed globally so new-note counts update live while browsing Live/Notifications/Settings
   useEffect(() => {

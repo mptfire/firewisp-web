@@ -8,10 +8,12 @@ import {
   Loader2,
   Lock,
   Search,
+  ShieldCheck,
   UserMinus,
   UserPlus,
   Users,
 } from 'lucide-react'
+import { evaluateWotStatus } from '../lib/nostr/wot'
 import { nostrPool } from '../lib/nostr/pool'
 import {
   filterEventsForSearch,
@@ -23,9 +25,11 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useWotStore } from '../lib/store/useWotStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { NoteCard } from '../components/NoteCard'
+import { WotBadge } from '../components/WotBadge'
 
 type SearchScope = 'all' | 'notes' | 'people'
 
@@ -81,6 +85,13 @@ export function SearchPage() {
   const privateMutedHashtags = useSettingsStore((s) => s.privateMutedHashtags)
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const relays = useSettingsStore((s) => s.relays)
+  const wotFilterSearch = useSettingsStore((s) => s.wotFilterSearch)
+  const setWotFilterSearch = useSettingsStore((s) => s.setWotFilterSearch)
+  const wotMinVouches = useSettingsStore((s) => s.wotMinVouches)
+  const nip85Enabled = useSettingsStore((s) => s.nip85Enabled)
+  const nip85MinRank = useSettingsStore((s) => s.nip85MinRank)
+  const wotEntries = useWotStore((s) => s.entries)
+  const nip85Scores = useWotStore((s) => s.nip85Scores)
   const listsMap = useListsStore((s) => s.lists)
   const sortedLists = useMemo(
     () => Object.values(listsMap).sort((a, b) => a.name.localeCompare(b.name)),
@@ -263,16 +274,54 @@ export function SearchPage() {
     [selectedList],
   )
 
-  const visiblePeople = useMemo(
-    () =>
-      peopleResults.filter((hit) => {
-        const pk = hit.pubkey.toLowerCase()
-        if (mutedPubkeySet.has(pk)) return false
-        if (selectedListAllowedSet && !selectedListAllowedSet.has(pk)) return false
-        return true
-      }),
-    [peopleResults, mutedPubkeySet, selectedListAllowedSet],
-  )
+  const visiblePeople = useMemo(() => {
+    const base = peopleResults.filter((hit) => {
+      const pk = hit.pubkey.toLowerCase()
+      if (mutedPubkeySet.has(pk)) return false
+      if (selectedListAllowedSet && !selectedListAllowedSet.has(pk)) return false
+      if (wotFilterSearch && myPubkey) {
+        const wot = evaluateWotStatus({
+          targetPubkey: pk,
+          myPubkey,
+          followsSet: followSet,
+          entries: wotEntries,
+          minVouches: wotMinVouches,
+          nip85Scores: nip85Enabled ? nip85Scores : undefined,
+          nip85MinRank,
+        })
+        if (!wot.trusted) return false
+      }
+      return true
+    })
+    if (!myPubkey) return base
+    const scoreOf = (pk: string) => {
+      const st = evaluateWotStatus({
+        targetPubkey: pk,
+        myPubkey,
+        followsSet: followSet,
+        entries: wotEntries,
+        minVouches: wotMinVouches,
+        nip85Scores: nip85Enabled ? nip85Scores : undefined,
+        nip85MinRank,
+      })
+      if (st.hop === 0) return 1_000_000
+      if (st.hop === 1) return 500_000
+      return st.vouches * 100 + (st.nip85Rank ?? 0)
+    }
+    return [...base].sort((a, b) => scoreOf(b.pubkey) - scoreOf(a.pubkey))
+  }, [
+    peopleResults,
+    mutedPubkeySet,
+    selectedListAllowedSet,
+    wotFilterSearch,
+    myPubkey,
+    followSet,
+    wotEntries,
+    wotMinVouches,
+    nip85Enabled,
+    nip85Scores,
+    nip85MinRank,
+  ])
 
   const visibleResults = useMemo(
     () =>
@@ -281,6 +330,18 @@ export function SearchPage() {
         if (selectedListAllowedSet && !selectedListAllowedSet.has(e.pubkey.toLowerCase())) {
           return false
         }
+        if (wotFilterSearch && myPubkey) {
+          const wot = evaluateWotStatus({
+            targetPubkey: e.pubkey,
+            myPubkey,
+            followsSet: followSet,
+            entries: wotEntries,
+            minVouches: wotMinVouches,
+            nip85Scores: nip85Enabled ? nip85Scores : undefined,
+            nip85MinRank,
+          })
+          if (!wot.trusted) return false
+        }
         return true
       }),
     [
@@ -288,6 +349,14 @@ export function SearchPage() {
       isEventDeleted,
       isEventMuted,
       selectedListAllowedSet,
+      wotFilterSearch,
+      myPubkey,
+      followSet,
+      wotEntries,
+      wotMinVouches,
+      nip85Enabled,
+      nip85Scores,
+      nip85MinRank,
       deletedByAuthor,
       mutedPubkeys,
       mutedHashtags,
@@ -375,6 +444,23 @@ export function SearchPage() {
               </button>
             ))}
           </div>
+
+          {myPubkey && (
+            <button
+              type="button"
+              aria-pressed={wotFilterSearch}
+              onClick={() => setWotFilterSearch(!wotFilterSearch)}
+              title="Restrict search results to your Web of Trust"
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium inline-flex items-center gap-1 transition cursor-pointer ${
+                wotFilterSearch
+                  ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                  : 'bg-[#15161c] hover:bg-[#1e212c] border-[#2a2d3a] text-[#9a9890] hover:text-white'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              WoT only
+            </button>
+          )}
 
           {myPubkey && (sortedLists.length > 0 || Boolean(selectedListDTag)) && (
             <label className="inline-flex items-center gap-1.5 text-[11px] text-[#9a9890] max-w-full">
@@ -489,8 +575,11 @@ export function SearchPage() {
                       <Link to={`/p/${pk}`} className="flex items-center gap-3 min-w-0 flex-1">
                         <Avatar src={hit.picture} pubkey={pk} name={name} size="md" />
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-white truncate hover:underline">
-                            {name}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-sm font-semibold text-white truncate hover:underline">
+                              {name}
+                            </span>
+                            <WotBadge pubkey={pk} compact showFollowing />
                           </div>
                           <div className="text-xs text-[#8c8a82] truncate">
                             {hit.nip05 ? hit.nip05.replace(/^_@/, '') : shortNpub}

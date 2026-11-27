@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import * as nip19 from 'nostr-tools/nip19'
 import {
   DEFAULT_BLOSSOM_SERVERS,
   DEFAULT_NOTE_POW_BITS,
@@ -8,7 +9,7 @@ import {
   LEGACY_FIREWISP_RELAY,
   type RelayEntry,
 } from '../constants'
-import { sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
+import { isValidHex64, sanitizeBlossomUrl, sanitizeRelayUrl } from '../sanitize'
 import { isAppStateDTag, isListFeedKey, type ListFeedKey } from '../nostr/followSets'
 import {
   isInterestFeedKey,
@@ -128,6 +129,17 @@ export interface SettingsState {
   mobileDataSaving: boolean
   mediaVolume: number
   mediaMuted: boolean
+  wotMinVouches: number
+  wotAutoRefreshHours: number
+  wotFilterNotifications: boolean
+  wotFilterSearch: boolean
+  wotFilterZapped: boolean
+  wotFilterExplore: boolean
+  wotPrioritizeReplies: boolean
+  nip85Enabled: boolean
+  nip85ProviderPubkey: string
+  nip85RelayUrl: string
+  nip85MinRank: number
   nwcUri: string
   nwcRememberDevice: boolean
 
@@ -186,6 +198,17 @@ export interface SettingsState {
   setMobileDataSaving: (enabled: boolean) => void
   setMediaVolume: (volume: number) => void
   setMediaMuted: (muted: boolean) => void
+  setWotMinVouches: (vouches: number) => void
+  setWotAutoRefreshHours: (hours: number) => void
+  setWotFilterNotifications: (enabled: boolean) => void
+  setWotFilterSearch: (enabled: boolean) => void
+  setWotFilterZapped: (enabled: boolean) => void
+  setWotFilterExplore: (enabled: boolean) => void
+  setWotPrioritizeReplies: (enabled: boolean) => void
+  setNip85Enabled: (enabled: boolean) => void
+  setNip85ProviderPubkey: (raw: string) => boolean
+  setNip85RelayUrl: (raw: string) => boolean
+  setNip85MinRank: (rank: number) => void
   setNwcUri: (uri: string, remember?: boolean) => void
   setNwcRememberDevice: (remember: boolean) => void
 
@@ -229,7 +252,35 @@ interface PersistedSettings {
   mobileDataSaving: boolean
   mediaVolume: number
   mediaMuted: boolean
+  wotMinVouches: number
+  wotAutoRefreshHours: number
+  wotFilterNotifications: boolean
+  wotFilterSearch: boolean
+  wotFilterZapped: boolean
+  wotFilterExplore: boolean
+  wotPrioritizeReplies: boolean
+  nip85Enabled: boolean
+  nip85ProviderPubkey: string
+  nip85RelayUrl: string
+  nip85MinRank: number
   // SECURITY: privateMuted* stays strictly in RAM; nwcUri is session-only unless user opts into "Remember on this device".
+}
+
+function normalizeProviderPubkey(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return ''
+  if (isValidHex64(trimmed)) return trimmed.toLowerCase()
+  if (/^npub1[0-9a-z]+$/i.test(trimmed)) {
+    try {
+      const decoded = nip19.decode(trimmed)
+      if (decoded.type === 'npub' && isValidHex64(decoded.data)) {
+        return decoded.data.toLowerCase()
+      }
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 function loadInitial(): PersistedSettings & {
@@ -285,6 +336,17 @@ function loadInitial(): PersistedSettings & {
     mobileDataSaving: false,
     mediaVolume: 0.85,
     mediaMuted: false,
+    wotMinVouches: 3,
+    wotAutoRefreshHours: 24,
+    wotFilterNotifications: false,
+    wotFilterSearch: false,
+    wotFilterZapped: false,
+    wotFilterExplore: false,
+    wotPrioritizeReplies: true,
+    nip85Enabled: false,
+    nip85ProviderPubkey: '',
+    nip85RelayUrl: '',
+    nip85MinRank: 20,
     nwcUri: storedNwc.nwcUri,
     nwcRememberDevice: storedNwc.remember,
   }
@@ -356,6 +418,29 @@ function loadInitial(): PersistedSettings & {
         : defaults.mediaVolume
     const mediaMuted =
       typeof parsed.mediaMuted === 'boolean' ? parsed.mediaMuted : defaults.mediaMuted
+    const wotMinVouches =
+      typeof parsed.wotMinVouches === 'number' && Number.isFinite(parsed.wotMinVouches)
+        ? Math.min(10, Math.max(1, Math.round(parsed.wotMinVouches)))
+        : defaults.wotMinVouches
+    const wotAutoRefreshHours =
+      parsed.wotAutoRefreshHours === 0 ||
+      parsed.wotAutoRefreshHours === 12 ||
+      parsed.wotAutoRefreshHours === 24 ||
+      parsed.wotAutoRefreshHours === 72
+        ? parsed.wotAutoRefreshHours
+        : defaults.wotAutoRefreshHours
+    const nip85ProviderPubkey =
+      typeof parsed.nip85ProviderPubkey === 'string'
+        ? normalizeProviderPubkey(parsed.nip85ProviderPubkey) ?? ''
+        : ''
+    const nip85RelayUrl =
+      typeof parsed.nip85RelayUrl === 'string'
+        ? sanitizeRelayUrl(parsed.nip85RelayUrl) ?? ''
+        : ''
+    const nip85MinRank =
+      typeof parsed.nip85MinRank === 'number' && Number.isFinite(parsed.nip85MinRank)
+        ? Math.min(100, Math.max(1, Math.round(parsed.nip85MinRank)))
+        : defaults.nip85MinRank
 
     const merged = {
       ...defaults,
@@ -366,6 +451,11 @@ function loadInitial(): PersistedSettings & {
       pinnedListTabs,
       mediaVolume,
       mediaMuted,
+      wotMinVouches,
+      wotAutoRefreshHours,
+      nip85ProviderPubkey,
+      nip85RelayUrl,
+      nip85MinRank,
       privateMutedPubkeys: [],
       privateMutedHashtags: [],
       privateMutedWords: [],
@@ -427,6 +517,17 @@ function persist(state: SettingsState) {
     mobileDataSaving: state.mobileDataSaving,
     mediaVolume: state.mediaVolume,
     mediaMuted: state.mediaMuted,
+    wotMinVouches: state.wotMinVouches,
+    wotAutoRefreshHours: state.wotAutoRefreshHours,
+    wotFilterNotifications: state.wotFilterNotifications,
+    wotFilterSearch: state.wotFilterSearch,
+    wotFilterZapped: state.wotFilterZapped,
+    wotFilterExplore: state.wotFilterExplore,
+    wotPrioritizeReplies: state.wotPrioritizeReplies,
+    nip85Enabled: state.nip85Enabled,
+    nip85ProviderPubkey: state.nip85ProviderPubkey,
+    nip85RelayUrl: state.nip85RelayUrl,
+    nip85MinRank: state.nip85MinRank,
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snap))
@@ -762,6 +863,63 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setForYouIncludeTrending: (forYouIncludeTrending) => {
     set({ forYouIncludeTrending })
+    persist(get())
+  },
+  setWotMinVouches: (vouches) => {
+    set({ wotMinVouches: Math.min(10, Math.max(1, Math.round(vouches))) })
+    persist(get())
+  },
+  setWotAutoRefreshHours: (hours) => {
+    const clean = hours === 0 || hours === 12 || hours === 24 || hours === 72 ? hours : 24
+    set({ wotAutoRefreshHours: clean })
+    persist(get())
+  },
+  setWotFilterNotifications: (wotFilterNotifications) => {
+    set({ wotFilterNotifications })
+    persist(get())
+  },
+  setWotFilterSearch: (wotFilterSearch) => {
+    set({ wotFilterSearch })
+    persist(get())
+  },
+  setWotFilterZapped: (wotFilterZapped) => {
+    set({ wotFilterZapped })
+    persist(get())
+  },
+  setWotFilterExplore: (wotFilterExplore) => {
+    set({ wotFilterExplore })
+    persist(get())
+  },
+  setWotPrioritizeReplies: (wotPrioritizeReplies) => {
+    set({ wotPrioritizeReplies })
+    persist(get())
+  },
+  setNip85Enabled: (nip85Enabled) => {
+    set({ nip85Enabled })
+    persist(get())
+  },
+  setNip85ProviderPubkey: (raw) => {
+    const normalized = normalizeProviderPubkey(raw)
+    if (normalized === null) return false
+    set({ nip85ProviderPubkey: normalized })
+    persist(get())
+    return true
+  },
+  setNip85RelayUrl: (raw) => {
+    const trimmed = raw.trim()
+    if (!trimmed) {
+      set({ nip85RelayUrl: '' })
+      persist(get())
+      return true
+    }
+    const clean = sanitizeRelayUrl(trimmed)
+    if (!clean) return false
+    set({ nip85RelayUrl: clean })
+    persist(get())
+    return true
+  },
+  setNip85MinRank: (rank) => {
+    set({ nip85MinRank: Math.min(100, Math.max(1, Math.round(rank))) })
     persist(get())
   },
   setShowLiveNowBar: (showLiveNowBar) => {

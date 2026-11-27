@@ -4,10 +4,12 @@ import * as nip19 from 'nostr-tools/nip19'
 import {
   Radio,
   UploadCloud,
+  Upload,
   Cpu,
   VolumeX,
   Wallet,
   Shield,
+  ShieldCheck,
   LayoutGrid,
   ChevronDown,
   Plus,
@@ -24,10 +26,13 @@ import {
   List,
 } from 'lucide-react'
 import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
+import { formatRelativeTime } from '../lib/format'
 import { extractMuteItemsFromTags } from '../lib/nostr/lists'
+import { getWotAuthorsForThreshold } from '../lib/nostr/wot'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useWotStore } from '../lib/store/useWotStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
 import { sanitizePublicRelayUrl } from '../lib/sanitize'
 
@@ -88,6 +93,7 @@ function SettingsSection({
 export function SettingsPage() {
   const settings = useSettingsStore()
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
+  const follows = useNostrStore((s) => s.follows)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
   const userWriteRelays = useNostrStore((s) => s.userWriteRelays)
   const profiles = useNostrStore((s) => s.profiles)
@@ -130,6 +136,26 @@ export function SettingsPage() {
   const [confirmRelayDrop, setConfirmRelayDrop] = useState(false)
   const [publishingBlossom, setPublishingBlossom] = useState(false)
   const [blossomPublishStatus, setBlossomPublishStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const wotEntries = useWotStore((s) => s.entries)
+  const wotUpdatedAt = useWotStore((s) => s.updatedAt)
+  const wotFollowsCrawled = useWotStore((s) => s.followsCrawled)
+  const wotCrawling = useWotStore((s) => s.crawling)
+  const wotCrawlProgress = useWotStore((s) => s.crawlProgress)
+  const wotRefresh = useWotStore((s) => s.refreshWotGraph)
+  const wotImportJson = useWotStore((s) => s.importSnapshotJson)
+  const wotExportJson = useWotStore((s) => s.exportSnapshotJson)
+  const wotClearCache = useWotStore((s) => s.clearLocalCache)
+  const [wotStatusMsg, setWotStatusMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [nip85ProviderInput, setNip85ProviderInput] = useState(settings.nip85ProviderPubkey)
+  const [nip85RelayInput, setNip85RelayInput] = useState(settings.nip85RelayUrl)
+  const [nip85Status, setNip85Status] = useState<{ ok: boolean; text: string } | null>(null)
+  const wotFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const wotCachedCount = useMemo(() => Object.keys(wotEntries).length, [wotEntries])
+  const wotTrustedCount = useMemo(
+    () => getWotAuthorsForThreshold(wotEntries, settings.wotMinVouches, 3000).length,
+    [wotEntries, settings.wotMinVouches],
+  )
 
   const syncedNip65Relays = useMemo(
     () => [...new Set([...userReadRelays, ...userWriteRelays])],
@@ -476,6 +502,360 @@ export function SettingsPage() {
             className="accent-[#e8590c]"
           />
         </label>
+      </SettingsSection>
+
+      {/* Web of Trust (WoT) */}
+      <SettingsSection
+        id="wot"
+        title="Web of Trust (WoT)"
+        icon={ShieldCheck}
+        badge={
+          <span className="text-[11px] text-emerald-400">
+            {pubkey
+              ? `${follows.length} follows · ${wotTrustedCount.toLocaleString()} 2-hop`
+              : 'Sign in'}
+          </span>
+        }
+        isOpen={Boolean(openSections['wot'])}
+        onToggle={toggleSection}
+      >
+        <p className="text-xs text-[#9a9890]">
+          Local 2-hop trust graph built from your follows&apos; follow lists, persisted privately in your browser&apos;s IndexedDB for instant loading without re-crawling every session.
+        </p>
+
+        {pubkey ? (
+          <>
+            <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] space-y-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="space-y-0.5">
+                  <div className="font-medium text-white">
+                    {wotTrustedCount.toLocaleString()} trusted 2-hop accounts{' '}
+                    <span className="text-[#8c8a82] font-normal">
+                      ({wotCachedCount.toLocaleString()} cached · {wotFollowsCrawled || follows.length} follows sampled)
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-[#8c8a82]">
+                    {wotCrawling
+                      ? `Crawling 2-hop graph… ${wotCrawlProgress}%`
+                      : wotUpdatedAt > 0
+                        ? `Last updated ${formatRelativeTime(wotUpdatedAt)} ago`
+                        : 'Graph not cached locally yet'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={wotCrawling || follows.length === 0}
+                  onClick={async () => {
+                    setWotStatusMsg(null)
+                    const relaysList = [
+                      ...new Set([...settings.getReadRelays(), ...userReadRelays]),
+                    ]
+                    const list = await wotRefresh({
+                      ownerPubkey: pubkey,
+                      follows,
+                      relays: relaysList,
+                      force: true,
+                    })
+                    useNostrStore.setState({ extendedAuthors: list })
+                    setWotStatusMsg({
+                      ok: true,
+                      text: `Refreshed WoT (${list.length} top 2-hop accounts ready).`,
+                    })
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-[11px] font-semibold text-white inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {wotCrawling ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  )}
+                  Refresh WoT now
+                </button>
+              </div>
+              {wotCrawling && (
+                <div className="w-full h-1.5 rounded-full bg-[#1d1f29] overflow-hidden">
+                  <div
+                    className="h-full bg-[#e8590c] transition-all duration-200"
+                    style={{ width: `${wotCrawlProgress}%` }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="p-3 rounded-xl bg-[#15161c] border border-[#232530] flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium text-white">Min follow vouches</div>
+                  <div className="text-[11px] text-[#8c8a82]">Follows endorsing a 2-hop account</div>
+                </div>
+                <select
+                  aria-label="Minimum follow vouches for 2-hop trust"
+                  value={settings.wotMinVouches}
+                  onChange={(e) => {
+                    const val = Number(e.target.value)
+                    settings.setWotMinVouches(val)
+                    useNostrStore.setState({
+                      extendedAuthors: getWotAuthorsForThreshold(wotEntries, val, 250),
+                    })
+                  }}
+                  className="px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#2a2d3a] text-white text-xs cursor-pointer"
+                >
+                  <option value={1}>1+ follow</option>
+                  <option value={2}>2+ follows</option>
+                  <option value={3}>3+ follows</option>
+                  <option value={5}>5+ follows</option>
+                </select>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#15161c] border border-[#232530] flex items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium text-white">Auto-refresh cadence</div>
+                  <div className="text-[11px] text-[#8c8a82]">Background IndexedDB refresh</div>
+                </div>
+                <select
+                  aria-label="Web of Trust auto-refresh cadence"
+                  value={settings.wotAutoRefreshHours}
+                  onChange={(e) => settings.setWotAutoRefreshHours(Number(e.target.value))}
+                  className="px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#2a2d3a] text-white text-xs cursor-pointer"
+                >
+                  <option value={12}>Every 12h</option>
+                  <option value={24}>Every 24h</option>
+                  <option value={72}>Every 72h</option>
+                  <option value={0}>Manual only</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button
+                type="button"
+                disabled={wotCachedCount === 0}
+                onClick={() => {
+                  const json = wotExportJson()
+                  if (!json) return
+                  const blob = new Blob([json], { type: 'application/json' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `firewisp-wot-${pubkey.slice(0, 8)}.json`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  setWotStatusMsg({ ok: true, text: 'Exported WoT snapshot JSON.' })
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-[#15161c] hover:bg-[#1e212c] border border-[#2a2d3a] text-[#d4d2cb] disabled:opacity-40 inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-[#f59f00]" />
+                Export JSON
+              </button>
+
+              <button
+                type="button"
+                onClick={() => wotFileInputRef.current?.click()}
+                className="px-2.5 py-1.5 rounded-lg bg-[#15161c] hover:bg-[#1e212c] border border-[#2a2d3a] text-[#d4d2cb] inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                Import JSON
+              </button>
+              <input
+                ref={wotFileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  try {
+                    const text = await file.text()
+                    const res = await wotImportJson(pubkey, text)
+                    if (!res.ok) {
+                      setWotStatusMsg({ ok: false, text: res.error || 'Import failed.' })
+                    } else {
+                      setWotStatusMsg({
+                        ok: true,
+                        text: `Imported ${res.count.toLocaleString()} WoT entries into IndexedDB.`,
+                      })
+                    }
+                  } catch {
+                    setWotStatusMsg({ ok: false, text: 'Failed to read WoT JSON file.' })
+                  }
+                }}
+              />
+
+              <button
+                type="button"
+                disabled={wotCachedCount === 0}
+                onClick={async () => {
+                  await wotClearCache(pubkey)
+                  useNostrStore.setState({ extendedAuthors: [] })
+                  setWotStatusMsg({ ok: true, text: 'Cleared local WoT IndexedDB cache.' })
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 disabled:opacity-40 inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear cached WoT
+              </button>
+            </div>
+
+            {wotStatusMsg && (
+              <p className={`text-[11px] ${wotStatusMsg.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                {wotStatusMsg.text}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-xs text-[#8c8a82]">Sign in to build and cache your personal Web of Trust.</p>
+        )}
+
+        <div className="pt-2 border-t border-[#20222c] space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-[#9a9890]">
+            App-Wide WoT Filters
+          </div>
+
+          <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+            <span>Prioritize WoT replies first in Threads</span>
+            <input
+              type="checkbox"
+              checked={settings.wotPrioritizeReplies}
+              onChange={(e) => settings.setWotPrioritizeReplies(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+
+          <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+            <span>WoT only: Notifications</span>
+            <input
+              type="checkbox"
+              checked={settings.wotFilterNotifications}
+              onChange={(e) => settings.setWotFilterNotifications(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+
+          <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+            <span>WoT only: Search results</span>
+            <input
+              type="checkbox"
+              checked={settings.wotFilterSearch}
+              onChange={(e) => settings.setWotFilterSearch(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+
+          <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+            <span>WoT only: Zapped feed</span>
+            <input
+              type="checkbox"
+              checked={settings.wotFilterZapped}
+              onChange={(e) => settings.setWotFilterZapped(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+
+          <label className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+            <span>WoT only: Explore feed</span>
+            <input
+              type="checkbox"
+              checked={settings.wotFilterExplore}
+              onChange={(e) => settings.setWotFilterExplore(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+        </div>
+
+        <div className="pt-2 border-t border-[#20222c] space-y-2.5 text-xs">
+          <label className="flex items-center justify-between cursor-pointer">
+            <div>
+              <div className="font-medium text-white">NIP-85 Trusted Assertions (Advanced)</div>
+              <div className="text-[11px] text-[#8c8a82]">
+                Optional external or self-hosted kind-30382 trust rank (e.g. Brainstorm / Vertex / personal relay).
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={settings.nip85Enabled}
+              onChange={(e) => settings.setNip85Enabled(e.target.checked)}
+              className="accent-[#e8590c]"
+            />
+          </label>
+
+          {settings.nip85Enabled && (
+            <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] space-y-2">
+              <div className="space-y-1">
+                <label className="block text-[11px] text-[#9a9890]">
+                  Provider Pubkey (hex or npub1…)
+                </label>
+                <input
+                  type="text"
+                  value={nip85ProviderInput}
+                  onChange={(e) => setNip85ProviderInput(e.target.value)}
+                  placeholder="npub1… or 64-char hex pubkey"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[#15161c] border border-[#2a2d3a] text-white font-mono text-[11px] focus:outline-none focus:border-[#e8590c]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[11px] text-[#9a9890]">
+                  Assertion Relay URL (wss://… or local ws://127.0.0.1:4869)
+                </label>
+                <input
+                  type="text"
+                  value={nip85RelayInput}
+                  onChange={(e) => setNip85RelayInput(e.target.value)}
+                  placeholder="wss://nip85.example.com or ws://127.0.0.1:4869"
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[#15161c] border border-[#2a2d3a] text-white font-mono text-[11px] focus:outline-none focus:border-[#e8590c]"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-[11px] text-[#9a9890]">
+                  <span>Min Rank (1–100):</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={settings.nip85MinRank}
+                    onChange={(e) => settings.setNip85MinRank(Number(e.target.value) || 20)}
+                    className="w-16 px-2 py-1 rounded bg-[#15161c] border border-[#2a2d3a] text-white text-xs"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const okPk = settings.setNip85ProviderPubkey(nip85ProviderInput)
+                    if (!okPk) {
+                      setNip85Status({ ok: false, text: 'Invalid provider pubkey or npub1.' })
+                      return
+                    }
+                    const okRelay = settings.setNip85RelayUrl(nip85RelayInput)
+                    if (!okRelay) {
+                      setNip85Status({
+                        ok: false,
+                        text: 'Invalid relay URL (use wss:// or local ws://127.0.0.1 / ws://localhost).',
+                      })
+                      return
+                    }
+                    setNip85Status({ ok: true, text: 'Saved NIP-85 provider settings.' })
+                  }}
+                  className="px-3 py-1 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] text-white text-[11px] font-semibold cursor-pointer"
+                >
+                  Save NIP-85
+                </button>
+              </div>
+
+              {nip85Status && (
+                <p className={`text-[11px] ${nip85Status.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {nip85Status.text}
+                </p>
+              )}
+
+              <p className="text-[11px] text-[#7c7a72]">
+                Power-user tip: local mobile/desktop relays such as Citrine (<code className="text-[#c2bfb7]">ws://127.0.0.1:4869</code>), Haven, or Nostr Vault can also be added directly under Nostr Relays below.
+              </p>
+            </div>
+          )}
+        </div>
       </SettingsSection>
 
       {/* Relays */}

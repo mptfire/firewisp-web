@@ -44,6 +44,7 @@ import { MediaLightbox } from './MediaLightbox'
 import { AddToListButton } from './AddToListButton'
 import { ReactionEmote } from './ReactionEmote'
 import { SongLinkCard } from './SongLinkCard'
+import { WotBadge } from './WotBadge'
 import { YouTubeCard } from './YouTubeCard'
 
 const ZapModal = lazy(() => import('./ZapModal').then((m) => ({ default: m.ZapModal })))
@@ -107,6 +108,7 @@ interface NoteCardProps {
   event: Event
   repostedByPubkey?: string
   hideParentPreview?: boolean
+  showWotBadge?: boolean
 }
 
 /** Isolated mention chip so profile updates only re-render this chip, never the whole feed. */
@@ -713,6 +715,7 @@ export const NoteCard = memo(function NoteCard({
   event,
   repostedByPubkey,
   hideParentPreview = false,
+  showWotBadge = false,
 }: NoteCardProps) {
   const navigate = useNavigate()
   const profile = useNostrStore((s) => s.profiles[event.pubkey])
@@ -973,6 +976,7 @@ export const NoteCard = memo(function NoteCard({
                   {powBits}b
                 </span>
               )}
+              {showWotBadge && <WotBadge pubkey={event.pubkey} compact />}
             </div>
 
             <div className="flex items-center gap-1 shrink-0">

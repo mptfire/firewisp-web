@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { Event } from 'nostr-tools/pure'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, ShieldCheck } from 'lucide-react'
 import { nostrPool } from '../lib/nostr/pool'
 import { extractReplyRefs } from '../lib/nostr/content'
 import { evaluateNoteSpam } from '../lib/nostr/spamFilter'
+import { evaluateWotStatus } from '../lib/nostr/wot'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useWotStore } from '../lib/store/useWotStore'
 import { NoteCard } from '../components/NoteCard'
 import { Composer } from '../components/Composer'
 
@@ -37,6 +39,13 @@ export function ThreadPage() {
   const privateMutedWords = useSettingsStore((s) => s.privateMutedWords)
   const relays = useSettingsStore((s) => s.relays)
   const spamFilterEnabled = useSettingsStore((s) => s.spamFilterEnabled)
+  const wotPrioritizeReplies = useSettingsStore((s) => s.wotPrioritizeReplies)
+  const setWotPrioritizeReplies = useSettingsStore((s) => s.setWotPrioritizeReplies)
+  const wotMinVouches = useSettingsStore((s) => s.wotMinVouches)
+  const nip85Enabled = useSettingsStore((s) => s.nip85Enabled)
+  const nip85MinRank = useSettingsStore((s) => s.nip85MinRank)
+  const wotEntries = useWotStore((s) => s.entries)
+  const nip85Scores = useWotStore((s) => s.nip85Scores)
   const myPubkey = useAuthStore((s) => s.pubkey)
   const follows = useNostrStore((s) => s.follows)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
@@ -119,31 +128,51 @@ export function ThreadPage() {
 
   const followSet = useMemo(() => new Set(follows.map((f) => f.toLowerCase())), [follows])
 
-  const visibleReplies = useMemo(
-    () =>
-      replies.filter((r) => {
-        if (isEventDeleted(r) || isEventMuted(r)) return false
-        if (spamFilterEnabled && evaluateNoteSpam(r, { myPubkey, follows: followSet }).isSpam) {
-          return false
-        }
-        return true
-      }),
-    [
-      replies,
-      isEventDeleted,
-      isEventMuted,
-      deletedByAuthor,
-      mutedPubkeys,
-      mutedHashtags,
-      mutedWords,
-      privateMutedPubkeys,
-      privateMutedHashtags,
-      privateMutedWords,
-      spamFilterEnabled,
-      myPubkey,
-      followSet,
-    ],
-  )
+  const visibleReplies = useMemo(() => {
+    const filtered = replies.filter((r) => {
+      if (isEventDeleted(r) || isEventMuted(r)) return false
+      if (spamFilterEnabled && evaluateNoteSpam(r, { myPubkey, follows: followSet }).isSpam) {
+        return false
+      }
+      return true
+    })
+    if (!wotPrioritizeReplies || !myPubkey) return filtered
+    const tierOf = (pk: string) => {
+      const st = evaluateWotStatus({
+        targetPubkey: pk,
+        myPubkey,
+        followsSet: followSet,
+        entries: wotEntries,
+        minVouches: wotMinVouches,
+        nip85Scores: nip85Enabled ? nip85Scores : undefined,
+        nip85MinRank,
+      })
+      if (st.hop === 0 || st.hop === 1) return 2
+      if (st.trusted) return 1
+      return 0
+    }
+    return [...filtered].sort((a, b) => tierOf(b.pubkey) - tierOf(a.pubkey) || a.created_at - b.created_at)
+  }, [
+    replies,
+    isEventDeleted,
+    isEventMuted,
+    deletedByAuthor,
+    mutedPubkeys,
+    mutedHashtags,
+    mutedWords,
+    privateMutedPubkeys,
+    privateMutedHashtags,
+    privateMutedWords,
+    spamFilterEnabled,
+    wotPrioritizeReplies,
+    wotEntries,
+    wotMinVouches,
+    nip85Enabled,
+    nip85Scores,
+    nip85MinRank,
+    myPubkey,
+    followSet,
+  ])
 
   return (
     <div>
@@ -192,12 +221,28 @@ export function ThreadPage() {
         </div>
       )}
 
-      <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#8c8a82] border-b border-[#20222c]">
-        Replies ({visibleReplies.length})
+      <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#8c8a82] border-b border-[#20222c] flex items-center justify-between gap-2">
+        <span>Replies ({visibleReplies.length})</span>
+        {myPubkey && (
+          <button
+            type="button"
+            aria-pressed={wotPrioritizeReplies}
+            onClick={() => setWotPrioritizeReplies(!wotPrioritizeReplies)}
+            title="Show Web of Trust replies before unknown accounts"
+            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold normal-case tracking-normal border inline-flex items-center gap-1 transition cursor-pointer ${
+              wotPrioritizeReplies
+                ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+            }`}
+          >
+            <ShieldCheck className="w-3 h-3" />
+            WoT first
+          </button>
+        )}
       </div>
 
       {visibleReplies.map((r) => (
-        <NoteCard key={r.id} event={r} hideParentPreview />
+        <NoteCard key={r.id} event={r} hideParentPreview showWotBadge />
       ))}
     </div>
   )

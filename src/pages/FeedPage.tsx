@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import type { Event } from 'nostr-tools/pure'
 import { extractEventHashtags } from '../lib/nostr/content'
+import { evaluateWotStatus } from '../lib/nostr/wot'
 import { getListFeedDTag, makeListFeedKey } from '../lib/nostr/followSets'
 import {
   capActiveRelaySetUrls,
@@ -39,6 +40,7 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore, type FeedTab } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { useWotStore } from '../lib/store/useWotStore'
 import { Composer } from '../components/Composer'
 import { LiveNowRow } from '../components/LiveNowRow'
 import { LiveZapsCard } from '../components/LiveZapsCard'
@@ -124,6 +126,15 @@ export function FeedPage() {
   const setForYouIncludeTopics = useSettingsStore((s) => s.setForYouIncludeTopics)
   const setForYouIncludeWotZapped = useSettingsStore((s) => s.setForYouIncludeWotZapped)
   const setForYouIncludeTrending = useSettingsStore((s) => s.setForYouIncludeTrending)
+  const wotFilterZapped = useSettingsStore((s) => s.wotFilterZapped)
+  const setWotFilterZapped = useSettingsStore((s) => s.setWotFilterZapped)
+  const wotFilterExplore = useSettingsStore((s) => s.wotFilterExplore)
+  const setWotFilterExplore = useSettingsStore((s) => s.setWotFilterExplore)
+  const wotMinVouches = useSettingsStore((s) => s.wotMinVouches)
+  const nip85Enabled = useSettingsStore((s) => s.nip85Enabled)
+  const nip85MinRank = useSettingsStore((s) => s.nip85MinRank)
+  const wotEntries = useWotStore((s) => s.entries)
+  const nip85Scores = useWotStore((s) => s.nip85Scores)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
@@ -347,6 +358,20 @@ export function FeedPage() {
         }
       }
 
+      // Optional WoT filter on Zapped / Explore feeds
+      if (myPk && ((tab === 'zapped' && wotFilterZapped) || (tab === 'global' && wotFilterExplore))) {
+        const wot = evaluateWotStatus({
+          targetPubkey: ev.pubkey,
+          myPubkey: myPk,
+          followsSet: followSet,
+          entries: wotEntries,
+          minVouches: wotMinVouches,
+          nip85Scores: nip85Enabled ? nip85Scores : undefined,
+          nip85MinRank,
+        })
+        if (!wot.trusted) return null
+      }
+
       let targetEv: Event = ev
       let repostedBy: string | undefined
       if (ev.kind === 6) {
@@ -445,6 +470,13 @@ export function FeedPage() {
     follows,
     extendedAuthors,
     forYouSuppIds,
+    wotFilterZapped,
+    wotFilterExplore,
+    wotEntries,
+    wotMinVouches,
+    nip85Enabled,
+    nip85Scores,
+    nip85MinRank,
     customStorageKey,
     activeListDTag,
     activeList,
@@ -655,6 +687,22 @@ export function FeedPage() {
             <>
               <Zap className="w-3.5 h-3.5 text-[#f59f00] shrink-0" />
               <span className="truncate">Zapped · Posts receiving verified Lightning zaps</span>
+              {pubkey && (
+                <button
+                  type="button"
+                  aria-pressed={wotFilterZapped}
+                  onClick={() => setWotFilterZapped(!wotFilterZapped)}
+                  title="Show only zapped posts by authors in your Web of Trust"
+                  className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border inline-flex items-center gap-1 transition cursor-pointer shrink-0 ${
+                    wotFilterZapped
+                      ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                      : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  WoT only
+                </button>
+              )}
             </>
           ) : tab === 'firewisp' ? (
             <>
@@ -675,6 +723,22 @@ export function FeedPage() {
                       : 'Curated Explore (anti-spam ON)'
                     : 'Anti-spam filter paused'}
               </span>
+              {tab === 'global' && pubkey && (
+                <button
+                  type="button"
+                  aria-pressed={wotFilterExplore}
+                  onClick={() => setWotFilterExplore(!wotFilterExplore)}
+                  title="Show only Explore posts from authors inside your Web of Trust"
+                  className={`ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border inline-flex items-center gap-1 transition cursor-pointer shrink-0 ${
+                    wotFilterExplore
+                      ? 'bg-emerald-500/20 border-emerald-500/45 text-emerald-300'
+                      : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3" />
+                  WoT only
+                </button>
+              )}
             </>
           )}
         </div>

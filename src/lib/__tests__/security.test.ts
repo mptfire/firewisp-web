@@ -2659,4 +2659,135 @@ describe('Full code-audit regression & security hardening', () => {
       useSettingsStore.getState().setForYouIncludeTrending(prevTrending)
     }
   })
+
+  it('builds, serializes, validates fail-closed WoT snapshots and NIP-85 assertions', async () => {
+    const {
+      buildWotGraphFromContactLists,
+      getWotAuthorsForThreshold,
+      evaluateWotStatus,
+      serializeWotSnapshot,
+      parseWotSnapshotJson,
+      parseNip85AssertionEvent,
+      KIND_NIP85_USER_ASSERTION,
+    } = await import('../nostr/wot')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+
+    const owner = 'a'.repeat(64)
+    const f1 = '1'.repeat(64)
+    const f2 = '2'.repeat(64)
+    const f3 = '3'.repeat(64)
+    const hop2Hot = 'b'.repeat(64)
+    const hop2Weak = 'c'.repeat(64)
+    const nip85Only = 'd'.repeat(64)
+
+    const contacts = [
+      {
+        id: 'e1'.padEnd(64, '0'),
+        kind: 3,
+        pubkey: f1,
+        created_at: 100,
+        content: '',
+        sig: '0'.repeat(128),
+        tags: [
+          ['p', hop2Hot],
+          ['p', hop2Weak],
+          ['p', f2], // direct follow must be excluded from hop-2
+          ['p', owner], // owner must be excluded from hop-2
+        ],
+      },
+      {
+        id: 'e2'.padEnd(64, '0'),
+        kind: 3,
+        pubkey: f2,
+        created_at: 200,
+        content: '',
+        sig: '0'.repeat(128),
+        tags: [
+          ['p', hop2Hot],
+          ['p', hop2Hot], // duplicate inside same follow list counts once
+        ],
+      },
+      {
+        id: 'e3'.padEnd(64, '0'),
+        kind: 3,
+        pubkey: f3,
+        created_at: 300,
+        content: '',
+        sig: '0'.repeat(128),
+        tags: [['p', hop2Hot]],
+      },
+    ]
+
+    const snap = buildWotGraphFromContactLists({
+      ownerPubkey: owner,
+      follows: [f1, f2, f3],
+      contactEvents: contacts,
+    })
+
+    expect(snap.followsCrawled).toBe(3)
+    expect(snap.entries[owner]).toBeUndefined()
+    expect(snap.entries[f2]).toBeUndefined()
+    expect(snap.entries[hop2Hot]).toEqual({ vouches: 3, by: [f1, f2, f3] })
+    expect(snap.entries[hop2Weak]).toEqual({ vouches: 1, by: [f1] })
+
+    expect(getWotAuthorsForThreshold(snap.entries, 3)).toEqual([hop2Hot])
+    expect(getWotAuthorsForThreshold(snap.entries, 1)).toEqual([hop2Hot, hop2Weak])
+
+    // Snapshot round-trip and wrong-owner fail-closed rejection
+    const json = serializeWotSnapshot(snap)
+    expect(parseWotSnapshotJson(json, owner)?.entries[hop2Hot]?.vouches).toBe(3)
+    expect(parseWotSnapshotJson(json, f1)).toBeNull()
+    expect(parseWotSnapshotJson('{"version":2}', owner)).toBeNull()
+
+    // NIP-85 assertion validation (rejects wrong provider, parses valid rank)
+    const provider = 'e'.repeat(64)
+    expect(
+      parseNip85AssertionEvent(
+        {
+          kind: KIND_NIP85_USER_ASSERTION,
+          pubkey: 'f'.repeat(64),
+          created_at: 500,
+          tags: [
+            ['d', nip85Only],
+            ['rank', '75'],
+          ],
+        },
+        provider,
+      ),
+    ).toBeNull()
+
+    const parsed85 = parseNip85AssertionEvent(
+      {
+        kind: KIND_NIP85_USER_ASSERTION,
+        pubkey: provider,
+        created_at: 500,
+        tags: [
+          ['d', nip85Only],
+          ['rank', '75'],
+        ],
+      },
+      provider,
+    )
+    expect(parsed85?.score.rank).toBe(75)
+
+    const evalRes = evaluateWotStatus({
+      targetPubkey: nip85Only,
+      myPubkey: owner,
+      followsSet: new Set([f1, f2, f3]),
+      entries: snap.entries,
+      minVouches: 3,
+      nip85Scores: parsed85 ? { [parsed85.targetPubkey]: parsed85.score } : undefined,
+      nip85MinRank: 20,
+    })
+    expect(evalRes.trusted).toBe(true)
+    expect(evalRes.nip85Rank).toBe(75)
+
+    // Citrine localhost ws:// and NIP-85 provider pubkey validation in settings store
+    expect(useSettingsStore.getState().setNip85RelayUrl('ws://127.0.0.1:4869')).toBe(true)
+    expect(useSettingsStore.getState().setNip85RelayUrl('ws://192.168.1.50:4869')).toBe(false)
+    expect(useSettingsStore.getState().setNip85ProviderPubkey(provider)).toBe(true)
+    expect(useSettingsStore.getState().setNip85ProviderPubkey('not-a-pubkey')).toBe(false)
+    useSettingsStore.getState().setNip85RelayUrl('')
+    useSettingsStore.getState().setNip85ProviderPubkey('')
+  })
 })

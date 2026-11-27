@@ -23,6 +23,7 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { AddToListButton } from '../components/AddToListButton'
 import { Avatar } from '../components/Avatar'
 import { MediaLightbox } from '../components/MediaLightbox'
+import { WotBadge } from '../components/WotBadge'
 import { NoteCard } from '../components/NoteCard'
 
 const ZapModal = lazy(() =>
@@ -452,6 +453,10 @@ export function ProfilePage() {
               <Copy className="w-3 h-3" />
             )}
           </button>
+        </div>
+
+        <div className="mt-2">
+          <WotBadge pubkey={hexPubkey} showFollowing />
         </div>
 
         {profile?.about && (
