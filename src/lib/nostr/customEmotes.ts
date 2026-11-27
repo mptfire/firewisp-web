@@ -19,6 +19,37 @@ export const CUSTOM_REACTION_EMOTES: readonly CustomReactionEmote[] = [
     publicUrl: `${FIREWISP_EMOTE_BASE_URL}/gg.png`,
   },
   {
+    shortcode: 'dogtoshi_cool',
+    key: ':dogtoshi_cool:',
+    label: 'Dogtoshi Cool',
+    localSrc: '/emotes/dogtoshi_cool.gif',
+    publicUrl: `${FIREWISP_EMOTE_BASE_URL}/dogtoshi_cool.gif`,
+  },
+  {
+    shortcode: 'dogtoshi_powerzap',
+    key: ':dogtoshi_powerzap:',
+    label: 'Dogtoshi Powerzap',
+    localSrc: '/emotes/dogtoshi_powerzap.gif',
+    publicUrl: `${FIREWISP_EMOTE_BASE_URL}/dogtoshi_powerzap.gif`,
+  },
+  {
+    shortcode: 'dogtoshi_wag',
+    key: ':dogtoshi_wag:',
+    label: 'Dogtoshi Wag',
+    localSrc: '/emotes/dogtoshi_wag.gif',
+    publicUrl: `${FIREWISP_EMOTE_BASE_URL}/dogtoshi_wag.gif`,
+  },
+  {
+    shortcode: 'dogtoshi_dream',
+    key: ':dogtoshi_dream:',
+    label: 'Dogtoshi Dream',
+    localSrc: '/emotes/dogtoshi_dream.gif',
+    publicUrl: `${FIREWISP_EMOTE_BASE_URL}/dogtoshi_dream.gif`,
+  },
+] as const
+
+const LEGACY_REACTION_EMOTES: readonly CustomReactionEmote[] = [
+  {
     shortcode: 'wisp_orange',
     key: ':wisp_orange:',
     label: 'Fire Wisp Orange',
@@ -42,7 +73,7 @@ export const CUSTOM_REACTION_EMOTES: readonly CustomReactionEmote[] = [
 ] as const
 
 const BUILTIN_BY_KEY = new Map<string, CustomReactionEmote>(
-  CUSTOM_REACTION_EMOTES.map((emote) => [emote.key, emote]),
+  [...CUSTOM_REACTION_EMOTES, ...LEGACY_REACTION_EMOTES].map((emote) => [emote.key, emote]),
 )
 
 export const SHORTCODE_RE = /^:([a-z0-9_.+-]{1,48}):$/i

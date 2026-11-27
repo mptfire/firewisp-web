@@ -2334,16 +2334,19 @@ describe('Full code-audit regression & security hardening', () => {
     const { nostrPool } = await import('../nostr/pool')
 
     expect(normalizeReactionEmoji(':GG:')).toBe(':gg:')
+    expect(normalizeReactionEmoji(' :Dogtoshi_Powerzap: ')).toBe(':dogtoshi_powerzap:')
     expect(normalizeReactionEmoji(' :Wisp_Orange: ')).toBe(':wisp_orange:')
     expect(normalizeReactionEmoji(':lightning_bolt_zap_emote:')).toBe(':lightning_bolt_zap_emote:')
 
     expect(getBuiltinEmoteByKey(':gg:')?.localSrc).toBe('/emotes/gg.png')
     expect(CUSTOM_REACTION_EMOTES.map((e) => e.shortcode)).toEqual([
       'gg',
-      'wisp_orange',
-      'wisp_green',
-      'wisp_white',
+      'dogtoshi_cool',
+      'dogtoshi_powerzap',
+      'dogtoshi_wag',
+      'dogtoshi_dream',
     ])
+    expect(CUSTOM_REACTION_EMOTES.some((e) => e.shortcode.startsWith('wisp_'))).toBe(false)
 
     // Valid remote HTTPS NIP-30 URL is preserved; insecure/LAN URLs are rejected
     expect(
@@ -2362,7 +2365,12 @@ describe('Full code-audit regression & security hardening', () => {
       extractNip30EmojiUrl([['emoji', 'pepe', 'javascript:alert(1)']], ':pepe:'),
     ).toBeNull()
 
-    // Built-in emote always resolves locally even if a remote tag tries to override its URL
+    // Built-in & legacy emotes always resolve locally even if a remote tag tries to override their URL
+    expect(
+      resolveReactionEmoteSrc(':dogtoshi_powerzap:', [
+        ['emoji', 'dogtoshi_powerzap', 'https://evil.example/spoof.gif'],
+      ]),
+    ).toBe('/emotes/dogtoshi_powerzap.gif')
     expect(
       resolveReactionEmoteSrc(':wisp_orange:', [
         ['emoji', 'wisp_orange', 'https://evil.example/spoof.png'],
@@ -2401,16 +2409,16 @@ describe('Full code-audit regression & security hardening', () => {
         return relays.map((relay) => ({ relay, ok: true }))
       }) as typeof nostrPool.publish
 
-      await useNostrStore.getState().toggleLike(targetEv, ':wisp_orange:')
-      expect(published[0].content).toBe(':wisp_orange:')
+      await useNostrStore.getState().toggleLike(targetEv, ':dogtoshi_powerzap:')
+      expect(published[0].content).toBe(':dogtoshi_powerzap:')
       expect(published[0].tags).toContainEqual([
         'emoji',
-        'wisp_orange',
-        'https://firewisp.de/emotes/wisp_orange.png',
+        'dogtoshi_powerzap',
+        'https://firewisp.de/emotes/dogtoshi_powerzap.gif',
       ])
-      expect(useNostrStore.getState().reactionEmojiCounts[targetId][':wisp_orange:']).toBe(1)
-      expect(useNostrStore.getState().reactionEmojiUrls[targetId][':wisp_orange:']).toBe(
-        '/emotes/wisp_orange.png',
+      expect(useNostrStore.getState().reactionEmojiCounts[targetId][':dogtoshi_powerzap:']).toBe(1)
+      expect(useNostrStore.getState().reactionEmojiUrls[targetId][':dogtoshi_powerzap:']).toBe(
+        '/emotes/dogtoshi_powerzap.gif',
       )
 
       // Ingest a remote third-party NIP-30 reaction (without valid sig check needed? ingestEvent verifies sig!)

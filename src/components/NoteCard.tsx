@@ -95,7 +95,7 @@ const LONG_NOTE_LINE_LIMIT = 12
 const EMPTY_EMOJI_COUNTS: Record<string, number> = {}
 const EMPTY_EMOJI_URLS: Record<string, string> = {}
 const EMPTY_USER_REACTIONS: Record<string, true> = {}
-const QUICK_BAR_EMOJIS = ['😂', '💯', '🖖'] as const
+const QUICK_BAR_EMOJIS = ['🔥', '😂', '💯', '🖖'] as const
 const PICKER_EMOJIS: Array<{ emoji: string; label: string }> = [
   { emoji: '🚀', label: 'Rocket' },
   { emoji: '🤗', label: 'Hug' },
@@ -1530,7 +1530,7 @@ export const NoteCard = memo(function NoteCard({
                           <img
                             src={em.localSrc}
                             alt={em.label}
-                            className="w-5 h-5 object-contain shrink-0"
+                            className="w-6 h-6 object-contain shrink-0"
                           />
                           {cnt > 0 && <span className="text-[10px] text-[#9a9890]">{cnt}</span>}
                         </button>
