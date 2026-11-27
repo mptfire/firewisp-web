@@ -847,7 +847,7 @@ export function FeedPage() {
                   : 'bg-[#0e0e11] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
               }`}
             >
-              Replies
+              Feed Replies
             </button>
           )}
           {tab === 'global' && (

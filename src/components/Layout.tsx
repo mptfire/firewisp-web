@@ -691,7 +691,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   >
                     <span className="flex items-center gap-1 min-w-0">
                       <MessageSquare className="w-3 h-3 text-[#f59f00] shrink-0" />
-                      <span className="truncate">Replies</span>
+                      <span className="truncate">Feed Replies</span>
                     </span>
                     <div
                       role="group"
