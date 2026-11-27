@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
+import type { Event } from 'nostr-tools/pure'
 import {
   Radio,
   UploadCloud,
@@ -24,17 +25,30 @@ import {
   Smartphone,
   ExternalLink,
   List,
+  Database,
+  X,
 } from 'lucide-react'
 import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
 import { formatRelativeTime } from '../lib/format'
+import {
+  broadcastBackupEvents,
+  extractMediaUrlsFromEvents,
+  fetchUserBackupEvents,
+  parseJsonlBackup,
+  resignReplaceableEventForRecovery,
+  serializeEventsToJsonl,
+  type BackupProgress,
+  type ParsedBackupSummary,
+} from '../lib/nostr/backup'
 import { extractMuteItemsFromTags } from '../lib/nostr/lists'
+import { nostrPool } from '../lib/nostr/pool'
 import { getWotAuthorsForThreshold } from '../lib/nostr/wot'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { useWotStore } from '../lib/store/useWotStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
-import { sanitizePublicRelayUrl } from '../lib/sanitize'
+import { sanitizePublicRelayUrl, sanitizeRelayUrl } from '../lib/sanitize'
 
 function relayHealthRow(st: string | undefined): string {
   if (st === 'connected') return 'bg-emerald-500/10 border-emerald-500/35'
@@ -150,6 +164,315 @@ export function SettingsPage() {
   const [nip85RelayInput, setNip85RelayInput] = useState(settings.nip85RelayUrl)
   const [nip85Status, setNip85Status] = useState<{ ok: boolean; text: string } | null>(null)
   const wotFileInputRef = useRef<HTMLInputElement | null>(null)
+  const loadUserGraph = useNostrStore((s) => s.loadUserGraph)
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null)
+  const backupAbortRef = useRef<AbortController | null>(null)
+  const [backupBusy, setBackupBusy] = useState<'scan' | 'sync' | 'import-sync' | 'recover' | null>(null)
+  const [backupProgress, setBackupProgress] = useState<BackupProgress | null>(null)
+  const [backupEvents, setBackupEvents] = useState<Event[]>([])
+  const [backupMediaUrls, setBackupMediaUrls] = useState<string[]>([])
+  const [backupStatus, setBackupStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [backupSyncTarget, setBackupSyncTarget] = useState<string>('__all_write__')
+  const [backupCustomRelay, setBackupCustomRelay] = useState('')
+  const [importedBackup, setImportedBackup] = useState<ParsedBackupSummary | null>(null)
+
+  useEffect(() => {
+    return () => {
+      backupAbortRef.current?.abort()
+    }
+  }, [])
+
+  const downloadTextFile = (filename: string, content: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const getBackupSourceRelays = (): string[] => {
+    const candidates = [
+      ...settings.relays.map((r) => r.url),
+      ...userReadRelays,
+      ...userWriteRelays,
+    ]
+    const unique = new Set<string>()
+    for (const candidate of candidates) {
+      const safe = sanitizeRelayUrl(candidate)
+      if (safe) unique.add(safe)
+    }
+    return Array.from(unique)
+  }
+
+  const getWriteRelays = (): string[] => {
+    const candidates = [
+      ...settings.relays.filter((r) => r.write).map((r) => r.url),
+      ...userWriteRelays,
+    ]
+    const unique = new Set<string>()
+    for (const candidate of candidates) {
+      const safe = sanitizeRelayUrl(candidate)
+      if (safe) unique.add(safe)
+    }
+    return Array.from(unique)
+  }
+
+  const resolveBackupTargetRelays = (): { relays: string[]; error?: string } => {
+    if (backupSyncTarget === '__all_write__') {
+      const writeList = getWriteRelays()
+      return writeList.length > 0
+        ? { relays: writeList }
+        : { relays: [], error: 'No write relays configured.' }
+    }
+    if (backupSyncTarget === '__custom__') {
+      const clean = sanitizeRelayUrl(backupCustomRelay)
+      return clean
+        ? { relays: [clean] }
+        : {
+            relays: [],
+            error: 'Enter a valid wss:// relay or local ws://127.0.0.1 / ws://localhost relay URL.',
+          }
+    }
+    const clean = sanitizeRelayUrl(backupSyncTarget)
+    return clean ? { relays: [clean] } : { relays: [], error: 'Selected relay URL is invalid.' }
+  }
+
+  const scanAccountBackup = async (signal: AbortSignal): Promise<Event[]> => {
+    if (!pubkey) {
+      throw new Error('Sign in with your Nostr key first to export or sync your history.')
+    }
+    const relays = getBackupSourceRelays()
+    if (relays.length === 0) {
+      throw new Error('No valid relays configured to fetch backup history.')
+    }
+    const events = await fetchUserBackupEvents(pubkey, relays, {
+      signal,
+      onProgress: (progress) => setBackupProgress(progress),
+    })
+    setBackupEvents(events)
+    setBackupMediaUrls(extractMediaUrlsFromEvents(events))
+    return events
+  }
+
+  const handleExportBackupJsonl = async () => {
+    if (!pubkey) {
+      setBackupStatus({ ok: false, text: 'Sign in first to export your Nostr backup.' })
+      return
+    }
+    backupAbortRef.current?.abort()
+    const controller = new AbortController()
+    backupAbortRef.current = controller
+    setBackupBusy('scan')
+    setBackupStatus(null)
+    try {
+      const events = await scanAccountBackup(controller.signal)
+      if (controller.signal.aborted) {
+        setBackupStatus({ ok: false, text: 'Backup scan cancelled.' })
+        return
+      }
+      if (events.length === 0) {
+        setBackupStatus({ ok: false, text: 'No signed events found on your configured relays yet.' })
+        return
+      }
+      const dateStamp = new Date().toISOString().slice(0, 10)
+      const jsonl = serializeEventsToJsonl(events)
+      downloadTextFile(`firewisp-backup-${pubkey.slice(0, 8)}-${dateStamp}.jsonl`, jsonl, 'application/x-ndjson')
+      const mediaCount = extractMediaUrlsFromEvents(events).length
+      setBackupStatus({
+        ok: true,
+        text: `Exported ${events.length} signed events (${mediaCount} media URLs indexed).`,
+      })
+    } catch (err) {
+      setBackupStatus({ ok: false, text: err instanceof Error ? err.message : 'Backup export failed.' })
+    } finally {
+      setBackupBusy(null)
+    }
+  }
+
+  const handleDownloadMediaUrlsTxt = async () => {
+    if (!pubkey) {
+      setBackupStatus({ ok: false, text: 'Sign in first to export your media URL list.' })
+      return
+    }
+    let urls = backupMediaUrls
+    if (backupEvents.length === 0) {
+      backupAbortRef.current?.abort()
+      const controller = new AbortController()
+      backupAbortRef.current = controller
+      setBackupBusy('scan')
+      setBackupStatus(null)
+      try {
+        const events = await scanAccountBackup(controller.signal)
+        if (controller.signal.aborted) {
+          setBackupStatus({ ok: false, text: 'Media URL scan cancelled.' })
+          return
+        }
+        urls = extractMediaUrlsFromEvents(events)
+      } catch (err) {
+        setBackupStatus({ ok: false, text: err instanceof Error ? err.message : 'Media scan failed.' })
+        setBackupBusy(null)
+        return
+      } finally {
+        setBackupBusy(null)
+      }
+    }
+    if (urls.length === 0) {
+      setBackupStatus({ ok: false, text: 'No HTTPS media URLs found in your scanned notes or imeta tags.' })
+      return
+    }
+    const dateStamp = new Date().toISOString().slice(0, 10)
+    downloadTextFile(`firewisp-media-urls-${pubkey.slice(0, 8)}-${dateStamp}.txt`, `${urls.join('\n')}\n`, 'text/plain')
+    setBackupStatus({ ok: true, text: `Downloaded ${urls.length} unique media URLs (.txt).` })
+  }
+
+  const handleSyncHistoryToRelay = async () => {
+    if (!pubkey) {
+      setBackupStatus({ ok: false, text: 'Sign in first to sync your history to a relay.' })
+      return
+    }
+    const resolved = resolveBackupTargetRelays()
+    if (resolved.error || resolved.relays.length === 0) {
+      setBackupStatus({ ok: false, text: resolved.error ?? 'No target relay selected.' })
+      return
+    }
+    backupAbortRef.current?.abort()
+    const controller = new AbortController()
+    backupAbortRef.current = controller
+    setBackupBusy('sync')
+    setBackupStatus(null)
+    try {
+      const events = backupEvents.length > 0 ? backupEvents : await scanAccountBackup(controller.signal)
+      if (controller.signal.aborted) {
+        setBackupStatus({ ok: false, text: 'Relay sync cancelled.' })
+        return
+      }
+      if (events.length === 0) {
+        setBackupStatus({ ok: false, text: 'No events found to sync.' })
+        return
+      }
+      const res = await broadcastBackupEvents(events, resolved.relays, {
+        signal: controller.signal,
+        onProgress: (progress) => setBackupProgress(progress),
+      })
+      if (res.cancelled) {
+        setBackupStatus({ ok: false, text: `Sync cancelled (${res.published} published before cancel).` })
+        return
+      }
+      setBackupStatus({
+        ok: res.published > 0,
+        text:
+          res.published > 0
+            ? `Synced ${res.published} verified events to ${resolved.relays.join(', ')}${res.failed > 0 ? ` (${res.failed} failed)` : ''}.`
+            : `Relay sync did not receive ACKs (${res.errors[0] ?? 'relay rejected or timed out'}).`,
+      })
+    } catch (err) {
+      setBackupStatus({ ok: false, text: err instanceof Error ? err.message : 'Relay sync failed.' })
+    } finally {
+      setBackupBusy(null)
+    }
+  }
+
+  const handleImportBackupFile = async (file: File) => {
+    setBackupStatus(null)
+    try {
+      const text = await file.text()
+      const parsed = parseJsonlBackup(text, pubkey ?? undefined)
+      setImportedBackup(parsed)
+      if (parsed.validCount === 0) {
+        setBackupStatus({
+          ok: false,
+          text:
+            parsed.foreignAuthorCount > 0
+              ? `No events matched your signed-in account (${parsed.foreignAuthorCount} foreign author events skipped).`
+              : 'No valid signed Nostr events found in that .jsonl file.',
+        })
+        return
+      }
+      const notesSkipped = [
+        parsed.invalidSignatureCount > 0 ? `${parsed.invalidSignatureCount} invalid sig` : null,
+        parsed.foreignAuthorCount > 0 ? `${parsed.foreignAuthorCount} other author` : null,
+        parsed.malformedLineCount > 0 ? `${parsed.malformedLineCount} malformed` : null,
+      ]
+        .filter(Boolean)
+        .join(', ')
+      setBackupStatus({
+        ok: true,
+        text: `Verified ${parsed.validCount} event(s) from backup${notesSkipped ? ` (skipped: ${notesSkipped})` : ''}.`,
+      })
+    } catch (err) {
+      setBackupStatus({ ok: false, text: err instanceof Error ? err.message : 'Failed to read .jsonl file.' })
+    }
+  }
+
+  const handleRebroadcastImported = async () => {
+    if (!importedBackup || importedBackup.events.length === 0) return
+    const resolved = resolveBackupTargetRelays()
+    if (resolved.error || resolved.relays.length === 0) {
+      setBackupStatus({ ok: false, text: resolved.error ?? 'No target relay selected.' })
+      return
+    }
+    backupAbortRef.current?.abort()
+    const controller = new AbortController()
+    backupAbortRef.current = controller
+    setBackupBusy('import-sync')
+    setBackupStatus(null)
+    try {
+      const res = await broadcastBackupEvents(importedBackup.events, resolved.relays, {
+        signal: controller.signal,
+        onProgress: (progress) => setBackupProgress(progress),
+      })
+      setBackupStatus({
+        ok: res.published > 0 && !res.cancelled,
+        text: res.cancelled
+          ? `Import broadcast cancelled (${res.published} published).`
+          : `Rebroadcast ${res.published}/${importedBackup.events.length} verified events to ${resolved.relays.join(', ')}.`,
+      })
+    } catch (err) {
+      setBackupStatus({ ok: false, text: err instanceof Error ? err.message : 'Rebroadcast failed.' })
+    } finally {
+      setBackupBusy(null)
+    }
+  }
+
+  const handleRecoverReplaceable = async (backupEv: Event, kindLabel: 'Follows' | 'Mute List') => {
+    if (!pubkey || !signer) {
+      setBackupStatus({ ok: false, text: 'Connect a signing key or NIP-07 extension first to re-sign recovery lists.' })
+      return
+    }
+    const targetRelays = new Set<string>(getWriteRelays())
+    const resolved = resolveBackupTargetRelays()
+    for (const r of resolved.relays) targetRelays.add(r)
+    const relays = Array.from(targetRelays)
+    if (relays.length === 0) {
+      setBackupStatus({ ok: false, text: 'No write relays configured to publish the recovered list.' })
+      return
+    }
+    setBackupBusy('recover')
+    setBackupStatus(null)
+    try {
+      const resigned = await resignReplaceableEventForRecovery(backupEv, signer)
+      const results = await nostrPool.publish(relays, resigned)
+      const okCount = results.filter((r) => r.ok).length
+      if (okCount === 0) {
+        throw new Error('Relays did not accept the recovered event.')
+      }
+      if (backupEv.kind === 3) {
+        await loadUserGraph(pubkey)
+      } else if (backupEv.kind === 10000) {
+        await syncMuteList(pubkey)
+      }
+      setBackupStatus({
+        ok: true,
+        text: `Recovered & re-signed ${kindLabel} (kind ${backupEv.kind}) to ${okCount}/${relays.length} relay(s).`,
+      })
+    } catch (err) {
+      setBackupStatus({ ok: false, text: err instanceof Error ? err.message : `${kindLabel} recovery failed.` })
+    } finally {
+      setBackupBusy(null)
+    }
+  }
 
   const wotCachedCount = useMemo(() => Object.keys(wotEntries).length, [wotEntries])
   const wotTrustedCount = useMemo(
@@ -856,6 +1179,268 @@ export function SettingsPage() {
             </div>
           )}
         </div>
+      </SettingsSection>
+
+      {/* Backup, Export & Relay Sync */}
+      <SettingsSection
+        id="backup"
+        title="Backup, Export (.jsonl) & Relay Sync"
+        icon={Database}
+        badge={
+          <span className="text-[11px] text-[#8c8a82]">
+            {backupEvents.length > 0 ? `${backupEvents.length} cached` : '.jsonl & relay sync'}
+          </span>
+        }
+        isOpen={Boolean(openSections['backup'])}
+        onToggle={toggleSection}
+      >
+        <p className="text-xs text-[#9a9890] leading-relaxed">
+          Your signed Nostr events (profile, follows, mute lists, Blossom servers, notes, and articles) can be exported as a standard portable <code className="text-[#c2bfb7]">.jsonl</code> archive, synced in one click to a personal or local relay (Citrine, Haven, Nostr Vault), or restored after an accidental overwrite.
+        </p>
+
+        {!pubkey ? (
+          <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] flex items-center justify-between gap-3 text-xs">
+            <span className="text-[#9a9890]">Sign in with your Nostr account to back up or restore your events.</span>
+            <button
+              type="button"
+              onClick={openAuthModal}
+              className="px-3 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] text-white font-semibold shrink-0 cursor-pointer"
+            >
+              Sign in
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Export section */}
+            <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold text-white">1. Portable File Archive</div>
+                  <div className="text-[11px] text-[#8c8a82]">
+                    {backupEvents.length > 0
+                      ? `Cached scan: ${backupEvents.length} verified events • ${backupMediaUrls.length} unique media URLs`
+                      : 'Scans your configured read, write, and NIP-65 relays (verifying every event signature).'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  disabled={backupBusy !== null}
+                  onClick={handleExportBackupJsonl}
+                  className="px-3 py-1.5 rounded-lg bg-[#e8590c] hover:bg-[#d9480f] disabled:opacity-50 text-white font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  {backupBusy === 'scan' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  Export All Data (.jsonl)
+                </button>
+
+                <button
+                  type="button"
+                  disabled={backupBusy !== null}
+                  onClick={handleDownloadMediaUrlsTxt}
+                  className="px-3 py-1.5 rounded-lg bg-[#15161c] hover:bg-[#1e212c] border border-[#2a2d3a] disabled:opacity-50 text-[#d4d2cb] inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#38bdf8]" />
+                  Download Media URLs (.txt)
+                </button>
+              </div>
+            </div>
+
+            {/* 1-Click Relay Sync */}
+            <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] space-y-2.5">
+              <div>
+                <div className="text-xs font-semibold text-white">2. Relay Sync (Local or Personal Relay)</div>
+                <div className="text-[11px] text-[#8c8a82]">
+                  Mirror your signed history to Citrine (<code className="text-[#c2bfb7]">ws://127.0.0.1:4869</code>), Haven, Nostr Vault, or your configured write relays.
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={backupSyncTarget}
+                  onChange={(e) => setBackupSyncTarget(e.target.value)}
+                  disabled={backupBusy !== null}
+                  className="flex-1 px-2.5 py-1.5 rounded-lg bg-[#15161c] border border-[#2a2d3a] text-white text-xs focus:outline-none focus:border-[#e8590c]"
+                >
+                  <option value="__all_write__">All configured write relays</option>
+                  {settings.relays.map((r) => {
+                    const isLocal =
+                      r.url.startsWith('ws://127.0.0.1') || r.url.startsWith('ws://localhost')
+                    return (
+                      <option key={r.url} value={r.url}>
+                        {r.url}
+                        {isLocal ? ' (local)' : ''}
+                      </option>
+                    )
+                  })}
+                  <option value="__custom__">Custom relay URL…</option>
+                </select>
+
+                <button
+                  type="button"
+                  disabled={backupBusy !== null}
+                  onClick={handleSyncHistoryToRelay}
+                  className="px-3 py-1.5 rounded-lg bg-[#1a2232] hover:bg-[#222d42] border border-[#2e3c57] disabled:opacity-50 text-[#e2e8f0] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                >
+                  {backupBusy === 'sync' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#38bdf8]" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5 text-[#38bdf8]" />
+                  )}
+                  Sync My History → Relay
+                </button>
+              </div>
+
+              {backupSyncTarget === '__custom__' && (
+                <input
+                  type="text"
+                  value={backupCustomRelay}
+                  onChange={(e) => setBackupCustomRelay(e.target.value)}
+                  placeholder="wss://my-relay.example or ws://127.0.0.1:4869"
+                  disabled={backupBusy !== null}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-[#15161c] border border-[#2a2d3a] text-white font-mono text-xs focus:outline-none focus:border-[#e8590c]"
+                />
+              )}
+            </div>
+
+            {/* Import & Replaceable List Recovery */}
+            <div className="p-3 rounded-xl bg-[#0e0f14] border border-[#232530] space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold text-white">3. Restore & Import (.jsonl)</div>
+                  <div className="text-[11px] text-[#8c8a82]">
+                    Verifies every cryptographic signature before offering archive rebroadcast or list recovery.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={backupBusy !== null}
+                  onClick={() => backupFileInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg bg-[#15161c] hover:bg-[#1e212c] border border-[#2a2d3a] disabled:opacity-50 text-[#d4d2cb] text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                  Load Backup (.jsonl)
+                </button>
+                <input
+                  ref={backupFileInputRef}
+                  type="file"
+                  accept=".jsonl,.ndjson,application/x-ndjson,text/plain"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    e.target.value = ''
+                    if (file) {
+                      await handleImportBackupFile(file)
+                    }
+                  }}
+                />
+              </div>
+
+              {importedBackup && importedBackup.validCount > 0 && (
+                <div className="p-2.5 rounded-lg bg-[#15161c] border border-[#232530] space-y-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#c2bfb7]">
+                    <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                      <Check className="w-3.5 h-3.5" />
+                      {importedBackup.validCount} verified events
+                    </span>
+                    <span>Notes: {importedBackup.kindCounts[1] ?? 0}</span>
+                    <span>Media URLs: {importedBackup.mediaUrls.length}</span>
+                    {importedBackup.latestProfileEvent && <span>Profile: kind 0</span>}
+                    {importedBackup.latestFollowsEvent && (
+                      <span>
+                        Follows:{' '}
+                        {
+                          importedBackup.latestFollowsEvent.tags.filter(
+                            (t) => t[0] === 'p' && t[1],
+                          ).length
+                        }{' '}
+                        pubkeys
+                      </span>
+                    )}
+                    {importedBackup.latestMuteEvent && <span>Mute list: kind 10000</span>}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={backupBusy !== null}
+                      onClick={handleRebroadcastImported}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#1a2232] hover:bg-[#222d42] border border-[#2e3c57] disabled:opacity-50 text-[#e2e8f0] text-[11px] font-medium inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {backupBusy === 'import-sync' ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Send className="w-3 h-3 text-[#38bdf8]" />
+                      )}
+                      Rebroadcast Archive to Relay
+                    </button>
+
+                    {importedBackup.latestFollowsEvent && (
+                      <button
+                        type="button"
+                        disabled={backupBusy !== null || !signer}
+                        onClick={() =>
+                          importedBackup.latestFollowsEvent &&
+                          handleRecoverReplaceable(importedBackup.latestFollowsEvent, 'Follows')
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-[#221a14] hover:bg-[#2d2118] border border-[#5a3922] disabled:opacity-50 text-[#fb923c] text-[11px] font-medium inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Restore Follows (kind 3)
+                      </button>
+                    )}
+
+                    {importedBackup.latestMuteEvent && (
+                      <button
+                        type="button"
+                        disabled={backupBusy !== null || !signer}
+                        onClick={() =>
+                          importedBackup.latestMuteEvent &&
+                          handleRecoverReplaceable(importedBackup.latestMuteEvent, 'Mute List')
+                        }
+                        className="px-2.5 py-1.5 rounded-lg bg-[#221a14] hover:bg-[#2d2118] border border-[#5a3922] disabled:opacity-50 text-[#fb923c] text-[11px] font-medium inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Restore Mute List (kind 10000)
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {backupBusy && backupProgress && (
+              <div className="p-2.5 rounded-lg bg-[#15161c] border border-[#2a2d3a] flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-[#d4d2cb] min-w-0">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-[#e8590c] shrink-0" />
+                  <span className="truncate">{backupProgress.message ?? 'Working…'}</span>
+                </div>
+                {(backupBusy === 'scan' || backupBusy === 'sync' || backupBusy === 'import-sync') && (
+                  <button
+                    type="button"
+                    onClick={() => backupAbortRef.current?.abort()}
+                    className="px-2 py-1 rounded bg-[#232530] hover:bg-[#2f3240] text-[#d4d2cb] text-[11px] inline-flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
+
+            {backupStatus && (
+              <p className={`text-xs ${backupStatus.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                {backupStatus.text}
+              </p>
+            )}
+          </div>
+        )}
       </SettingsSection>
 
       {/* Relays */}

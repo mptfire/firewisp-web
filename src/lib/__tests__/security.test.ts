@@ -2791,3 +2791,92 @@ describe('Full code-audit regression & security hardening', () => {
     useSettingsStore.getState().setNip85ProviderPubkey('')
   })
 })
+
+describe('Nostr backup, .jsonl validation, media extraction & list recovery', () => {
+  it('serializes, verifies fail-closed, extracts media URLs, and re-signs replaceable lists', async () => {
+    const {
+      serializeEventsToJsonl,
+      parseJsonlBackup,
+      resignReplaceableEventForRecovery,
+    } = await import('../nostr/backup')
+
+    const ownerSk = generateSecretKey()
+    const ownerPk = getPublicKey(ownerSk)
+    const foreignSk = generateSecretKey()
+
+    const noteEv = finalizeEvent(
+      {
+        kind: 1,
+        created_at: 1700000100,
+        tags: [
+          ['imeta', 'url https://blossom.example/pic.jpg', 'm image/jpeg'],
+        ],
+        content: 'Check this video https://cdn.example/clip.mp4 and ftp://bad.example/file.png',
+      },
+      ownerSk,
+    )
+
+    const followsEv = finalizeEvent(
+      {
+        kind: 3,
+        created_at: 1700000200,
+        tags: [
+          ['p', getPublicKey(foreignSk)],
+        ],
+        content: '',
+      },
+      ownerSk,
+    )
+
+    const muteEv = finalizeEvent(
+      {
+        kind: 10000,
+        created_at: 1700000250,
+        tags: [['word', 'spam']],
+        content: '',
+      },
+      ownerSk,
+    )
+
+    const foreignEv = finalizeEvent(
+      {
+        kind: 1,
+        created_at: 1700000300,
+        tags: [],
+        content: 'someone else',
+      },
+      foreignSk,
+    )
+
+    const tamperedEv = { ...noteEv, content: 'tampered content' }
+
+    const validJsonl = serializeEventsToJsonl([noteEv, followsEv, muteEv, noteEv])
+    const combinedJsonl = [
+      validJsonl.trim(),
+      JSON.stringify(tamperedEv),
+      JSON.stringify(foreignEv),
+      '{not-json',
+    ].join('\n')
+
+    const summary = parseJsonlBackup(combinedJsonl, ownerPk)
+    expect(summary.validCount).toBe(3)
+    expect(summary.invalidSignatureCount).toBe(1)
+    expect(summary.foreignAuthorCount).toBe(1)
+    expect(summary.malformedLineCount).toBe(1)
+    expect(summary.latestFollowsEvent?.id).toBe(followsEv.id)
+    expect(summary.latestMuteEvent?.id).toBe(muteEv.id)
+    expect(summary.mediaUrls).toContain('https://blossom.example/pic.jpg')
+    expect(summary.mediaUrls).toContain('https://cdn.example/clip.mp4')
+    expect(summary.mediaUrls.some((u) => u.startsWith('ftp://'))).toBe(false)
+
+    // Recovery re-signing bumps timestamp past accidental newer overwrite and keeps valid sig
+    const signer = new LocalKeySigner(ownerSk)
+    const recoveredFollows = await resignReplaceableEventForRecovery(followsEv, signer, 1700005000)
+    expect(recoveredFollows.kind).toBe(3)
+    expect(recoveredFollows.created_at).toBe(1700005000)
+    expect(recoveredFollows.tags).toEqual(followsEv.tags)
+    expect(recoveredFollows.id).not.toBe(followsEv.id)
+
+    await expect(resignReplaceableEventForRecovery(tamperedEv, signer, 1700005000)).rejects.toThrow()
+  })
+})
