@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
 import type { Event } from 'nostr-tools/pure'
@@ -27,8 +27,17 @@ import {
   List,
   Database,
   X,
+  Zap,
 } from 'lucide-react'
-import { ANDROID_APP_URL, ZAPSTORE_URL } from '../lib/constants'
+import {
+  ANDROID_APP_URL,
+  DEVELOPER_LUD16,
+  DEVELOPER_NAME,
+  DEVELOPER_NPUB,
+  DEVELOPER_PUBKEY,
+  ZAPSTORE_URL,
+} from '../lib/constants'
+import { Avatar } from '../components/Avatar'
 import { formatRelativeTime } from '../lib/format'
 import {
   broadcastBackupEvents,
@@ -49,6 +58,10 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { useWotStore } from '../lib/store/useWotStore'
 import { parseNwcUri } from '../lib/nostr/nip57'
 import { sanitizePublicRelayUrl, sanitizeRelayUrl } from '../lib/sanitize'
+
+const ZapModal = lazy(() =>
+  import('../components/ZapModal').then((m) => ({ default: m.ZapModal })),
+)
 
 function relayHealthRow(st: string | undefined): string {
   if (st === 'connected') return 'bg-emerald-500/10 border-emerald-500/35'
@@ -520,6 +533,7 @@ export function SettingsPage() {
     settings.showGlobalAudio,
     settings.showWisps,
     settings.mobileDataSaving,
+    settings.hoverProfilePreview,
     settings.hoverStreamPreview,
     settings.inlineMediaPlayback,
     settings.showFireWispTab,
@@ -563,6 +577,16 @@ export function SettingsPage() {
       void fetchProfiles(settings.privateMutedPubkeys.slice(0, 80))
     }
   }, [privateMutedUsersOpen, settings.privateMutedPubkeys, fetchProfiles])
+
+  const [devZapOpen, setDevZapOpen] = useState(false)
+  const devProfile = profiles[DEVELOPER_PUBKEY]
+  const devLud16 = devProfile?.lud16 || DEVELOPER_LUD16
+
+  useEffect(() => {
+    if (openSections['zap-dev'] && !profiles[DEVELOPER_PUBKEY]) {
+      void fetchProfiles([DEVELOPER_PUBKEY])
+    }
+  }, [openSections, profiles, fetchProfiles])
 
   return (
     <div className="divide-y divide-[#20222c]">
@@ -687,6 +711,21 @@ export function SettingsPage() {
             type="checkbox"
             checked={settings.mobileDataSaving}
             onChange={(e) => settings.setMobileDataSaving(e.target.checked)}
+            className="accent-[#e8590c]"
+          />
+        </label>
+
+        <label className="flex items-center justify-between text-xs p-3 rounded-xl bg-[#15161c] border border-[#232530] cursor-pointer">
+          <div>
+            <div className="font-medium text-white">Hover over avatar for profile preview</div>
+            <div className="text-[#8c8a82]">
+              Shows a quick desktop preview pane with bio, Web of Trust vouches, and Follow button when hovering user avatars.
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.hoverProfilePreview}
+            onChange={(e) => settings.setHoverProfilePreview(e.target.checked)}
             className="accent-[#e8590c]"
           />
         </label>
@@ -2495,6 +2534,66 @@ export function SettingsPage() {
             </a>
           </div>
         </div>
+      </SettingsSection>
+
+      {/* Zap the Developer */}
+      <SettingsSection
+        id="zap-dev"
+        title="Zap the Developer"
+        icon={Zap}
+        badge={<span className="text-[11px] text-[#f59f00]">{DEVELOPER_NAME} ⚡</span>}
+        isOpen={Boolean(openSections['zap-dev'])}
+        onToggle={toggleSection}
+      >
+        <div className="p-3.5 rounded-2xl bg-[#15161c] border border-[#232530] space-y-3">
+          <div className="flex items-center gap-3">
+            <Avatar
+              src={devProfile?.picture}
+              pubkey={DEVELOPER_PUBKEY}
+              name={DEVELOPER_NAME}
+              size="md"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-white">{DEVELOPER_NAME}</div>
+              <div className="text-[11px] text-[#f59f00] truncate">{devLud16}</div>
+              <div className="text-[10px] font-mono text-[#7c7a72] truncate">
+                {DEVELOPER_NPUB}
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#9a9890] leading-relaxed">
+            Enjoying Fire Wisp? Send a Lightning zap to support ongoing web &amp; Android development, relays, and new features.
+          </p>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setDevZapOpen(true)}
+              className="flex-1 min-w-[160px] px-3.5 py-2 rounded-xl bg-[#f59f00] hover:bg-[#eab308] text-xs font-bold text-[#14151e] flex items-center justify-center gap-1.5 transition cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              Zap {DEVELOPER_NAME}
+            </button>
+            <Link
+              to={`/p/${DEVELOPER_PUBKEY}`}
+              className="flex-1 min-w-[160px] px-3.5 py-2 rounded-xl bg-[#1d1f29] hover:bg-[#262936] text-xs font-medium text-center text-[#d4d2cb] flex items-center justify-center gap-1.5 transition"
+            >
+              View Profile
+            </Link>
+          </div>
+        </div>
+
+        {devZapOpen && (
+          <Suspense fallback={null}>
+            <ZapModal
+              recipientPubkey={DEVELOPER_PUBKEY}
+              recipientName={DEVELOPER_NAME}
+              lud16={devLud16}
+              onClose={() => setDevZapOpen(false)}
+            />
+          </Suspense>
+        )}
       </SettingsSection>
     </div>
   )

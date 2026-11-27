@@ -363,7 +363,7 @@ export function ProfilePage() {
       <div className="px-4 pb-4 border-b border-[#20222c]">
         <div className="flex items-end justify-between -mt-10 mb-3 relative z-10">
           <div className="p-1 rounded-full bg-[#0e0e11]">
-            <Avatar src={profile?.picture} pubkey={hexPubkey} name={displayName} size="xl" />
+            <Avatar src={profile?.picture} pubkey={hexPubkey} name={displayName} size="xl" disableHoverPreview />
           </div>
 
           <div className="flex items-center gap-1.5 pt-12">

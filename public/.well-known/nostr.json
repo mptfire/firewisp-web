@@ -1,0 +1,14 @@
+{
+  "names": {
+    "steve": "1408bad049bab8a38b976075affe413c3521bbeef62cc4ce3555299f4971f2ca",
+    "_": "1408bad049bab8a38b976075affe413c3521bbeef62cc4ce3555299f4971f2ca"
+  },
+  "relays": {
+    "1408bad049bab8a38b976075affe413c3521bbeef62cc4ce3555299f4971f2ca": [
+      "wss://relay.firewisp.de",
+      "wss://relay.damus.io",
+      "wss://relay.primal.net",
+      "wss://nos.lol"
+    ]
+  }
+}

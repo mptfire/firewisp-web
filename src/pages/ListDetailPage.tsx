@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import * as nip19 from 'nostr-tools/nip19'
-import { ArrowLeft, Check, Loader2, Lock, Pencil, Pin, Plus, Rss, Search, Trash2, UserMinus } from 'lucide-react'
+import { ArrowLeft, Check, Eye, EyeOff, Loader2, Lock, Pencil, Pin, Plus, Rss, Search, Trash2, UserMinus } from 'lucide-react'
 import { makeListFeedKey } from '../lib/nostr/followSets'
 import { searchProfiles, type ProfileSearchHit } from '../lib/nostr/profileSearch'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
-import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { isListShownInFeedDropdown, useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 
 export function ListDetailPage() {
@@ -34,6 +34,10 @@ export function ListDetailPage() {
   const relays = useSettingsStore((s) => s.relays)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
+  const feedDropdownListOverrides = useSettingsStore((s) => s.feedDropdownListOverrides)
+  const toggleFeedDropdownListVisible = useSettingsStore(
+    (s) => s.toggleFeedDropdownListVisible,
+  )
 
   const readRelays = useMemo(
     () =>
@@ -213,6 +217,39 @@ export function ListDetailPage() {
                 <Rss className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Use as feed</span>
               </button>
+              {(() => {
+                const feedKey = makeListFeedKey(list.dTag)
+                const shownInDropdown = isListShownInFeedDropdown(
+                  feedKey,
+                  list.dTag,
+                  list.name,
+                  feedDropdownListOverrides,
+                )
+                return (
+                  <button
+                    type="button"
+                    onClick={() => toggleFeedDropdownListVisible(feedKey, list.dTag, list.name)}
+                    aria-pressed={shownInDropdown}
+                    title={
+                      shownInDropdown
+                        ? 'Included in feed dropdown — click to hide'
+                        : 'Hidden from feed dropdown — click to include'
+                    }
+                    className={`px-2 py-1 rounded-lg border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                      shownInDropdown
+                        ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                        : 'bg-[#15161c] border-[#2a2d3a] text-[#7c7a72] hover:text-white'
+                    }`}
+                  >
+                    {shownInDropdown ? (
+                      <Eye className="w-3.5 h-3.5" />
+                    ) : (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    )}
+                    <span className="hidden sm:inline">Dropdown</span>
+                  </button>
+                )
+              })()}
               <button
                 type="button"
                 onClick={() => togglePinnedListTab(list.dTag)}

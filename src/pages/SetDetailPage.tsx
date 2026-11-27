@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   Bookmark,
   Download,
+  Eye,
+  EyeOff,
   Hash,
   Loader2,
   Lock,
@@ -31,7 +33,7 @@ import { sanitizePublicRelayUrl, isValidHex64 } from '../lib/sanitize'
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
-import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { isListShownInFeedDropdown, useSettingsStore } from '../lib/store/useSettingsStore'
 import { NoteCard } from '../components/NoteCard'
 
 function parseSetTypeParam(raw?: string): Nip51SetType | null {
@@ -91,6 +93,10 @@ export function SetDetailPage() {
   const relays = useSettingsStore((s) => s.relays)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
+  const feedDropdownListOverrides = useSettingsStore((s) => s.feedDropdownListOverrides)
+  const toggleFeedDropdownListVisible = useSettingsStore(
+    (s) => s.toggleFeedDropdownListVisible,
+  )
   const importRelays = useSettingsStore((s) => s.importRelays)
 
   const setObj =
@@ -359,6 +365,40 @@ export function SetDetailPage() {
                     <Rss className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Use as feed</span>
                   </button>
+                  {(() => {
+                    const shownInDropdown = isListShownInFeedDropdown(
+                      feedKey,
+                      setObj.dTag,
+                      setObj.name,
+                      feedDropdownListOverrides,
+                    )
+                    return (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          toggleFeedDropdownListVisible(feedKey, setObj.dTag, setObj.name)
+                        }
+                        aria-pressed={shownInDropdown}
+                        title={
+                          shownInDropdown
+                            ? 'Included in feed dropdown — click to hide'
+                            : 'Hidden from feed dropdown — click to include'
+                        }
+                        className={`px-2 py-1 rounded-lg border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                          shownInDropdown
+                            ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                            : 'bg-[#15161c] border-[#2a2d3a] text-[#7c7a72] hover:text-white'
+                        }`}
+                      >
+                        {shownInDropdown ? (
+                          <Eye className="w-3.5 h-3.5" />
+                        ) : (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Dropdown</span>
+                      </button>
+                    )
+                  })()}
                   <button
                     type="button"
                     onClick={() => togglePinnedListTab(feedKey)}

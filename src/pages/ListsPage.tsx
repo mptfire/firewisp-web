@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Bookmark,
   ChevronRight,
+  Eye,
+  EyeOff,
   Hash,
   List,
   Loader2,
@@ -28,7 +30,7 @@ import {
 import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
-import { useSettingsStore } from '../lib/store/useSettingsStore'
+import { isListShownInFeedDropdown, useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from '../components/Avatar'
 
 type ListsTab = 'people' | Nip51SetType
@@ -48,6 +50,10 @@ export function ListsPage() {
   const setActiveFeedTab = useNostrStore((s) => s.setActiveFeedTab)
   const pinnedListTabs = useSettingsStore((s) => s.pinnedListTabs)
   const togglePinnedListTab = useSettingsStore((s) => s.togglePinnedListTab)
+  const feedDropdownListOverrides = useSettingsStore((s) => s.feedDropdownListOverrides)
+  const toggleFeedDropdownListVisible = useSettingsStore(
+    (s) => s.toggleFeedDropdownListVisible,
+  )
 
   const listsMap = useListsStore((s) => s.lists)
   const bookmarkSets = useListsStore((s) => s.bookmarkSets)
@@ -384,6 +390,51 @@ export function ListsPage() {
                             </button>
                             <button
                               type="button"
+                              onClick={() => {
+                                const key = makeListFeedKey(list.dTag)
+                                toggleFeedDropdownListVisible(key, list.dTag, list.name)
+                              }}
+                              aria-pressed={isListShownInFeedDropdown(
+                                makeListFeedKey(list.dTag),
+                                list.dTag,
+                                list.name,
+                                feedDropdownListOverrides,
+                              )}
+                              title={
+                                isListShownInFeedDropdown(
+                                  makeListFeedKey(list.dTag),
+                                  list.dTag,
+                                  list.name,
+                                  feedDropdownListOverrides,
+                                )
+                                  ? 'Included in feed dropdown — click to hide'
+                                  : 'Hidden from feed dropdown — click to include'
+                              }
+                              className={`px-2 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                                isListShownInFeedDropdown(
+                                  makeListFeedKey(list.dTag),
+                                  list.dTag,
+                                  list.name,
+                                  feedDropdownListOverrides,
+                                )
+                                  ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                                  : 'bg-[#111218] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                              }`}
+                            >
+                              {isListShownInFeedDropdown(
+                                makeListFeedKey(list.dTag),
+                                list.dTag,
+                                list.name,
+                                feedDropdownListOverrides,
+                              ) ? (
+                                <Eye className="w-3 h-3" />
+                              ) : (
+                                <EyeOff className="w-3 h-3" />
+                              )}
+                              <span className="hidden sm:inline">Dropdown</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => togglePinnedListTab(list.dTag)}
                               title={
                                 pinnedListTabs.includes(list.dTag)
@@ -553,6 +604,50 @@ export function ListsPage() {
                                 >
                                   <Rss className="w-3 h-3" />
                                   <span className="hidden sm:inline">Feed</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleFeedDropdownListVisible(feedKey, setObj.dTag, setObj.name)
+                                  }
+                                  aria-pressed={isListShownInFeedDropdown(
+                                    feedKey,
+                                    setObj.dTag,
+                                    setObj.name,
+                                    feedDropdownListOverrides,
+                                  )}
+                                  title={
+                                    isListShownInFeedDropdown(
+                                      feedKey,
+                                      setObj.dTag,
+                                      setObj.name,
+                                      feedDropdownListOverrides,
+                                    )
+                                      ? 'Included in feed dropdown — click to hide'
+                                      : 'Hidden from feed dropdown — click to include'
+                                  }
+                                  className={`px-2 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1 transition cursor-pointer ${
+                                    isListShownInFeedDropdown(
+                                      feedKey,
+                                      setObj.dTag,
+                                      setObj.name,
+                                      feedDropdownListOverrides,
+                                    )
+                                      ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                                      : 'bg-[#111218] border-[#262938] text-[#7c7a72] hover:text-[#d4d2cb]'
+                                  }`}
+                                >
+                                  {isListShownInFeedDropdown(
+                                    feedKey,
+                                    setObj.dTag,
+                                    setObj.name,
+                                    feedDropdownListOverrides,
+                                  ) ? (
+                                    <Eye className="w-3 h-3" />
+                                  ) : (
+                                    <EyeOff className="w-3 h-3" />
+                                  )}
+                                  <span className="hidden sm:inline">Dropdown</span>
                                 </button>
                                 <button
                                   type="button"

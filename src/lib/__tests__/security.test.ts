@@ -2880,3 +2880,84 @@ describe('Nostr backup, .jsonl validation, media extraction & list recovery', ()
     await expect(resignReplaceableEventForRecovery(tamperedEv, signer, 1700005000)).rejects.toThrow()
   })
 })
+
+describe('Feed dropdown list overrides, hover preview positioning & settings', () => {
+  it('auto-hides likely mute lists from feed dropdown while respecting explicit overrides', async () => {
+    const {
+      isLikelyMuteList,
+      isListShownInFeedDropdown,
+      useSettingsStore,
+    } = await import('../store/useSettingsStore')
+
+    expect(isLikelyMuteList('mute', 'Muted accounts')).toBe(true)
+    expect(isLikelyMuteList('my-block-list', 'Random')).toBe(true)
+    expect(isLikelyMuteList('bitcoin', 'Bitcoiners')).toBe(false)
+
+    // Defaults: mute lists hidden, regular lists visible
+    expect(isListShownInFeedDropdown('list:mute', 'mute', 'Muted', {})).toBe(false)
+    expect(isListShownInFeedDropdown('list:devs', 'devs', 'Devs', {})).toBe(true)
+
+    // Explicit toggles via store
+    useSettingsStore.getState().toggleFeedDropdownListVisible('list:mute', 'mute', 'Muted')
+    expect(
+      isListShownInFeedDropdown(
+        'list:mute',
+        'mute',
+        'Muted',
+        useSettingsStore.getState().feedDropdownListOverrides,
+      ),
+    ).toBe(true)
+
+    useSettingsStore.getState().toggleFeedDropdownListVisible('list:devs', 'devs', 'Devs')
+    expect(
+      isListShownInFeedDropdown(
+        'list:devs',
+        'devs',
+        'Devs',
+        useSettingsStore.getState().feedDropdownListOverrides,
+      ),
+    ).toBe(false)
+
+    // Restore clean store state
+    useSettingsStore.getState().setFeedDropdownListVisible('list:mute', false)
+    useSettingsStore.getState().setFeedDropdownListVisible('list:devs', true)
+  })
+
+  it('positions profile hover preview card with bottom-edge flip, horizontal clamp, and store controls', async () => {
+    const {
+      computeHoverCardPosition,
+      useProfileHoverStore,
+    } = await import('../store/useProfileHoverStore')
+    const { useSettingsStore } = await import('../store/useSettingsStore')
+
+    // Default below placement
+    const below = computeHoverCardPosition(
+      { top: 100, left: 80, right: 120, bottom: 140, width: 40, height: 40 },
+      { width: 1280, height: 800 },
+    )
+    expect(below.placement).toBe('bottom')
+    expect(below.top).toBe(148)
+    expect(below.left).toBe(80)
+
+    // Flip above near bottom edge & clamp right edge
+    const flipped = computeHoverCardPosition(
+      { top: 700, left: 1180, right: 1220, bottom: 740, width: 40, height: 40 },
+      { width: 1280, height: 800 },
+      { width: 312, height: 280 },
+      12,
+    )
+    expect(flipped.placement).toBe('top')
+    expect(flipped.top).toBe(700 - 8 - 280)
+    expect(flipped.left).toBe(1280 - 312 - 12)
+
+    // Settings toggle default true and toggles cleanly
+    expect(useSettingsStore.getState().hoverProfilePreview).toBe(true)
+    useSettingsStore.getState().setHoverProfilePreview(false)
+    expect(useSettingsStore.getState().hoverProfilePreview).toBe(false)
+    useSettingsStore.getState().setHoverProfilePreview(true)
+
+    // Hover store closeImmediate resets active target cleanly
+    useProfileHoverStore.getState().closeImmediate()
+    expect(useProfileHoverStore.getState().pubkey).toBeNull()
+  })
+})

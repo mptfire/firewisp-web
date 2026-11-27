@@ -19,6 +19,11 @@ export const DEFAULT_BLOSSOM_FALLBACK = 'https://blossom.primal.net'
 export const ANDROID_APP_URL = 'https://app.firewisp.de/'
 export const ZAPSTORE_URL = 'https://zapstore.dev/apps/de.rtard.wisp'
 
+export const DEVELOPER_NAME = 'Steve'
+export const DEVELOPER_NPUB = 'npub1zsyt45zfh2u28zuhvp66lljp8s6jrwlw7ckvfn34255e7jt37t9qx0xwsm'
+export const DEVELOPER_PUBKEY = '1408bad049bab8a38b976075affe413c3521bbeef62cc4ce3555299f4971f2ca'
+export const DEVELOPER_LUD16 = 'mypathtofire@rizful.com'
+
 export const DEFAULT_RELAYS: RelayEntry[] = [
   { url: FIREWISP_RELAY, read: true, write: true },
   { url: 'wss://relay.damus.io', read: true, write: true },

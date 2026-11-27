@@ -53,6 +53,34 @@ function isValidPinnedTabKey(raw: unknown): raw is string {
   return !clean.includes(':') && !isAppStateDTag(clean)
 }
 
+const MUTE_LIST_NAME_RE = /(?:^|[\s:/_-])(mute|muted|mutes|block|blocked|blocks|spam|ignore|blacklist)(?:$|[\s:/_-])/i
+
+/**
+ * Returns true when a NIP-51 list/set d-tag or title clearly represents a mute/block list
+ * so Fire Wisp excludes it from the feed switcher dropdown unless explicitly enabled.
+ */
+export function isLikelyMuteList(dTag: string, name?: string): boolean {
+  const cleanTag = dTag.trim()
+  const cleanName = (name ?? '').trim()
+  return MUTE_LIST_NAME_RE.test(cleanTag) || (cleanName.length > 0 && MUTE_LIST_NAME_RE.test(cleanName))
+}
+
+/**
+ * Resolves whether a list or set should appear in the sidebar feed dropdown.
+ * Explicit user overrides take precedence; otherwise likely mute/block lists default to hidden.
+ */
+export function isListShownInFeedDropdown(
+  feedKey: string,
+  dTag: string,
+  name: string | undefined,
+  overrides: Record<string, boolean>,
+): boolean {
+  if (Object.prototype.hasOwnProperty.call(overrides, feedKey)) {
+    return Boolean(overrides[feedKey])
+  }
+  return !isLikelyMuteList(dTag, name)
+}
+
 function loadStoredNwc(): { nwcUri: string; remember: boolean } {
   try {
     if (typeof localStorage !== 'undefined') {
@@ -124,6 +152,8 @@ export interface SettingsState {
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
   pinnedListTabs: string[]
+  feedDropdownListOverrides: Record<string, boolean>
+  hoverProfilePreview: boolean
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   mobileDataSaving: boolean
@@ -193,6 +223,9 @@ export interface SettingsState {
   setSidebarFeedMode: (mode: SidebarFeedMode) => void
   togglePinnedListTab: (dTag: string) => void
   unpinListTab: (dTag: string) => void
+  setFeedDropdownListVisible: (feedKey: string, visible: boolean) => void
+  toggleFeedDropdownListVisible: (feedKey: string, dTag: string, name?: string) => void
+  setHoverProfilePreview: (enabled: boolean) => void
   setHoverStreamPreview: (enabled: boolean) => void
   setInlineMediaPlayback: (enabled: boolean) => void
   setMobileDataSaving: (enabled: boolean) => void
@@ -247,6 +280,8 @@ interface PersistedSettings {
   showBookmarksNav: boolean
   sidebarFeedMode: SidebarFeedMode
   pinnedListTabs: string[]
+  feedDropdownListOverrides: Record<string, boolean>
+  hoverProfilePreview: boolean
   hoverStreamPreview: boolean
   inlineMediaPlayback: boolean
   mobileDataSaving: boolean
@@ -331,6 +366,8 @@ function loadInitial(): PersistedSettings & {
     showBookmarksNav: false,
     sidebarFeedMode: 'trending',
     pinnedListTabs: [],
+    feedDropdownListOverrides: {},
+    hoverProfilePreview: true,
     hoverStreamPreview: true,
     inlineMediaPlayback: true,
     mobileDataSaving: false,
@@ -412,6 +449,26 @@ function loadInitial(): PersistedSettings & {
         ].slice(0, 12)
       : []
 
+    const rawOverrides =
+      parsed.feedDropdownListOverrides &&
+      typeof parsed.feedDropdownListOverrides === 'object' &&
+      !Array.isArray(parsed.feedDropdownListOverrides)
+        ? (parsed.feedDropdownListOverrides as Record<string, unknown>)
+        : null
+    const feedDropdownListOverrides: Record<string, boolean> = {}
+    if (rawOverrides) {
+      for (const [k, v] of Object.entries(rawOverrides)) {
+        const cleanKey = k.trim()
+        if (cleanKey && typeof v === 'boolean') {
+          feedDropdownListOverrides[cleanKey] = v
+        }
+      }
+    }
+    const hoverProfilePreview =
+      typeof parsed.hoverProfilePreview === 'boolean'
+        ? parsed.hoverProfilePreview
+        : defaults.hoverProfilePreview
+
     const mediaVolume =
       typeof parsed.mediaVolume === 'number' && Number.isFinite(parsed.mediaVolume)
         ? Math.min(2, Math.max(0, parsed.mediaVolume))
@@ -449,6 +506,8 @@ function loadInitial(): PersistedSettings & {
       blossomServers,
       sidebarFeedMode,
       pinnedListTabs,
+      feedDropdownListOverrides,
+      hoverProfilePreview,
       mediaVolume,
       mediaMuted,
       wotMinVouches,
@@ -512,6 +571,8 @@ function persist(state: SettingsState) {
     showBookmarksNav: state.showBookmarksNav,
     sidebarFeedMode: state.sidebarFeedMode,
     pinnedListTabs: state.pinnedListTabs,
+    feedDropdownListOverrides: state.feedDropdownListOverrides,
+    hoverProfilePreview: state.hoverProfilePreview,
     hoverStreamPreview: state.hoverStreamPreview,
     inlineMediaPlayback: state.inlineMediaPlayback,
     mobileDataSaving: state.mobileDataSaving,
@@ -967,6 +1028,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const cur = get().pinnedListTabs
     if (!cur.includes(clean)) return
     set({ pinnedListTabs: cur.filter((d) => d !== clean) })
+    persist(get())
+  },
+  setFeedDropdownListVisible: (rawKey, visible) => {
+    const clean = rawKey.trim()
+    if (!clean) return
+    const next = { ...get().feedDropdownListOverrides, [clean]: visible }
+    set({ feedDropdownListOverrides: next })
+    persist(get())
+  },
+  toggleFeedDropdownListVisible: (rawKey, dTag, name) => {
+    const clean = rawKey.trim()
+    if (!clean) return
+    const cur = get().feedDropdownListOverrides
+    const currentlyShown = isListShownInFeedDropdown(clean, dTag, name, cur)
+    const next = { ...cur, [clean]: !currentlyShown }
+    set({ feedDropdownListOverrides: next })
+    persist(get())
+  },
+  setHoverProfilePreview: (hoverProfilePreview) => {
+    set({ hoverProfilePreview })
     persist(get())
   },
   setHoverStreamPreview: (hoverStreamPreview) => {

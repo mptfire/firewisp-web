@@ -436,6 +436,7 @@ export function Composer({
           pubkey={pubkey || ''}
           name={profile?.display_name || profile?.name}
           size={compact ? 'sm' : 'md'}
+          disableHoverPreview
         />
         <div className="flex-1 min-w-0">
           {previewMode ? (

@@ -94,14 +94,13 @@ const LONG_NOTE_LINE_LIMIT = 12
 const EMPTY_EMOJI_COUNTS: Record<string, number> = {}
 const EMPTY_EMOJI_URLS: Record<string, string> = {}
 const EMPTY_USER_REACTIONS: Record<string, true> = {}
-const QUICK_BAR_EMOJIS = ['😂', '💯'] as const
+const QUICK_BAR_EMOJIS = ['😂', '💯', '🖖'] as const
 const PICKER_EMOJIS: Array<{ emoji: string; label: string }> = [
   { emoji: '🚀', label: 'Rocket' },
   { emoji: '🤗', label: 'Hug' },
   { emoji: '👀', label: 'Eyes' },
   { emoji: '🤔', label: 'Thinking' },
   { emoji: '😱', label: 'Shocked' },
-  { emoji: '🖖', label: 'Vulcan Salute' },
 ]
 
 interface NoteCardProps {
@@ -1335,7 +1334,10 @@ export const NoteCard = memo(function NoteCard({
 
           {(() => {
             const extraChips = Object.entries(emojiCounts)
-              .filter(([k, n]) => k !== '+' && k !== '😂' && k !== '💯' && n > 0)
+              .filter(
+                ([k, n]) =>
+                  k !== '+' && !(QUICK_BAR_EMOJIS as readonly string[]).includes(k) && n > 0,
+              )
               .sort((a, b) => b[1] - a[1])
               .slice(0, 6)
             if (extraChips.length === 0) return null

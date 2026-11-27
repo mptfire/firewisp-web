@@ -28,6 +28,7 @@ import { useAuthStore } from '../lib/store/useAuthStore'
 import { useListsStore } from '../lib/store/useListsStore'
 import { useNostrStore } from '../lib/store/useNostrStore'
 import {
+  isListShownInFeedDropdown,
   useSettingsStore,
   type BuiltinSidebarFeedMode,
   type SidebarFeedMode,
@@ -225,6 +226,7 @@ export function TrendingSidebar() {
   const pubkey = useAuthStore((s) => s.pubkey)
   const sidebarFeedMode = useSettingsStore((s) => s.sidebarFeedMode)
   const setSidebarFeedMode = useSettingsStore((s) => s.setSidebarFeedMode)
+  const feedDropdownListOverrides = useSettingsStore((s) => s.feedDropdownListOverrides)
 
   const postIds = useNostrStore((s) => s.sidebarFeedIds[sidebarFeedMode] ?? EMPTY_IDS)
   const loading = useNostrStore((s) => Boolean(s.sidebarFeedLoading[sidebarFeedMode]))
@@ -248,6 +250,39 @@ export function TrendingSidebar() {
   const sortedRelaySets = useMemo(
     () => Object.values(relaySets).sort((a, b) => a.name.localeCompare(b.name)),
     [relaySets],
+  )
+  const dropdownLists = useMemo(
+    () =>
+      sortedLists.filter((l) => {
+        const key = makeListFeedKey(l.dTag)
+        return (
+          sidebarFeedMode === key ||
+          isListShownInFeedDropdown(key, l.dTag, l.name, feedDropdownListOverrides)
+        )
+      }),
+    [sortedLists, feedDropdownListOverrides, sidebarFeedMode],
+  )
+  const dropdownInterestSets = useMemo(
+    () =>
+      sortedInterestSets.filter((s) => {
+        const key = makeInterestFeedKey(s.dTag)
+        return (
+          sidebarFeedMode === key ||
+          isListShownInFeedDropdown(key, s.dTag, s.name, feedDropdownListOverrides)
+        )
+      }),
+    [sortedInterestSets, feedDropdownListOverrides, sidebarFeedMode],
+  )
+  const dropdownRelaySets = useMemo(
+    () =>
+      sortedRelaySets.filter((s) => {
+        const key = makeRelaySetFeedKey(s.dTag)
+        return (
+          sidebarFeedMode === key ||
+          isListShownInFeedDropdown(key, s.dTag, s.name, feedDropdownListOverrides)
+        )
+      }),
+    [sortedRelaySets, feedDropdownListOverrides, sidebarFeedMode],
   )
   const selectedListDTag = getListFeedDTag(sidebarFeedMode)
   const selectedInterestDTag = getInterestFeedDTag(sidebarFeedMode)
@@ -413,9 +448,9 @@ export function TrendingSidebar() {
                 </option>
               ))}
             </optgroup>
-            {((pubkey && sortedLists.length > 0) || Boolean(selectedListDTag)) && (
+            {((pubkey && dropdownLists.length > 0) || Boolean(selectedListDTag)) && (
               <optgroup label="Your Lists" className="bg-[#14151e] text-[#9a9890]">
-                {sortedLists.map((l) => (
+                {dropdownLists.map((l) => (
                   <option
                     key={l.dTag}
                     value={makeListFeedKey(l.dTag)}
@@ -431,9 +466,9 @@ export function TrendingSidebar() {
                 )}
               </optgroup>
             )}
-            {((pubkey && sortedInterestSets.length > 0) || Boolean(selectedInterestDTag)) && (
+            {((pubkey && dropdownInterestSets.length > 0) || Boolean(selectedInterestDTag)) && (
               <optgroup label="Interest Sets" className="bg-[#14151e] text-[#9a9890]">
-                {sortedInterestSets.map((s) => (
+                {dropdownInterestSets.map((s) => (
                   <option
                     key={s.dTag}
                     value={makeInterestFeedKey(s.dTag)}
@@ -449,9 +484,9 @@ export function TrendingSidebar() {
                 )}
               </optgroup>
             )}
-            {((pubkey && sortedRelaySets.length > 0) || Boolean(selectedRelaySetDTag)) && (
+            {((pubkey && dropdownRelaySets.length > 0) || Boolean(selectedRelaySetDTag)) && (
               <optgroup label="Relay Sets" className="bg-[#14151e] text-[#9a9890]">
-                {sortedRelaySets.map((s) => (
+                {dropdownRelaySets.map((s) => (
                   <option
                     key={s.dTag}
                     value={makeRelaySetFeedKey(s.dTag)}

@@ -15,18 +15,15 @@ import {
   Radio,
   ChevronDown,
   ChevronUp,
-  UploadCloud,
   Play,
   Share,
   X,
 } from 'lucide-react'
 import {
   ANDROID_APP_URL,
-  DEFAULT_BLOSSOM_PRIMARY,
   FIREWISP_RELAY,
 } from '../lib/constants'
 import { isIosDevice } from '../lib/mediaAudio'
-import { buildCandidateServers, formatBlossomHost } from '../lib/nostr/blossom'
 import { getStreamPrimaryPubkey, isLiveStreamFresh } from '../lib/nostr/nip53'
 import { isTopLevelNote, evaluateNoteSpam } from '../lib/nostr/spamFilter'
 import { useAuthStore } from '../lib/store/useAuthStore'
@@ -36,6 +33,7 @@ import { useSettingsStore } from '../lib/store/useSettingsStore'
 import { Avatar } from './Avatar'
 import { FireWispFlameSprite } from './FireWispFlameSprite'
 import { LiveZapsCard } from './LiveZapsCard'
+import { ProfileHoverCard } from './ProfileHoverCard'
 import { RoamingFireWisp } from './RoamingFireWisp'
 import { SidebarAudioDeck } from './SidebarAudioDeck'
 import { StreamTopZappersCard } from './StreamTopZappersCard'
@@ -57,8 +55,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const profile = useNostrStore((s) => (pubkey ? s.profiles[pubkey] : undefined))
   const relayStatuses = useNostrStore((s) => s.relayStatuses)
   const userReadRelays = useNostrStore((s) => s.userReadRelays)
-  const blossomServers = useSettingsStore((s) => s.blossomServers)
-  const setPrimaryBlossomServer = useSettingsStore((s) => s.setPrimaryBlossomServer)
   const inlineMediaPlayback = useSettingsStore((s) => s.inlineMediaPlayback)
   const setInlineMediaPlayback = useSettingsStore((s) => s.setInlineMediaPlayback)
   const showLiveZaps = useSettingsStore((s) => s.showLiveZaps)
@@ -394,8 +390,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const connectedCount = Object.values(relayStatuses).filter((s) => s === 'connected').length
   const totalCount = Math.max(Object.keys(relayStatuses).length, 1)
   const firewispRelayUp = relayStatuses[FIREWISP_RELAY] === 'connected'
-  const candidateBlossomServers = buildCandidateServers(blossomServers)
-  const activeBlossomServer = blossomServers[0] || candidateBlossomServers[0] || DEFAULT_BLOSSOM_PRIMARY
   const sortedRelayEntries = Object.entries(relayStatuses).sort((a, b) => {
     if (a[1] === 'connected' && b[1] !== 'connected') return -1
     if (b[1] === 'connected' && a[1] !== 'connected') return 1
@@ -648,29 +642,6 @@ export function Layout({ children }: { children: ReactNode }) {
                   </div>
                 )}
                 <div className="pt-1.5 mt-1.5 border-t border-[#222532] space-y-2">
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="sidebar-blossom-select"
-                      className="text-[10px] text-[#8c8a82] flex items-center gap-1"
-                    >
-                      <UploadCloud className="w-3 h-3 text-[#f59f00] shrink-0" />
-                      Blossom media server
-                    </label>
-                    <select
-                      id="sidebar-blossom-select"
-                      value={activeBlossomServer}
-                      onChange={(e) => setPrimaryBlossomServer(e.target.value)}
-                      className="w-full px-2 py-1 rounded-lg bg-[#0e0e11] border border-[#262938] hover:border-[#3b4057] text-[11px] font-mono text-[#e4e1d8] focus:outline-none focus:border-[#e8590c] truncate cursor-pointer"
-                      title="Primary Blossom server for uploads (automatically falls back if unavailable)"
-                    >
-                      {candidateBlossomServers.map((srv) => (
-                        <option key={srv} value={srv} className="bg-[#14151e] text-white">
-                          {formatBlossomHost(srv)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   <div
                     className="w-full flex items-center justify-between gap-1.5 pt-0.5 text-[10px] text-[#c2bfb7]"
                     title="Choose whether streams & YouTube videos play inline inside notes or open in the full player"
@@ -725,6 +696,7 @@ export function Layout({ children }: { children: ReactNode }) {
                       pubkey={pubkey}
                       name={profile?.display_name || profile?.name}
                       size="sm"
+                      disableHoverPreview
                     />
                     <div className="min-w-0">
                       <div className="text-xs font-semibold truncate">
@@ -815,6 +787,7 @@ export function Layout({ children }: { children: ReactNode }) {
                       pubkey={pubkey}
                       name={profile?.display_name || profile?.name}
                       size="sm"
+                      disableHoverPreview
                     />
                   </Link>
                 ) : (
@@ -957,6 +930,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <AuthModal />
         </Suspense>
       )}
+      <ProfileHoverCard />
 
       {/* iOS Safari Home-Screen PWA Install Guide (only ever opened on iOS Safari) */}
       {iosInstallOpen && (
